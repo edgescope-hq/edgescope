@@ -1,0 +1,13 @@
+User-agent: *
+Allow: /
+
+# Keep authenticated app surfaces out of the index.
+Disallow: /dashboard
+Disallow: /trades
+Disallow: /analytics
+Disallow: /community
+Disallow: /notes
+Disallow: /settings
+Disallow: /reset-password
+
+Sitemap: https://your-domain.com/sitemap.xml

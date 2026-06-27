@@ -1,0 +1,288 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-glow: var(--primary-glow);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-surface: var(--surface);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --font-display: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+/* ─── Premium dark-first fintech palette ─── */
+:root {
+  --radius: 0.75rem;
+
+  --background: oklch(0.09 0.015 270);
+  --foreground: oklch(0.97 0.003 270);
+
+  --card: oklch(0.135 0.018 270);
+  --card-foreground: oklch(0.97 0.003 270);
+
+  --popover: oklch(0.12 0.016 270);
+  --popover-foreground: oklch(0.97 0.003 270);
+
+  --primary: oklch(0.68 0.23 295);
+  --primary-foreground: oklch(0.99 0.002 270);
+  --primary-glow: oklch(0.78 0.19 295);
+
+  --secondary: oklch(0.18 0.02 270);
+  --secondary-foreground: oklch(0.92 0.005 270);
+
+  --muted: oklch(0.2 0.015 270);
+  --muted-foreground: oklch(0.62 0.015 270);
+
+  --accent: oklch(0.24 0.06 295);
+  --accent-foreground: oklch(0.97 0.003 270);
+
+  --surface: oklch(0.16 0.018 270);
+
+  --destructive: oklch(0.64 0.22 22);
+  --destructive-foreground: oklch(0.99 0.002 270);
+
+  --success: oklch(0.74 0.19 152);
+  --success-foreground: oklch(0.13 0.02 152);
+
+  --warning: oklch(0.82 0.17 65);
+  --warning-foreground: oklch(0.15 0.03 65);
+
+  --info: oklch(0.72 0.17 235);
+  --info-foreground: oklch(0.13 0.02 235);
+
+  --border: oklch(1 0 0 / 7%);
+  --input: oklch(1 0 0 / 10%);
+  --ring: oklch(0.68 0.23 295);
+
+  --chart-1: oklch(0.68 0.23 295);
+  --chart-2: oklch(0.74 0.19 152);
+  --chart-3: oklch(0.72 0.17 235);
+  --chart-4: oklch(0.82 0.17 65);
+  --chart-5: oklch(0.64 0.22 22);
+
+  --sidebar: oklch(0.08 0.012 270);
+  --sidebar-foreground: oklch(0.82 0.008 270);
+  --sidebar-primary: oklch(0.68 0.23 295);
+  --sidebar-primary-foreground: oklch(0.99 0.002 270);
+  --sidebar-accent: oklch(0.18 0.035 295);
+  --sidebar-accent-foreground: oklch(0.97 0.003 270);
+  --sidebar-border: oklch(1 0 0 / 5%);
+  --sidebar-ring: oklch(0.68 0.23 295);
+
+  /* ─── Custom tokens ─── */
+  --gradient-primary: linear-gradient(135deg, oklch(0.68 0.23 295), oklch(0.78 0.19 295));
+  --gradient-aurora: radial-gradient(ellipse at top right, oklch(0.68 0.23 295 / 0.3), transparent 60%);
+  --gradient-surface: linear-gradient(180deg, oklch(0.16 0.02 270 / 0.9), oklch(0.12 0.018 270 / 0.7));
+  --shadow-glow: 0 0 32px -8px oklch(0.68 0.23 295 / 0.4);
+  --shadow-glow-lg: 0 0 60px -12px oklch(0.68 0.23 295 / 0.35);
+  --shadow-card: 0 1px 0 0 oklch(1 0 0 / 0.04) inset, 0 8px 24px -12px oklch(0 0 0 / 0.6);
+  --shadow-card-hover: 0 1px 0 0 oklch(1 0 0 / 0.06) inset, 0 12px 32px -8px oklch(0 0 0 / 0.5);
+  --shadow-elevated: 0 4px 0 0 oklch(1 0 0 / 0.03) inset, 0 20px 48px -16px oklch(0 0 0 / 0.7);
+
+  /* ─── Motion tokens ─── */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --duration-fast: 150ms;
+  --duration-normal: 250ms;
+  --duration-slow: 400ms;
+}
+
+html, body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-display);
+  font-feature-settings: "cv11", "ss01", "ss03", "tnum";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@layer base {
+  * { border-color: var(--color-border); }
+
+  ::selection {
+    background: oklch(0.68 0.23 295 / 0.3);
+    color: oklch(0.99 0.002 270);
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: oklch(1 0 0 / 0.08);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: oklch(1 0 0 / 0.14);
+  }
+}
+
+/* ─── Premium glass card system ─── */
+@utility glow-card {
+  background: linear-gradient(180deg, oklch(0.15 0.02 270 / 0.85), oklch(0.11 0.018 270 / 0.65));
+  border: 1px solid oklch(1 0 0 / 0.06);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(16px) saturate(1.2);
+  transition: box-shadow var(--duration-normal) var(--ease-out-expo),
+              border-color var(--duration-normal) var(--ease-out-expo),
+              transform var(--duration-normal) var(--ease-out-expo);
+}
+
+@utility glow-card-hover {
+  box-shadow: var(--shadow-card-hover);
+  border-color: oklch(1 0 0 / 0.1);
+}
+
+@utility aurora-bg {
+  background-image: var(--gradient-aurora);
+}
+
+@utility text-gradient-primary {
+  background: var(--gradient-primary);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+@utility text-gradient {
+  background: var(--gradient-primary);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+@utility surface-card {
+  background: linear-gradient(180deg, oklch(0.15 0.02 270 / 0.85), oklch(0.11 0.018 270 / 0.65));
+  border: 1px solid oklch(1 0 0 / 0.06);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(16px) saturate(1.2);
+}
+
+@utility glow-primary {
+  box-shadow: var(--shadow-glow);
+}
+
+@utility glow-primary-lg {
+  box-shadow: var(--shadow-glow-lg);
+}
+
+/* ─── Focus ring ─── */
+@utility focus-ring {
+  outline: 2px solid oklch(0.68 0.23 295 / 0.5);
+  outline-offset: 2px;
+}
+
+/* ─── Interactive card hover effect ─── */
+@utility interactive-card {
+  transition: transform var(--duration-normal) var(--ease-out-expo),
+              box-shadow var(--duration-normal) var(--ease-out-expo),
+              border-color var(--duration-normal) var(--ease-out-expo);
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow:
+      0 1px 0 0 oklch(1 0 0 / 0.07) inset,
+      0 14px 36px -10px oklch(0 0 0 / 0.55),
+      0 0 28px -6px oklch(0.68 0.23 295 / 0.35);
+    border-color: oklch(0.68 0.23 295 / 0.22);
+  }
+}
+
+/* legacy alias — keep for any future hover:interactive-card-hover usage */
+@utility interactive-card-hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 1px 0 0 oklch(1 0 0 / 0.07) inset,
+    0 14px 36px -10px oklch(0 0 0 / 0.55),
+    0 0 28px -6px oklch(0.68 0.23 295 / 0.35);
+  border-color: oklch(0.68 0.23 295 / 0.22);
+}
+
+/* ─── Row glow for table rows (use as hover:row-glow on a <tr>) ─── */
+@utility row-glow {
+  background-color: oklch(0.68 0.23 295 / 0.06);
+  box-shadow: inset 2px 0 0 0 oklch(0.68 0.23 295 / 0.55);
+}
+
+/* ─── Ambient halo behind a card (purple) ─── */
+@utility ambient-halo {
+  position: relative;
+  &::before {
+    content: "";
+    position: absolute;
+    inset: -24px;
+    z-index: -1;
+    background: radial-gradient(ellipse at center, oklch(0.68 0.23 295 / 0.28), transparent 65%);
+    filter: blur(32px);
+    pointer-events: none;
+  }
+}
+
+/* ─── Shimmer loading effect ─── */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@utility shimmer {
+  background: linear-gradient(90deg,
+    oklch(1 0 0 / 0.03) 25%,
+    oklch(1 0 0 / 0.07) 50%,
+    oklch(1 0 0 / 0.03) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2s ease-in-out infinite;
+}
+
+/* ─── Subtle noise texture overlay ─── */
+@utility noise-texture {
+  position: relative;
+}

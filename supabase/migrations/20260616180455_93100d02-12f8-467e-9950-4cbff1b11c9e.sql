@@ -1,0 +1,1 @@
+ALTER TABLE public.invites ADD COLUMN IF NOT EXISTS disabled boolean NOT NULL DEFAULT false;

@@ -1,0 +1,22 @@
+# EdgeScope
+
+> EdgeScope is a private trading journal and analytics platform built for traders who want to review execution, analyze performance, and improve long-term consistency.
+
+EdgeScope helps active traders log every trade, attach chart screenshots and reasoning, review emotions and execution quality, and surface long-term performance patterns through analytics. It is invite-only and privacy-first — each trader's journal is fully isolated, and only what the trader explicitly shares appears in the optional community feed.
+
+**Who it's for:** discretionary forex, futures, equities, and crypto traders who want to grade their own execution, build process discipline, and improve consistency over time.
+
+**Key capabilities:**
+- Trade journaling with screenshots, reasoning, emotions, and execution grade
+- Performance analytics (win rate, expectancy, average R, session breakdown, grade analysis)
+- Weekly, monthly, and overall performance reports
+- Sticky notes for trading rules, lessons, and playbook entries
+- Optional community feed for sharing chart screenshots and reasoning only
+- Private by design — invite-only signup, per-user data isolation
+
+## Pages
+- [EdgeScope — Private Trading Journal & Analytics](/): What EdgeScope is, who it's for, and how to request access
+- [Sign in](/auth): Sign in or redeem an invite
+
+## Optional
+- [Reset password](/reset-password): Password reset flow for existing members
