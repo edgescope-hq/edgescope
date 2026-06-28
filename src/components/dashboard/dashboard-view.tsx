@@ -1,6 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import {
   Target, Briefcase, TrendingUp, Calendar, Trophy, XOctagon, Scale, Crosshair,
   Clock, PieChart as PieIcon, Flame, Plus, Wallet, Shield, AlertTriangle,
   ClipboardList, Sparkles,
@@ -269,40 +281,43 @@ export function DashboardView() {
 
       <AnimatePresence>
         {welcomeOpen && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 grid place-items-center bg-black/70 backdrop-blur-md p-4">
-            <motion.div initial={{ scale: 0.96, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.96, y: 10 }} transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }} className="glow-card w-full max-w-lg rounded-2xl p-6">
-              <div className="flex items-center gap-3">
-                <div className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10 ring-1 ring-primary/20">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 grid place-items-center bg-black/75 backdrop-blur-md p-4">
+            <motion.div initial={{ scale: 0.96, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.96, y: 10 }} transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }} className="relative w-full max-w-lg overflow-hidden rounded-2xl border border-white/[0.1] bg-[radial-gradient(circle_at_top_left,oklch(0.68_0.23_295/0.16),transparent_34%),linear-gradient(145deg,oklch(0.12_0.02_270/0.96),oklch(0.075_0.012_270/0.98))] p-7 shadow-[0_28px_90px_-28px_oklch(0_0_0/0.9),0_0_64px_-24px_oklch(0.68_0.23_295/0.75)]">
+              <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-primary/70 to-transparent" />
+              <div className="flex items-start gap-4">
+                <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-primary/15 ring-1 ring-primary/30 shadow-[0_0_32px_-10px_oklch(0.68_0.23_295/0.85)]">
                   <Sparkles className="h-5 w-5 text-primary" />
                 </div>
-                <div>
-                  <h2 className="text-xl font-bold">Welcome to EdgeScope</h2>
-                  <p className="text-sm text-muted-foreground">Journal trades. Review decisions. Improve execution.</p>
+                <div className="min-w-0">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-primary/90">Your trading journal starts here</div>
+                  <h2 className="mt-1 text-2xl font-bold tracking-tight">Welcome to EdgeScope</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">Set up your account, log trades, then let your review data compound.</p>
                 </div>
               </div>
-              <p className="mt-4 text-sm text-muted-foreground leading-relaxed">
+              <p className="mt-5 text-sm leading-relaxed text-muted-foreground">
                 EdgeScope helps you track trades, understand your emotions, review your process, and discover patterns in your trading behavior over time.
               </p>
-              <div className="mt-5 space-y-3">
+              <div className="mt-6 space-y-2.5">
                 {[
-                  { step: "1", text: "Log your first trade" },
-                  { step: "2", text: "Review your execution" },
-                  { step: "3", text: "Track emotions and mistakes" },
-                  { step: "4", text: "Use Analytics and AI Discovery as your journal grows" },
+                  { step: "1", text: "Create your trading account" },
+                  { step: "2", text: "Log your first trade" },
+                  { step: "3", text: "Review your execution" },
+                  { step: "4", text: "Track emotions and mistakes" },
+                  { step: "5", text: "Use Analytics and AI Discovery as your journal grows" },
                 ].map((item) => (
-                  <div key={item.step} className="flex items-center gap-3 rounded-xl bg-white/[0.03] px-4 py-3 ring-1 ring-white/[0.05]">
-                    <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-primary/10 text-xs font-bold text-primary">{item.step}</span>
-                    <span className="text-sm text-foreground">{item.text}</span>
+                  <div key={item.step} className="flex items-center gap-3 rounded-xl bg-white/[0.045] px-4 py-3 ring-1 ring-white/[0.07]">
+                    <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-primary/15 text-xs font-bold text-primary ring-1 ring-primary/20">{item.step}</span>
+                    <span className="text-sm font-medium text-foreground/95">{item.text}</span>
                   </div>
                 ))}
               </div>
-              <div className="mt-6 flex justify-end gap-2">
-                <button onClick={dismissWelcome} className="rounded-xl bg-white/[0.04] px-5 py-2.5 text-sm font-medium text-muted-foreground ring-1 ring-white/[0.06] hover:text-foreground">
-                  Get Started
+              <div className="mt-7 flex flex-wrap justify-end gap-2.5">
+                <button onClick={dismissWelcome} className="rounded-xl bg-white/[0.045] px-5 py-2.5 text-sm font-medium text-muted-foreground ring-1 ring-white/[0.08] transition hover:text-foreground hover:bg-white/[0.07]">
+                  Explore App
                 </button>
-                <button onClick={() => { dismissWelcome(); setNewOpen(true); }} className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] hover:brightness-110">
-                  Log First Trade
-                </button>
+                <Link onClick={dismissWelcome} to="/accounts" className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] transition hover:brightness-110">
+                  Create Trading Account
+                </Link>
               </div>
             </motion.div>
           </motion.div>
