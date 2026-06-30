@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { MouseEvent } from "react";
 import { motion } from "framer-motion";
-import { X, Pencil, Trash2, Plus, Check, Save } from "lucide-react";
+import { X, Pencil, Trash2, Plus, Check, Save, CalendarDays } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -9,6 +9,9 @@ import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { getTrade, updateTrade, deleteScreenshot, addScreenshot, listTrades, updateScreenshotTimeframe } from "@/lib/trades.functions";
 import { validateScreenshotFile } from "@/lib/file-validation";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 type AnnotationShape = unknown;
 import { GRADES, type Grade } from "@/components/trades/trade-form-modal";
 import { rrNum, formatTradeWhen, type DbTrade } from "@/lib/trade-mappers";
@@ -29,6 +32,23 @@ const DEFAULT_MISTAKE_TAGS = [
 ];
 
 type Shot = { id: string; kind: string; url: string | null; caption?: string | null; annotations?: AnnotationShape[] };
+
+const modalTransition = { duration: 0.22, ease: [0.16, 1, 0.3, 1] as const };
+
+function parseDateKey(value: string): Date | undefined {
+  if (!value) return undefined;
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
+function formatDateKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function displayDate(value: string): string {
+  const date = parseDateKey(value);
+  return date ? date.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : "Select date";
+}
 
 const gradeTone = (g: string): string => {
   if (g === "A+" || g === "A") return "bg-success/15 text-success ring-success/30";
@@ -71,27 +91,27 @@ export function TradeReviewModal({
   // Local review-form state — initialized from server data.
   const [reasoning, setReasoning] = useState("");
   const [category, setCategory] = useState("");
-  const [lessons, setLessons] = useState("");
   const [grade, setGrade] = useState<Grade | "">("");
   const [mistakeTags, setMistakeTags] = useState<string[]>([]);
   const [emotionTags, setEmotionTags] = useState<string[]>([]);
   const [inKillzone, setInKillzone] = useState(false);
   const [tradeDate, setTradeDate] = useState<string>("");
-  const [tradeTime, setTradeTime] = useState<string>("");
+  const [shareCommunity, setShareCommunity] = useState(false);
+  const [previewShot, setPreviewShot] = useState<Shot | null>(null);
+  const [confirmShotDelete, setConfirmShotDelete] = useState<Shot | null>(null);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
     if (!trade || hydrated) return;
     setReasoning(trade.reasoning ?? "");
     setCategory((trade.categories ?? [])[0] ?? "");
-    setLessons(trade.lessons_learned ?? "");
     const g = GRADES.includes((trade.grade ?? "") as Grade) ? (trade.grade as Grade) : "";
     setGrade(g);
     setMistakeTags(trade.mistake_tags ?? []);
     setEmotionTags(trade.emotion_tags ?? []);
     setInKillzone(trade.in_killzone === true);
     setTradeDate(trade.trade_date ?? "");
-    setTradeTime((trade.trade_time ?? "").slice(0, 5));
+    setShareCommunity(!!trade.is_shared);
     setHydrated(true);
   }, [trade, hydrated]);
 
@@ -121,14 +141,13 @@ export function TradeReviewModal({
           id: trade.id,
           patch: {
             reasoning: reasoning || null,
-            lessons_learned: lessons || null,
             grade: grade || null,
             mistake_tags: mistakeTags,
             emotion_tags: emotionTags,
             in_killzone: inKillzone,
+            is_shared: shareCommunity,
             categories: category.trim() ? [category.trim()] : [],
             ...(tradeDate ? { trade_date: tradeDate } : {}),
-            trade_time: tradeTime ? `${tradeTime}:00` : null,
           },
         },
       });
@@ -144,18 +163,26 @@ export function TradeReviewModal({
 
   const removeShot = useMutation({
     mutationFn: (id: string) => delShot({ data: { id } }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["trade", tradeId] }); toast.success("Screenshot removed"); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["trades"] });
+      qc.invalidateQueries({ queryKey: ["trade", tradeId] });
+      setConfirmShotDelete(null);
+      toast.success("Screenshot removed");
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const setTimeframe = useMutation({
-    mutationFn: (vars: { id: string; timeframe: "HTF" | "MTF" | "LTF" | "Other" | null }) => updateShotTimeframe({ data: vars }),
+    mutationFn: (vars: { id: string; timeframe: "HTF" | "MTF" | "LTF" | null }) => updateShotTimeframe({ data: vars }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["trade", tradeId] }); toast.success("Screenshot classified"); },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const uploadShots = useMutation({
     mutationFn: async (files: File[]) => {
+      if (shots.length + files.length > 3) {
+        throw new Error("Each trade can have up to 3 screenshots. Remove one before adding another.");
+      }
       for (const f of files) {
         const errMsg = validateScreenshotFile(f);
         if (errMsg) throw new Error(`"${f.name}": ${errMsg}`);
@@ -171,7 +198,11 @@ export function TradeReviewModal({
         await addShot({ data: { trade_id: tradeId, storage_path: path, kind: "after" } });
       }
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["trade", tradeId] }); toast.success("Screenshot added"); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["trades"] });
+      qc.invalidateQueries({ queryKey: ["trade", tradeId] });
+      toast.success("Screenshot added");
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -195,7 +226,7 @@ export function TradeReviewModal({
   
 
   const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
-    <div className="rounded-xl bg-white/[0.025] p-4 ring-1 ring-white/[0.04]">
+    <div className="rounded-xl bg-white/[0.025] p-4 ring-1 ring-white/[0.05]">
       <div className="text-[10px] font-semibold tracking-[0.18em] text-muted-foreground">{title}</div>
       <div className="mt-3">{children}</div>
     </div>
@@ -205,7 +236,7 @@ export function TradeReviewModal({
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 grid place-items-center bg-black/70 backdrop-blur-md p-4" onClick={onClose}>
-      <motion.div initial={{ scale: 0.96, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.96, y: 10 }} transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }} onClick={(e: MouseEvent) => e.stopPropagation()} className="glow-card w-full max-w-3xl max-h-[92vh] overflow-y-auto rounded-2xl p-6">
+      <motion.div initial={{ scale: 0.98, y: 8 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.98, y: 8 }} transition={modalTransition} onClick={(e: MouseEvent) => e.stopPropagation()} className="glow-card w-full max-w-3xl max-h-[92vh] overflow-y-auto rounded-2xl p-6 shadow-[var(--shadow-elevated)]">
         {/* Header */}
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -236,52 +267,90 @@ export function TradeReviewModal({
         </div>
 
         {/* Screenshots */}
-        {(shots.length > 0 || true) && (
-          <div className="mt-5">
+        <div className="mt-5">
             <Section title="SCREENSHOTS">
               {shots.length === 0 && (
-                <p className="text-xs text-muted-foreground">No screenshots yet.</p>
+                <div className="rounded-xl bg-white/[0.02] px-4 py-5 text-center text-xs text-muted-foreground ring-1 ring-white/[0.04]">
+                  No screenshots yet. Add up to 3 clean review images when they help your process.
+                </div>
               )}
               {shots.length > 0 && (
-                <div className="grid grid-cols-1 gap-4">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                   {shots.map((s) => s.url ? (
-                    <div key={s.id} className="relative overflow-hidden rounded-lg ring-1 ring-white/[0.06]">
-                      <img src={s.url} alt={`Screenshot ${s.kind}`} className="w-full object-contain" />
-                      <div className="absolute bottom-2 left-2 right-2 z-10 flex flex-wrap items-center gap-1">
-                        {(["HTF", "MTF", "LTF", "Other"] as const).map((tf) => {
+                  <div
+                    key={s.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setPreviewShot(s)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setPreviewShot(s);
+                      }
+                    }}
+                    className="group relative aspect-video overflow-hidden rounded-xl bg-white/[0.025] text-left shadow-[0_10px_30px_-18px_oklch(0_0_0/0.9)] ring-1 ring-white/[0.06] transition-all duration-200 hover:-translate-y-0.5 hover:ring-primary/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                  >
+                      <img src={s.url} alt={`Screenshot ${s.kind}`} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" />
+                      <div className="absolute inset-x-1 bottom-1 z-10 flex flex-wrap items-center gap-1">
+                        {(["HTF", "MTF", "LTF"] as const).map((tf) => {
                           const active = s.caption === tf;
                           return (
-                            <button
+                            <span
                               key={tf}
-                              type="button"
-                              onClick={() => setTimeframe.mutate({ id: s.id, timeframe: active ? null : tf })}
-                              disabled={setTimeframe.isPending}
+                              role="button"
+                              tabIndex={0}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setTimeframe.mutate({ id: s.id, timeframe: active ? null : tf });
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setTimeframe.mutate({ id: s.id, timeframe: active ? null : tf });
+                                }
+                              }}
                               className={cn(
-                                "rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 transition-all",
+                                "rounded-full px-1.5 py-0.5 text-[9px] font-semibold ring-1 transition-all",
                                 active
-                                  ? "bg-primary/20 text-primary ring-primary/40"
-                                  : "bg-black/60 text-white/70 ring-white/20 hover:bg-black/80 hover:text-white",
+                                  ? "bg-primary/25 text-primary ring-primary/45"
+                                  : "bg-black/65 text-white/70 ring-white/20 hover:bg-black/85 hover:text-white",
+                                setTimeframe.isPending && "pointer-events-none opacity-50",
                               )}
                             >
                               {tf}
-                            </button>
+                            </span>
                           );
                         })}
-                        <button
-                          type="button"
-                          onClick={() => { if (confirm("Delete this screenshot?")) removeShot.mutate(s.id); }}
-                          disabled={removeShot.isPending}
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setConfirmShotDelete(s);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setConfirmShotDelete(s);
+                            }
+                          }}
                           title="Delete screenshot"
-                          className="ml-auto rounded-full bg-black/60 p-1.5 text-white/70 ring-1 ring-white/20 hover:bg-destructive hover:text-white disabled:opacity-30"
+                          className={cn(
+                            "ml-auto grid h-6 w-6 place-items-center rounded-full bg-black/65 text-white/70 ring-1 ring-white/20 transition-all hover:bg-destructive hover:text-white",
+                            removeShot.isPending && "pointer-events-none opacity-30",
+                          )}
                         >
-                          <Trash2 className="h-3 w-3" />
-                        </button>
+                          <X className="h-3.5 w-3.5" />
+                        </span>
                       </div>
                     </div>
                   ) : null)}
                 </div>
               )}
-              <label className="mt-3 inline-flex cursor-pointer items-center gap-2 rounded-lg bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-muted-foreground ring-1 ring-white/[0.06] transition-all hover:text-foreground hover:ring-white/[0.1]">
+              {shots.length < 3 ? (
+              <label className="mt-3 inline-flex cursor-pointer items-center gap-2 rounded-lg bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-muted-foreground ring-1 ring-white/[0.06] transition-all duration-200 hover:bg-white/[0.06] hover:text-foreground hover:ring-white/[0.1]">
                 <Plus className="h-3.5 w-3.5" /> {uploadShots.isPending ? "Uploading…" : "Add screenshot"}
                 <input
                   type="file"
@@ -296,36 +365,41 @@ export function TradeReviewModal({
                   }}
                 />
               </label>
+              ) : (
+                <div className="mt-3 rounded-lg bg-white/[0.025] px-3 py-2 text-xs text-muted-foreground ring-1 ring-white/[0.05]">
+                  Screenshot limit reached. Each trade can have up to 3 screenshots.
+                </div>
+              )}
             </Section>
           </div>
-        )}
 
         {/* Review */}
         <div className="mt-3">
           <Section title="REVIEW">
             <div className="space-y-3">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <label className="text-[10px] font-semibold tracking-wider text-muted-foreground">TRADE DATE</label>
-                  <input
-                    type="date"
-                    value={tradeDate}
-                    onChange={(e) => setTradeDate(e.target.value)}
-                    className={cn(inputClass, "mt-1.5")}
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-semibold tracking-wider text-muted-foreground">TRADE TIME</label>
-                  <input
-                    type="time"
-                    value={tradeTime}
-                    onChange={(e) => setTradeTime(e.target.value)}
-                    className={cn(inputClass, "mt-1.5")}
-                  />
-                </div>
-                <p className="text-[11px] text-muted-foreground sm:col-span-2 -mt-1">
-                  When the trade actually happened. The journal entry was logged separately.
-                </p>
+              <div>
+                <label className="text-[10px] font-semibold tracking-wider text-muted-foreground">TRADE DATE</label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className={cn(inputClass, "mt-1.5 flex items-center justify-between text-left", !tradeDate && "text-muted-foreground")}
+                    >
+                      <span>{displayDate(tradeDate)}</span>
+                      <CalendarDays className="h-4 w-4 text-muted-foreground" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent align="start" className="w-auto rounded-xl border-white/[0.08] bg-background/95 p-0">
+                    <Calendar
+                      mode="single"
+                      selected={parseDateKey(tradeDate)}
+                      onSelect={(date) => {
+                        if (date) setTradeDate(formatDateKey(date));
+                      }}
+                      captionLayout="dropdown"
+                    />
+                  </PopoverContent>
+                </Popover>
               </div>
               <div>
                 <label className="text-[10px] font-semibold tracking-wider text-muted-foreground">CATEGORY / SETUP</label>
@@ -342,7 +416,10 @@ export function TradeReviewModal({
                     <button key={g} type="button" onClick={() => setGrade(grade === g ? "" : g)} className={cn("flex-1 rounded-lg py-2 text-xs font-bold ring-1 transition-all duration-200", grade === g ? gradeTone(g) : "bg-white/[0.04] text-muted-foreground ring-white/[0.06] hover:text-foreground")}>{g}</button>
                   ))}
                 </div>
-                <label className="mt-2 flex cursor-pointer items-center gap-2.5 rounded-lg bg-white/[0.04] px-3 py-2 ring-1 ring-white/[0.06] hover:ring-primary/30 transition">
+              </div>
+              <div className="pt-1">
+                <label className="text-[10px] font-semibold tracking-wider text-muted-foreground">KILLZONE</label>
+                <label className="mt-1.5 flex cursor-pointer items-center gap-2.5 rounded-lg bg-white/[0.04] px-3 py-2 ring-1 ring-white/[0.06] transition hover:ring-primary/30">
                   <input type="checkbox" checked={inKillzone} onChange={(e) => setInKillzone(e.target.checked)} className="h-4 w-4 accent-primary" />
                   <span className="text-sm">Taken during Killzone</span>
                 </label>
@@ -407,14 +484,6 @@ export function TradeReviewModal({
           </Section>
         </div>
 
-        {/* Notes */}
-        <div className="mt-3">
-          <Section title="NOTES">
-            <textarea value={lessons} onChange={(e) => setLessons(e.target.value)} rows={3} className={cn(inputClass, "resize-none")} />
-          </Section>
-        </div>
-
-
         {/* Similar */}
         {(similar.wins.length > 0 || similar.losses.length > 0) && (
           <div className="mt-3">
@@ -427,12 +496,64 @@ export function TradeReviewModal({
           </div>
         )}
 
+        <div className="mt-3">
+          <Section title="COMMUNITY SHARING">
+            <label className="flex cursor-pointer items-center justify-between gap-3 rounded-lg bg-white/[0.025] px-3 py-2.5 ring-1 ring-white/[0.05] transition hover:bg-white/[0.04]">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold">Share with Community</div>
+                <div className="mt-0.5 text-[11px] text-muted-foreground">
+                  Group members can see the screenshot, instrument, side, result, and reasoning.
+                </div>
+              </div>
+              <input
+                type="checkbox"
+                checked={shareCommunity}
+                onChange={(e) => setShareCommunity(e.target.checked)}
+                className="h-4 w-4 shrink-0 cursor-pointer accent-primary"
+              />
+            </label>
+          </Section>
+        </div>
+
         <div className="mt-5 flex justify-end gap-2">
           <button onClick={onClose} className="rounded-xl bg-white/[0.04] px-4 py-2.5 text-sm font-medium text-muted-foreground ring-1 ring-white/[0.06] hover:text-foreground">Close</button>
           <button onClick={() => saveM.mutate()} disabled={saveM.isPending} className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] hover:brightness-110 disabled:opacity-50">
             <Save className="h-4 w-4" /> {saveM.isPending ? "Saving…" : "Save review"}
           </button>
         </div>
+        {previewShot?.url && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setPreviewShot(null)}
+            className="fixed inset-0 z-[60] grid place-items-center bg-black/85 p-4 backdrop-blur-md"
+          >
+            <motion.div initial={{ scale: 0.98, y: 8 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.98, y: 8 }} transition={modalTransition} onClick={(e: MouseEvent) => e.stopPropagation()} className="relative max-h-[88vh] max-w-5xl overflow-hidden rounded-xl bg-background/95 p-2 ring-1 ring-white/10">
+              <button
+                type="button"
+                onClick={() => setPreviewShot(null)}
+                aria-label="Close screenshot preview"
+                className="absolute right-3 top-3 z-10 grid h-8 w-8 place-items-center rounded-full bg-black/70 text-white/80 ring-1 ring-white/15 transition hover:bg-white/10 hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+              <img src={previewShot.url} alt={`Screenshot ${previewShot.kind}`} className="max-h-[82vh] max-w-[92vw] rounded-lg object-contain" />
+            </motion.div>
+          </motion.div>
+        )}
+        <ConfirmDialog
+          open={confirmShotDelete !== null}
+          onOpenChange={(open) => { if (!open) setConfirmShotDelete(null); }}
+          title="Delete screenshot?"
+          description="This screenshot will be permanently removed from this trade and Supabase Storage."
+          confirmLabel="Delete screenshot"
+          destructive
+          loading={removeShot.isPending}
+          onConfirm={() => {
+            if (confirmShotDelete) removeShot.mutate(confirmShotDelete.id);
+          }}
+        />
       </motion.div>
     </motion.div>
   );

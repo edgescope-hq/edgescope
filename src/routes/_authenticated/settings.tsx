@@ -8,9 +8,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import appLogo from "@/assets/edgescope-logo.png.asset.json";
 import appLogoHorizontal from "@/assets/edgescope-horizontal.png.asset.json";
 import { getProfile, updateProfile } from "@/lib/account.functions";
+import { PageHeader, PageShell } from "@/components/ui/premium";
 
 export const Route = createFileRoute("/_authenticated/settings")({
   head: () => ({
@@ -103,14 +103,13 @@ function SettingsPage() {
   const edgeId = (profile as { edge_id?: string | null } | undefined)?.edge_id ?? null;
 
   return (
-    <div className="px-6 py-8 md:px-10 md:py-10">
-      <div className="flex items-center gap-3">
-        <img src={appLogo.url} alt="EdgeScope" className="h-12 w-12 object-contain" />
-        <motion.h1 initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}
-          className="text-3xl font-bold tracking-tight md:text-4xl">
-          Settings
-        </motion.h1>
-      </div>
+    <PageShell>
+      <PageHeader
+        icon={User}
+        eyebrow="Workspace"
+        title="Settings"
+        description="Profile, appearance, and security controls for your EdgeScope workspace."
+      />
 
       <div className="mt-8 grid grid-cols-1 gap-4 lg:grid-cols-[220px_1fr]">
         <nav className="glow-card h-fit rounded-2xl p-1.5">
@@ -133,7 +132,7 @@ function SettingsPage() {
           })}
         </nav>
 
-        <motion.div key={active} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}
+        <motion.div key={active} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
           className="glow-card rounded-2xl p-6">
           {active === "profile" && (
             <div>
@@ -246,6 +245,6 @@ function SettingsPage() {
           )}
         </motion.div>
       </div>
-    </div>
+    </PageShell>
   );
 }

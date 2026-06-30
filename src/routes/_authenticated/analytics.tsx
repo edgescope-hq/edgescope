@@ -7,6 +7,7 @@ import {
 } from "recharts";
 import { Activity, BarChart3, Target, Flame, CalendarDays, CalendarRange, Trophy, Layers, DollarSign, Grid3x3, Smile } from "lucide-react";
 import { EMOTIONS } from "@/lib/emotions";
+import { PageHeader, PageShell, PremiumEmptyState } from "@/components/ui/premium";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { listTrades } from "@/lib/trades.functions";
@@ -30,6 +31,8 @@ export const Route = createFileRoute("/_authenticated/analytics")({
 type CategoryRow = {
   name: string; trades: number; winRate: number; netR: number; avgRR: number; avgProfit: number; avgLoss: number;
 };
+
+type ReportScope = "overall" | "weekly" | "monthly" | "quarterly" | "yearly";
 
 type Report = {
   totalTrades: number;
@@ -93,14 +96,37 @@ function ymKey(d: Date): string {
 }
 
 function weekKey(d: Date): string {
-  return startOfWeekISO(d).toISOString().slice(0, 10);
+  const start = startOfWeekISO(d);
+  return `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-${String(start.getDate()).padStart(2, "0")}`;
 }
 
-function filterByScope(all: DbTrade[], scope: "overall" | "weekly" | "monthly", periodKey: string | null): DbTrade[] {
+function addDays(d: Date, days: number): Date {
+  const next = new Date(d);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function quarterKey(d: Date): string {
+  return `${d.getFullYear()}-Q${Math.floor(d.getMonth() / 3) + 1}`;
+}
+
+function yearKey(d: Date): string {
+  return String(d.getFullYear());
+}
+
+function filterByScope(all: DbTrade[], scope: ReportScope, periodKey: string | null): DbTrade[] {
   if (scope === "overall") return all;
   if (scope === "weekly") {
     const key = periodKey ?? weekKey(new Date());
     return all.filter((t) => weekKey(new Date(t.trade_date + "T00:00:00")) === key);
+  }
+  if (scope === "quarterly") {
+    const key = periodKey ?? quarterKey(new Date());
+    return all.filter((t) => quarterKey(new Date(t.trade_date + "T00:00:00")) === key);
+  }
+  if (scope === "yearly") {
+    const key = periodKey ?? yearKey(new Date());
+    return all.filter((t) => t.trade_date.startsWith(key));
   }
   const key = periodKey ?? ymKey(new Date());
   return all.filter((t) => t.trade_date.startsWith(key));
@@ -141,7 +167,63 @@ function labelMonth(key: string): string {
   return `${prefix}${d.toLocaleDateString("en-US", { month: "long", year: "numeric" })}`;
 }
 
-function buildReport(trades: DbTrade[], scope: "overall" | "weekly" | "monthly"): Report {
+function cleanMonthLabel(key: string): string {
+  const [y, m] = key.split("-").map(Number);
+  const d = new Date(y, m - 1, 1);
+  return d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+}
+
+type WeeklySelection = "current" | "previous" | "custom";
+
+function weeklyRangeKeys(count: number): Set<string> {
+  const currentStart = startOfWeekISO(new Date());
+  const keys = new Set<string>();
+  for (let i = 0; i < count; i += 1) {
+    keys.add(weekKey(addDays(currentStart, -7 * i)));
+  }
+  return keys;
+}
+
+function filterByWeeklySelection(all: DbTrade[], selection: WeeklySelection, customKey: string): DbTrade[] {
+  const key =
+    selection === "previous"
+      ? weekKey(addDays(new Date(), -7))
+      : selection === "custom"
+        ? customKey
+        : weekKey(new Date());
+  return all.filter((t) => weekKey(new Date(t.trade_date + "T00:00:00")) === key);
+}
+
+function labelWeekRange(key: string): string {
+  const start = new Date(key + "T00:00:00");
+  const end = addDays(start, 6);
+  const fmt = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return `${fmt(start)} - ${fmt(end)}`;
+}
+
+function weekInputFromKey(key: string): string {
+  const date = new Date(`${key}T00:00:00`);
+  const target = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNumber = target.getUTCDay() || 7;
+  target.setUTCDate(target.getUTCDate() + 4 - dayNumber);
+  const yearStart = new Date(Date.UTC(target.getUTCFullYear(), 0, 1));
+  const weekNumber = Math.ceil((((target.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  return `${target.getUTCFullYear()}-W${String(weekNumber).padStart(2, "0")}`;
+}
+
+function keyFromWeekInput(value: string): string | null {
+  const match = /^(\d{4})-W(\d{2})$/.exec(value);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const week = Number(match[2]);
+  if (!Number.isInteger(year) || !Number.isInteger(week) || week < 1 || week > 53) return null;
+  const jan4 = new Date(year, 0, 4);
+  const start = startOfWeekISO(jan4);
+  start.setDate(start.getDate() + (week - 1) * 7);
+  return weekKey(start);
+}
+
+function buildReport(trades: DbTrade[], scope: ReportScope): Report {
   const ana = trades.map(toAnalytics);
   const total = trades.length;
   const wins = trades.filter((t) => t.result === "win").length;
@@ -461,7 +543,7 @@ function Kpi({ icon: Icon, label, value, suffix = "", tone, decimals = 0 }: any)
 
 type LifetimeWeekday = { name: string; count: number; winRate: number | null; wins: number; losses: number };
 
-function ReportView({ r, lifetimeWeekdays }: { r: Report; scope: "overall" | "weekly" | "monthly"; lifetimeWeekdays: LifetimeWeekday[] }) {
+function ReportView({ r, lifetimeWeekdays }: { r: Report; scope: ReportScope; lifetimeWeekdays: LifetimeWeekday[] }) {
   if (r.totalTrades === 0) {
     return (
       <motion.div
@@ -470,9 +552,11 @@ function ReportView({ r, lifetimeWeekdays }: { r: Report; scope: "overall" | "we
         exit={{ opacity: 0, y: -8 }}
         className="mt-6"
       >
-        <div className="glow-card rounded-2xl p-10 text-center">
-          <p className="text-sm text-muted-foreground">No trades in this period yet. Log a trade to populate analytics.</p>
-        </div>
+        <PremiumEmptyState
+          icon={BarChart3}
+          title="No trades in this period yet"
+          description="Choose another report period or log a trade to populate analytics."
+        />
       </motion.div>
     );
   }
@@ -482,7 +566,7 @@ function ReportView({ r, lifetimeWeekdays }: { r: Report; scope: "overall" | "we
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -8 }}
-      transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+      transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
       className="mt-6 space-y-4"
     >
       {/* Summary stats (first) */}
@@ -501,8 +585,8 @@ function ReportView({ r, lifetimeWeekdays }: { r: Report; scope: "overall" | "we
       <div className="glow-card rounded-2xl p-5">
         <h3 className="flex items-center gap-2 text-sm font-semibold"><CalendarDays className="h-4 w-4 text-primary" /> Highlights</h3>
         <dl className="mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-          <div className="flex items-center justify-between"><dt className="text-muted-foreground">Best session</dt><dd className={cn("font-semibold", r.bestSession === "Not enough data" ? "text-foreground" : "text-success")}>{r.bestSession}</dd></div>
-          <div className="flex items-center justify-between"><dt className="text-muted-foreground">Worst session</dt><dd className={cn("font-semibold", r.worstSession === "Not enough data" ? "text-foreground" : "text-destructive")}>{r.worstSession}</dd></div>
+          <div className="flex items-center justify-between"><dt className="text-muted-foreground">Best session</dt><dd className={cn("font-semibold", r.bestSession === "Not enough data" ? "text-muted-foreground/55" : "text-success")}>{r.bestSession}</dd></div>
+          <div className="flex items-center justify-between"><dt className="text-muted-foreground">Worst session</dt><dd className={cn("font-semibold", r.worstSession === "Not enough data" ? "text-muted-foreground/55" : "text-destructive")}>{r.worstSession}</dd></div>
           <div className="flex items-center justify-between"><dt className="text-muted-foreground">Best category</dt><dd className="font-semibold text-primary">{r.bestCategory}</dd></div>
           <div className="flex items-center justify-between"><dt className="text-muted-foreground flex items-center gap-1.5"><Trophy className="h-3.5 w-3.5 text-success" /> Best trade</dt><dd className="font-semibold text-success">{r.bestTrade ? `${r.bestTrade.sym} · +${r.bestTrade.r.toFixed(2)}R` : "—"}</dd></div>
           <div className="flex items-center justify-between"><dt className="text-muted-foreground">Longest win streak</dt><dd className="font-semibold">{r.longest.wins}</dd></div>
@@ -515,7 +599,7 @@ function ReportView({ r, lifetimeWeekdays }: { r: Report; scope: "overall" | "we
         <h3 className="text-sm font-semibold">Equity curve</h3>
         <div className="mt-4 h-[280px]">
           {r.equity.length === 0 ? (
-            <div className="grid h-full place-items-center text-sm text-muted-foreground">Not enough data.</div>
+            <div className="grid h-full place-items-center rounded-xl bg-white/[0.02] text-sm text-muted-foreground/55 ring-1 ring-white/[0.04]">Not enough data.</div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={r.equity} margin={{ top: 10, right: 8, left: -16, bottom: 8 }}>
@@ -703,7 +787,7 @@ function ReportView({ r, lifetimeWeekdays }: { r: Report; scope: "overall" | "we
           <Target className="h-4 w-4 text-primary" /> Planned vs Achieved R
         </h3>
         {r.plannedVsAchieved.sampleSize === 0 ? (
-          <p className="mt-4 text-sm text-muted-foreground">Not enough data — log trades with entry/SL/TP prices to enable this view.</p>
+          <p className="mt-4 text-sm text-muted-foreground/55">Not enough data — log trades with entry/SL/TP prices to enable this view.</p>
         ) : (
           <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div className="rounded-xl bg-white/[0.03] p-4 ring-1 ring-white/[0.05]">
@@ -734,14 +818,14 @@ function ReportView({ r, lifetimeWeekdays }: { r: Report; scope: "overall" | "we
         </h3>
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
           {r.directions.map((d) => (
-            <div key={d.name} className="rounded-xl bg-white/[0.03] p-4 ring-1 ring-white/[0.05]">
+            <div key={d.name} className={cn("rounded-xl bg-white/[0.03] p-4 ring-1", d.name === "Long" ? "ring-primary/20" : "ring-info/20")}>
               <div className="flex items-center justify-between">
-                <div className={cn("text-sm font-bold", d.name === "Long" ? "text-success" : "text-destructive")}>{d.name}</div>
+                <div className={cn("text-sm font-bold", d.name === "Long" ? "text-primary" : "text-info")}>{d.name}</div>
                 <div className="text-[11px] text-muted-foreground">{d.count} trades</div>
               </div>
               <div className="mt-3 grid grid-cols-3 gap-3 text-xs">
                 <div><div className="text-muted-foreground">Win rate</div><div className="mt-0.5 font-semibold tabular-nums">{d.winRate.toFixed(1)}%</div></div>
-                <div><div className="text-muted-foreground">Net R</div><div className={cn("mt-0.5 font-semibold tabular-nums", d.netR >= 0 ? "text-success" : "text-destructive")}>{d.netR >= 0 ? "+" : ""}{d.netR}R</div></div>
+                <div><div className="text-muted-foreground">Net R</div><div className="mt-0.5 font-semibold tabular-nums text-foreground">{d.netR >= 0 ? "+" : ""}{d.netR}R</div></div>
                 <div><div className="text-muted-foreground">Avg R</div><div className="mt-0.5 font-semibold tabular-nums">{d.avgRR.toFixed(2)}R</div></div>
               </div>
             </div>
@@ -843,32 +927,48 @@ function ReportView({ r, lifetimeWeekdays }: { r: Report; scope: "overall" | "we
 }
 
 function AnalyticsPage() {
-  const [tab, setTab] = useState<"overall" | "weekly" | "monthly">("overall");
-  const [weekSel, setWeekSel] = useState<string | null>(null);
+  const [tab, setTab] = useState<ReportScope>("overall");
+  const [weekSel, setWeekSel] = useState<WeeklySelection>("current");
+  const [customWeekKey, setCustomWeekKey] = useState(weekKey(new Date()));
   const [monthSel, setMonthSel] = useState<string | null>(null);
   const fn = useServerFn(listTrades);
   const { data } = useSuspenseQuery({ queryKey: ["trades"], queryFn: () => fn() });
   const trades = (data ?? []) as DbTrade[];
 
-  const weekKeys = useMemo(() => listWeekKeys(trades), [trades]);
   const monthKeys = useMemo(() => listMonthKeys(trades), [trades]);
+  const tradeMonthKeys = useMemo(() => {
+    const set = new Set<string>();
+    for (const t of trades) set.add(t.trade_date.slice(0, 7));
+    return Array.from(set).sort();
+  }, [trades]);
+  const showQuarterly = tradeMonthKeys.length >= 3;
+  const showYearly = tradeMonthKeys.length >= 12;
   // Default to the most recent period that actually contains trades, so a
   // brand-new week/month doesn't appear empty while history is still there.
-  const tradeWeekSet = useMemo(() => {
-    const s = new Set<string>();
-    for (const t of trades) s.add(weekKey(new Date(t.trade_date + "T00:00:00")));
-    return s;
-  }, [trades]);
   const tradeMonthSet = useMemo(() => {
     const s = new Set<string>();
     for (const t of trades) s.add(t.trade_date.slice(0, 7));
     return s;
   }, [trades]);
-  const defaultWeekKey = weekKeys.find((k) => tradeWeekSet.has(k)) ?? weekKeys[0] ?? null;
   const defaultMonthKey = monthKeys.find((k) => tradeMonthSet.has(k)) ?? monthKeys[0] ?? null;
-  const activeKey = tab === "weekly" ? (weekSel ?? defaultWeekKey) : tab === "monthly" ? (monthSel ?? defaultMonthKey) : null;
+  const activeKey =
+    tab === "weekly"
+      ? `${weekSel}:${customWeekKey}`
+      : tab === "monthly"
+        ? (monthSel ?? defaultMonthKey)
+        : tab === "quarterly"
+          ? quarterKey(new Date())
+          : tab === "yearly"
+            ? yearKey(new Date())
+            : null;
 
-  const report = useMemo(() => buildReport(filterByScope(trades, tab, activeKey), tab), [trades, tab, activeKey]);
+  const reportTrades = useMemo(
+    () => tab === "weekly"
+      ? filterByWeeklySelection(trades, weekSel, customWeekKey)
+      : filterByScope(trades, tab, activeKey),
+    [trades, tab, weekSel, customWeekKey, activeKey],
+  );
+  const report = useMemo(() => buildReport(reportTrades, tab), [reportTrades, tab]);
 
   const lifetimeWeekdays = useMemo<LifetimeWeekday[]>(() => {
     const ana = trades.map(toAnalytics);
@@ -887,14 +987,16 @@ function AnalyticsPage() {
   }, [trades]);
 
   return (
-    <div className="px-6 py-8 md:px-10 md:py-10">
-      <motion.h1 initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }} className="text-3xl font-bold tracking-tight md:text-4xl">
-        Analytics
-      </motion.h1>
-      <p className="mt-1.5 text-sm text-muted-foreground">Performance organized into overall, weekly, and monthly reports.</p>
+    <PageShell>
+      <PageHeader
+        icon={BarChart3}
+        eyebrow="Reports"
+        title="Analytics"
+        description="Performance organized into overall, weekly, monthly, and longer-horizon reports."
+      />
 
-      <div className="mt-6 flex flex-wrap items-center gap-3">
-        <div className="inline-flex rounded-xl bg-white/[0.03] p-1 ring-1 ring-white/[0.06]">
+      <div className="glow-card mt-6 flex flex-wrap items-center gap-3 rounded-2xl p-3">
+        <div className="inline-flex flex-wrap rounded-xl bg-white/[0.03] p-1 ring-1 ring-white/[0.06]">
           <button onClick={() => setTab("overall")} className={cn("inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-all duration-200", tab === "overall" ? "bg-primary text-primary-foreground shadow-[var(--shadow-glow)]" : "text-muted-foreground hover:text-foreground")}>
             <BarChart3 className="h-4 w-4" /> Overall
           </button>
@@ -904,36 +1006,62 @@ function AnalyticsPage() {
           <button onClick={() => setTab("monthly")} className={cn("inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-all duration-200", tab === "monthly" ? "bg-primary text-primary-foreground shadow-[var(--shadow-glow)]" : "text-muted-foreground hover:text-foreground")}>
             <CalendarRange className="h-4 w-4" /> Monthly
           </button>
+          {showQuarterly && (
+            <button onClick={() => setTab("quarterly")} className={cn("inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-all duration-200", tab === "quarterly" ? "bg-primary text-primary-foreground shadow-[var(--shadow-glow)]" : "text-muted-foreground hover:text-foreground")}>
+              <CalendarRange className="h-4 w-4" /> Quarterly
+            </button>
+          )}
+          {showYearly && (
+            <button onClick={() => setTab("yearly")} className={cn("inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-all duration-200", tab === "yearly" ? "bg-primary text-primary-foreground shadow-[var(--shadow-glow)]" : "text-muted-foreground hover:text-foreground")}>
+              <CalendarRange className="h-4 w-4" /> Yearly
+            </button>
+          )}
         </div>
 
         {tab === "weekly" && (
-          <select
-            value={weekSel ?? defaultWeekKey ?? ""}
-            onChange={(e) => setWeekSel(e.target.value)}
-            className="rounded-xl bg-white/[0.04] px-3 py-2 text-sm ring-1 ring-white/[0.06] focus:outline-none focus:ring-2 focus:ring-primary/40"
-          >
-            {weekKeys.map((k) => (
-              <option key={k} value={k} className="bg-background text-foreground">{labelWeek(k)}</option>
-            ))}
-          </select>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={weekSel}
+              onChange={(e) => setWeekSel(e.target.value as WeeklySelection)}
+              className="rounded-xl bg-white/[0.04] px-3 py-2 text-sm ring-1 ring-white/[0.06] transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary/40"
+            >
+              <option value="current" className="bg-background text-foreground">Current Week</option>
+              <option value="previous" className="bg-background text-foreground">Previous Week</option>
+              <option value="custom" className="bg-background text-foreground">Custom Week</option>
+            </select>
+            {weekSel === "custom" && (
+              <div className="flex items-center gap-2 rounded-xl bg-white/[0.04] px-3 py-2 ring-1 ring-white/[0.06] transition-all duration-200 focus-within:ring-2 focus-within:ring-primary/40">
+                <input
+                  type="week"
+                  value={weekInputFromKey(customWeekKey)}
+                  onChange={(e) => {
+                    const key = keyFromWeekInput(e.target.value);
+                    if (key) setCustomWeekKey(key);
+                  }}
+                  className="bg-transparent text-sm text-foreground outline-none"
+                />
+                <span className="text-xs text-muted-foreground">{labelWeekRange(customWeekKey)}</span>
+              </div>
+            )}
+          </div>
         )}
 
         {tab === "monthly" && (
-          <select
-            value={monthSel ?? defaultMonthKey ?? ""}
-            onChange={(e) => setMonthSel(e.target.value)}
-            className="rounded-xl bg-white/[0.04] px-3 py-2 text-sm ring-1 ring-white/[0.06] focus:outline-none focus:ring-2 focus:ring-primary/40"
-          >
-            {monthKeys.map((k) => (
-              <option key={k} value={k} className="bg-background text-foreground">{labelMonth(k)}</option>
-            ))}
-          </select>
+          <div className="flex items-center gap-2 rounded-xl bg-white/[0.04] px-3 py-2 ring-1 ring-white/[0.06] transition-all duration-200 focus-within:ring-2 focus-within:ring-primary/40">
+            <input
+              type="month"
+              value={monthSel ?? defaultMonthKey ?? ymKey(new Date())}
+              onChange={(e) => e.target.value && setMonthSel(e.target.value)}
+              className="bg-transparent text-sm text-foreground outline-none"
+            />
+            <span className="text-xs text-muted-foreground">{cleanMonthLabel(monthSel ?? defaultMonthKey ?? ymKey(new Date()))}</span>
+          </div>
         )}
       </div>
 
       <AnimatePresence mode="wait">
         <ReportView key={`${tab}-${activeKey ?? "all"}`} r={report} scope={tab} lifetimeWeekdays={lifetimeWeekdays} />
       </AnimatePresence>
-    </div>
+    </PageShell>
   );
 }

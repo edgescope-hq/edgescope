@@ -1,5 +1,4 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { motion } from "framer-motion";
 import { useEffect, useMemo, useState } from "react";
 import {
   Plus, Archive, Star, AlertTriangle, TrendingUp,
@@ -24,6 +23,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { PageHeader, PageShell, PremiumEmptyState } from "@/components/ui/premium";
 
 export const Route = createFileRoute("/_authenticated/accounts")({
   head: () => ({
@@ -151,14 +151,13 @@ function AccountsPage() {
   });
 
   return (
-    <div className="px-6 py-8 md:px-10 md:py-10">
-      <div className="flex items-center gap-3">
-        <img src={appLogo.url} alt="EdgeScope" className="h-12 w-12 object-contain" />
-        <motion.h1 initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}
-          className="text-3xl font-bold tracking-tight md:text-4xl">
-          Accounts
-        </motion.h1>
-      </div>
+    <PageShell>
+      <PageHeader
+        icon={User}
+        eyebrow="Account discipline"
+        title="Accounts"
+        description="Manage trading accounts, risk rules, and lightweight guardrail reminders."
+      />
 
       <div className="mt-6 flex items-center justify-end">
         <button
@@ -173,9 +172,12 @@ function AccountsPage() {
         <div className="rounded-2xl bg-white/[0.02] p-1 ring-1 ring-white/[0.05]">
           {isLoading && <div className="px-2.5 py-3 text-xs text-muted-foreground">Loading…</div>}
           {!isLoading && accounts.length === 0 && !showNew && (
-            <div className="px-2.5 py-5 text-center text-xs text-muted-foreground">
-              No accounts yet.
-            </div>
+            <PremiumEmptyState
+              icon={User}
+              title="No accounts yet"
+              description="Add an account to connect trades with risk rules and performance context."
+              compact
+            />
           )}
           {accounts.map((a) => {
             const isSel = selectedId === a.id && !showNew;
@@ -276,7 +278,7 @@ function AccountsPage() {
           )}
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 }
 

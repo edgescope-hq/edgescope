@@ -57,7 +57,7 @@ const FEATURES = [
   { icon: LineChart, title: "Execution focused", body: "Grade every trade A+ to D. Track planned vs achieved R:R, sessions, and categories.", gradient: "from-primary/20 to-primary/5" },
   { icon: Brain, title: "Emotion aware", body: "Tag what you felt before, during, and after. See which states actually make you money.", gradient: "from-success/20 to-success/5" },
   { icon: BarChart3, title: "Performance Analytics", body: "Track win rate, R, session performance, day-of-week performance, psychology trends, and long-term growth.", gradient: "from-primary/20 to-primary/5" },
-  { icon: Sparkles, title: "AI Edge Discovery", body: "Discover hidden patterns in your trading data. Identify which setups, sessions, and behaviors create your best results.", gradient: "from-warning/20 to-warning/5" },
+  { icon: Sparkles, title: "Scope", body: "Find hidden patterns in your trading journal. No signals. No predictions.", gradient: "from-warning/20 to-warning/5" },
   { icon: CandlestickChart, title: "Chart & Review", body: "Analyze charts, capture screenshots, journal trades, and review performance inside a single workflow.", gradient: "from-info/20 to-info/5" },
 ];
 
@@ -87,10 +87,7 @@ function Landing() {
         {/* Hero */}
         <section className="pb-20 pt-32 text-center md:pt-40 md:pb-28">
           <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.03] px-4 py-1.5 text-xs font-medium tracking-wide text-muted-foreground">
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-            </span>
+            <span className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_14px_oklch(0.74_0.19_152/0.55)]" />
             Execute. Journal. Analyze. Improve.
           </div>
 
@@ -113,14 +110,14 @@ function Landing() {
             <Link
               to="/auth"
               search={{ mode: "signup" }}
-              className="group inline-flex items-center gap-2.5 rounded-xl bg-primary px-7 py-3.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] transition-all duration-300 hover:shadow-[var(--shadow-glow-lg)] hover:brightness-110"
+              className="group inline-flex items-center gap-2.5 rounded-xl bg-primary px-7 py-3.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] transition-all duration-200 hover:-translate-y-px hover:shadow-[var(--shadow-glow-lg)] hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
             >
               Get Started
               <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-0.5" />
             </Link>
             <Link
               to="/auth"
-              className="inline-flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.03] px-7 py-3.5 text-sm font-medium text-muted-foreground transition-all duration-200 hover:border-white/[0.14] hover:bg-white/[0.06] hover:text-foreground"
+              className="inline-flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.03] px-7 py-3.5 text-sm font-medium text-muted-foreground transition-all duration-200 hover:border-white/[0.14] hover:bg-white/[0.06] hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             >
               Sign In
             </Link>

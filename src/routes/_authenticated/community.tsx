@@ -46,6 +46,7 @@ import {
 } from "@/lib/groups.functions";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { cn } from "@/lib/utils";
+import { PageShell, PremiumEmptyState } from "@/components/ui/premium";
 
 export const Route = createFileRoute("/_authenticated/community")({
   head: () => ({
@@ -62,14 +63,14 @@ function CommunityPage() {
   const [activeGroup, setActiveGroup] = useState<GroupSummary | null>(null);
 
   return (
-    <div className="px-6 py-8 md:px-10 md:py-10">
+    <PageShell>
       <Header />
       {activeGroup ? (
         <GroupDetail group={activeGroup} onBack={() => setActiveGroup(null)} />
       ) : (
         <GroupsList onOpen={setActiveGroup} />
       )}
-    </div>
+    </PageShell>
   );
 }
 
@@ -103,7 +104,7 @@ function Header() {
         <motion.h1
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+          transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
           className="text-3xl font-bold tracking-tight md:text-4xl"
         >
           Community
@@ -342,13 +343,12 @@ function GroupsList({ onOpen }: { onOpen: (g: GroupSummary) => void }) {
       {isLoading ? (
         <p className="mt-8 text-center text-sm text-muted-foreground">Loading…</p>
       ) : groups.length === 0 ? (
-        <div className="glow-card mt-6 rounded-2xl p-10 text-center">
-          <Users className="mx-auto h-8 w-8 text-muted-foreground/60" />
-          <h3 className="mt-3 text-base font-semibold">No groups yet</h3>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Create a group, then invite traders by their EdgeScope ID.
-          </p>
-        </div>
+        <PremiumEmptyState
+          icon={Users}
+          title="No groups yet"
+          description="Create a private review circle, then invite traders by their EdgeScope ID."
+          className="mt-6"
+        />
       ) : (
         <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {groups.map((g) => (
@@ -398,7 +398,6 @@ function GroupsList({ onOpen }: { onOpen: (g: GroupSummary) => void }) {
                 <input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. ICT Study Group"
                   maxLength={60}
                   className="mt-1.5 w-full rounded-xl bg-white/[0.04] px-3 py-2.5 text-sm ring-1 ring-white/[0.06] focus:outline-none focus:ring-2 focus:ring-primary/40"
                 />
@@ -462,7 +461,7 @@ function GroupDetail({ group, onBack }: { group: GroupSummary; onBack: () => voi
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+      transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
       className="mt-6"
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1167,7 +1166,7 @@ function ModalShell({
         initial={{ scale: 0.96, y: 10 }}
         animate={{ scale: 1, y: 0 }}
         exit={{ scale: 0.96, y: 10 }}
-        transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+        transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
         onClick={(e: MouseEvent) => e.stopPropagation()}
         className={cn(
           "glow-card max-h-[90vh] w-full overflow-y-auto rounded-2xl p-6",

@@ -28,7 +28,7 @@ const primaryNav: NavItem[] = [
   { to: "/trades", label: "My Trades", icon: LineChart },
   { to: "/analytics", label: "Analytics", icon: BarChart3 },
   { to: "/playbook", label: "Playbook", icon: BookOpen },
-  { to: "/edge-discovery", label: "AI Edge Discovery", icon: Sparkles },
+  { to: "/edge-discovery", label: "Scope", icon: Sparkles },
   { to: "/paper", label: "Paper Trading", icon: CandlestickChart, disabled: true, badge: "Soon" },
 ];
 

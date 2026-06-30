@@ -2,8 +2,8 @@ import { useEffect } from "react";
 
 /**
  * Warn before browser navigation (refresh / close / back) when there are
- * unsaved edits. For in-app close intents, callers should use
- * `confirmDiscard(dirty)` before dismissing a modal.
+ * unsaved edits. In-app close/reset intents should use an app-styled
+ * confirmation modal instead of browser-native dialogs.
  */
 export function useUnsavedChanges(dirty: boolean) {
   useEffect(() => {
@@ -16,15 +16,4 @@ export function useUnsavedChanges(dirty: boolean) {
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
   }, [dirty]);
-}
-
-/**
- * Returns true if it is safe to discard (either nothing is dirty, or the
- * user confirmed leaving). Use inside event handlers that close edit modals.
- */
-export function confirmDiscard(dirty: boolean): boolean {
-  if (!dirty) return true;
-  return typeof window === "undefined"
-    ? true
-    : window.confirm("You have unsaved changes. Leave without saving?");
 }

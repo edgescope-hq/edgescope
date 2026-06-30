@@ -1,15 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
-import { Plus, Trash2, NotebookPen, Save, X, FileText, Copy, Play, Square, Sparkles, BookOpen } from "lucide-react";
+import { Plus, Trash2, NotebookPen, Save, X, FileText, Play, Square, Sparkles, BookOpen } from "lucide-react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { listEntries, createEntry, updateEntry, deleteEntry } from "@/lib/notebook.functions";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { confirmDiscard, useUnsavedChanges } from "@/hooks/use-unsaved-changes";
-import { NOTE_TEMPLATES, templateToPlainText, type NoteTemplate } from "@/lib/note-templates";
+import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
+import { NOTE_TEMPLATES } from "@/lib/note-templates";
+import { PageHeader, PageShell, PremiumEmptyState } from "@/components/ui/premium";
 
 export const Route = createFileRoute("/_authenticated/playbook")({
   head: () => ({
@@ -45,8 +46,14 @@ function PlaybookPage() {
   const [tab, setTab] = useState<Tab>("notes");
 
   return (
-    <div className="px-6 py-8 md:px-10 md:py-10">
-      <div>
+    <PageShell>
+      <PageHeader
+        icon={BookOpen}
+        eyebrow="Process"
+        title="Playbook"
+        description="Your personal rules, notes, templates, and mindset space for quieter review."
+      />
+      <div className="hidden">
         <motion.h1
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
@@ -89,7 +96,7 @@ function PlaybookPage() {
         {tab === "templates" && <TemplatesTab />}
         {tab === "meditation" && <MeditationTab />}
       </div>
-    </div>
+    </PageShell>
   );
 }
 
@@ -143,7 +150,13 @@ function NotesTab() {
       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr]">
         <aside className="glow-card rounded-2xl p-2">
           {entries.length === 0 ? (
-            <div className="p-8 text-center text-sm text-muted-foreground">No notes yet. Create your first one.</div>
+            <PremiumEmptyState
+              icon={NotebookPen}
+              title="No notes yet"
+              description="Create your first setup note, lesson, or review entry."
+              compact
+              className="m-2"
+            />
           ) : (
             <ul className="space-y-1">
               {entries.map((e) => (
@@ -215,14 +228,21 @@ function NoteEditor({
   const [tagsText, setTagsText] = useState((entry.tags ?? []).join(", "));
   const [noteType, setNoteType] = useState<NoteType>((entry.note_type ?? "general") as NoteType);
   const [saving, setSaving] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
   const dirty = title !== (entry.title ?? "") || content !== (entry.content ?? "") || tagsText !== (entry.tags ?? []).join(", ") || noteType !== (entry.note_type ?? "general");
   useUnsavedChanges(dirty);
+  const resetDraft = () => {
+    setTitle(entry.title ?? "");
+    setContent(entry.content ?? "");
+    setTagsText((entry.tags ?? []).join(", "));
+    setNoteType((entry.note_type ?? "general") as NoteType);
+  };
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+      transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
       className="glow-card rounded-2xl p-5"
     >
       <input
@@ -269,11 +289,11 @@ function NoteEditor({
         <div className="flex items-center gap-2">
           <button
             onClick={() => {
-              if (!confirmDiscard(dirty)) return;
-              setTitle(entry.title ?? "");
-              setContent(entry.content ?? "");
-              setTagsText((entry.tags ?? []).join(", "));
-              setNoteType((entry.note_type ?? "general") as NoteType);
+              if (dirty) {
+                setConfirmReset(true);
+                return;
+              }
+              resetDraft();
             }}
             className="inline-flex items-center gap-2 rounded-xl bg-white/[0.04] px-3.5 py-2 text-xs font-medium text-muted-foreground ring-1 ring-white/[0.06] transition-all duration-200 hover:text-foreground"
           >
@@ -296,6 +316,18 @@ function NoteEditor({
           </button>
         </div>
       </div>
+      <ConfirmDialog
+        open={confirmReset}
+        onOpenChange={setConfirmReset}
+        title="Discard note edits?"
+        description="Your unsaved Playbook changes will be reset to the last saved version."
+        confirmLabel="Discard edits"
+        destructive
+        onConfirm={() => {
+          resetDraft();
+          setConfirmReset(false);
+        }}
+      />
     </motion.div>
   );
 }
@@ -303,20 +335,8 @@ function NoteEditor({
 /* ============ Templates tab ============ */
 
 function TemplatesTab() {
-  const qc = useQueryClient();
-  const create = useServerFn(createEntry);
   const [selectedId, setSelectedId] = useState<string>(NOTE_TEMPLATES[0]?.id ?? "");
   const selected = NOTE_TEMPLATES.find((t) => t.id === selectedId) ?? NOTE_TEMPLATES[0];
-
-  const dupM = useMutation({
-    mutationFn: (t: NoteTemplate) =>
-      create({ data: { title: t.title, content: templateToPlainText(t), tags: t.tags, note_type: t.note_type } }),
-    onSuccess: (_row, t) => {
-      qc.invalidateQueries({ queryKey: ["notebook"] });
-      toast.success(`Duplicated "${t.title}" into your notes`);
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr]">
@@ -333,7 +353,7 @@ function TemplatesTab() {
               >
                 <BookOpen className={cn("mt-0.5 h-4 w-4 shrink-0", selected?.id === t.id ? "text-primary" : "text-muted-foreground/60")} />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium">{t.title}</div>
+                  <div className="overflow-hidden text-sm font-medium leading-snug [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">{t.title}</div>
                 </div>
               </button>
             </li>
@@ -346,7 +366,7 @@ function TemplatesTab() {
           key={selected.id}
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+          transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
           className="glow-card rounded-2xl p-6 md:p-8"
         >
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -356,16 +376,9 @@ function TemplatesTab() {
               </div>
               <h2 className="mt-1 text-2xl font-bold tracking-tight">{selected.title}</h2>
             </div>
-            <button
-              onClick={() => dupM.mutate(selected)}
-              disabled={dupM.isPending}
-              className="inline-flex items-center gap-2 rounded-xl bg-primary px-3.5 py-2 text-xs font-semibold text-primary-foreground shadow-[var(--shadow-glow)] transition-all duration-200 hover:brightness-110 disabled:opacity-50"
-            >
-              <Copy className="h-3.5 w-3.5" /> Duplicate to my notes
-            </button>
           </div>
 
-          <article className="mt-6 max-w-2xl space-y-5 text-[15px] leading-[1.75] text-foreground/85">
+          <article className="mt-6 max-w-3xl space-y-5 rounded-2xl bg-white/[0.025] p-5 text-[15px] leading-[1.75] text-foreground/85 ring-1 ring-white/[0.04]">
             {selected.blocks.map((b, i) => {
               if (b.type === "heading") {
                 return (
@@ -390,9 +403,6 @@ function TemplatesTab() {
             })}
           </article>
 
-          <p className="mt-8 text-xs text-muted-foreground">
-            Built-in templates are read-only. Duplicate one to edit your own copy.
-          </p>
         </motion.div>
       ) : null}
     </div>
@@ -462,7 +472,7 @@ function MeditationTab() {
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+        transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
         className="glow-card rounded-2xl p-8"
       >
         <h2 className="text-xl font-bold tracking-tight">Daily Meditation</h2>
@@ -514,7 +524,7 @@ function MeditationTab() {
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+        transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
         className="glow-card rounded-2xl p-6"
       >
         <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Daily streak</div>

@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { motion, AnimatePresence } from "framer-motion";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { MouseEvent } from "react";
 import {
   Search, Plus, X, FolderPlus, LineChart,
@@ -16,6 +16,7 @@ import {
 import { rrNum, formatTradeWhen, type DbTrade } from "@/lib/trade-mappers";
 import { TradeFormModal, GRADES, type Grade, type Taxonomy } from "@/components/trades/trade-form-modal";
 import { TradeReviewModal } from "@/components/trades/trade-review-modal";
+import { PageHeader, PageShell, PremiumEmptyState } from "@/components/ui/premium";
 
 
 export const Route = createFileRoute("/_authenticated/trades")({
@@ -48,7 +49,10 @@ type Row = {
   emotionBefore: string;
   emotionDuring: string;
   emotionAfter: string;
+  reviewed: boolean;
 };
+
+const TRADE_JOURNAL_GRID = "grid-cols-[160px_72px_minmax(190px,1fr)_108px_108px_154px]";
 
 function dbToRow(t: DbTrade, num: number): Row {
   const res = t.result === "win" ? "WIN" : t.result === "loss" ? "LOSS" : t.result === "breakeven" ? "BE" : "BE";
@@ -73,7 +77,35 @@ function dbToRow(t: DbTrade, num: number): Row {
     emotionBefore: t.emotion_before ?? "",
     emotionDuring: t.emotion_during ?? "",
     emotionAfter: t.emotion_after ?? "",
+    reviewed: hasMeaningfulReview(t),
   };
+}
+
+function hasText(value: string | null | undefined): boolean {
+  return !!value?.trim();
+}
+
+function hasItems(value: string[] | null | undefined): boolean {
+  return Array.isArray(value) && value.some((item) => item.trim().length > 0);
+}
+
+function hasMeaningfulReview(t: DbTrade): boolean {
+  return (
+    hasText(t.reasoning) ||
+    hasText(t.lessons_learned) ||
+    hasText(t.notes) ||
+    hasText(t.grade) ||
+    hasText(t.killzone) ||
+    hasText(t.emotion_before) ||
+    hasText(t.emotion_during) ||
+    hasText(t.emotion_after) ||
+    hasItems(t.categories) ||
+    hasItems(t.subcategories) ||
+    hasItems(t.mistake_tags) ||
+    hasItems(t.emotion_tags) ||
+    t.in_killzone === true ||
+    ((t.trade_screenshots?.length ?? 0) > 0)
+  );
 }
 
 function TradesPage() {
@@ -121,9 +153,10 @@ function TradesPage() {
   const [newOpen, setNewOpen] = useState(false);
   const [catManagerOpen, setCatManagerOpen] = useState(false);
   const [activeCategory, setActiveCategory] = useState<string | "ALL">("ALL");
-  const [detail, setDetail] = useState<Row | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<Row | null>(null);
+  const [detail, setDetail] = useState<Pick<Row, "id" | "num"> | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Pick<Row, "id" | "num"> | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [visibleCount, setVisibleCount] = useState(10);
   
   const editingDb = useMemo(
     () => (editingId ? dbRows.find((t) => t.id === editingId) ?? null : null),
@@ -145,6 +178,12 @@ function TradesPage() {
       ),
     [q, filter, activeCategory, rows],
   );
+  const visibleRows = visible.slice(0, visibleCount);
+  const hasMoreRows = visible.length > visibleRows.length;
+
+  useEffect(() => {
+    setVisibleCount(10);
+  }, [q, filter, activeCategory, paperFilter]);
 
   const removeM = useMutation({
     mutationFn: (id: string) => del({ data: { id } }),
@@ -153,40 +192,35 @@ function TradesPage() {
   });
 
   return (
-    <div className="px-6 py-8 md:px-10 md:py-10">
-      {/* Header */}
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <motion.h1 initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }} className="text-3xl font-bold tracking-tight md:text-4xl">
-            My Trades
-          </motion.h1>
-          
-        </div>
-        <div className="flex items-center gap-2">
+    <PageShell>
+      <PageHeader
+        icon={LineChart}
+        eyebrow="Journal"
+        title="My Trades"
+        description="Browse, filter, and review your logged trades without losing table clarity."
+        actions={
+          <>
           <button onClick={() => setCatManagerOpen(true)} className="inline-flex items-center gap-2 rounded-xl bg-white/[0.04] px-3.5 py-2.5 text-sm font-medium text-muted-foreground ring-1 ring-white/[0.06] transition-all duration-200 hover:text-foreground hover:ring-white/[0.1]">
             <FolderPlus className="h-4 w-4" /> Manage categories
           </button>
-          <button onClick={() => setNewOpen(true)} className="group inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] transition-all duration-300 hover:shadow-[var(--shadow-glow-lg)] hover:brightness-110">
-            <Plus className="h-4 w-4 transition-transform duration-300 group-hover:rotate-90" /> New trade
+          <button onClick={() => setNewOpen(true)} className="group inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] transition-all duration-200 hover:shadow-[var(--shadow-glow-lg)] hover:brightness-110">
+            <Plus className="h-4 w-4 transition-transform duration-200 group-hover:rotate-90" /> New trade
           </button>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       {/* Category pills */}
+      {categories.length > 0 && (
       <div className="mt-6 flex flex-wrap items-center gap-2">
-        <button onClick={() => setActiveCategory("ALL")} className={cn("rounded-full px-3.5 py-1.5 text-xs font-semibold transition-all duration-200 ring-1 ring-white/[0.06]", activeCategory === "ALL" ? "bg-primary/10 text-primary ring-primary/20" : "bg-white/[0.03] text-muted-foreground hover:text-foreground hover:ring-white/[0.1]")}>
-          All categories
-        </button>
         {categories.map((c) => (
-          <button key={c} onClick={() => setActiveCategory(c)} className={cn("rounded-full px-3.5 py-1.5 text-xs font-semibold transition-all duration-200 ring-1 ring-white/[0.06]", activeCategory === c ? "bg-primary/10 text-primary ring-primary/20" : "bg-white/[0.03] text-muted-foreground hover:text-foreground hover:ring-white/[0.1]")}>
+          <button key={c} onClick={() => setActiveCategory(activeCategory === c ? "ALL" : c)} className={cn("rounded-full px-3.5 py-1.5 text-xs font-semibold transition-all duration-200 ring-1 ring-white/[0.06]", activeCategory === c ? "bg-primary/10 text-primary ring-primary/20" : "bg-white/[0.03] text-muted-foreground hover:text-foreground hover:ring-white/[0.1]")}>
             {c}
             <span className="ml-1.5 text-[10px] text-muted-foreground/60">{rows.filter((r) => r.category === c).length}</span>
           </button>
         ))}
-        <button onClick={() => setCatManagerOpen(true)} className="inline-flex items-center gap-1.5 rounded-full bg-white/[0.03] px-3.5 py-1.5 text-xs font-medium text-muted-foreground ring-1 ring-white/[0.06] ring-dashed transition-all duration-200 hover:text-foreground hover:ring-white/[0.1]">
-          <FolderPlus className="h-3.5 w-3.5" /> New category
-        </button>
       </div>
+      )}
 
       {/* Search + filter bar */}
       <div className="glow-card mt-4 flex flex-wrap items-center gap-3 rounded-2xl p-3">
@@ -210,49 +244,79 @@ function TradesPage() {
         </div>
       </div>
 
-      {/* Trades table */}
+      {/* Trades journal list */}
       <div className="glow-card mt-4 overflow-hidden rounded-2xl">
         <div className="overflow-x-auto">
-          <div className="min-w-[700px]">
-            <div className="grid grid-cols-[170px_96px_minmax(180px,1fr)_132px_132px] items-center border-b border-white/[0.06] px-6 py-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+          <div className="w-full min-w-[760px]">
+            <div className={cn("grid items-center border-b border-white/[0.06] px-4 py-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground", TRADE_JOURNAL_GRID)}>
               <div className="min-w-0">DATE</div>
               <div className="min-w-0 text-center">TRADE #</div>
-              <div className="min-w-0 px-4">INSTRUMENT</div>
-              <div className="min-w-0 px-4 text-right">PLANNED RR</div>
-              <div className="min-w-0 text-right">ACHIEVED R</div>
+              <div className="min-w-0 pl-2">INSTRUMENT</div>
+              <div className="min-w-0 text-center">PLANNED RR</div>
+              <div className="min-w-0 text-center">ACHIEVED R</div>
+              <div className="min-w-0 text-right">REVIEW</div>
             </div>
-            {visible.map((r, i) => {
+            {visibleRows.map((r, i) => {
               const positive = r.hasRR && r.rr > 0;
               const negative = r.hasRR && r.rr < 0;
               const breakeven = r.hasRR && r.rr === 0;
               return (
-                <motion.button key={r.id} initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.02 * i, duration: 0.3, ease: [0.16, 1, 0.3, 1] }} onClick={() => setDetail(r)} className="grid w-full grid-cols-[170px_96px_minmax(180px,1fr)_132px_132px] items-center border-b border-white/[0.04] px-6 py-4 text-left transition-all duration-200 hover:row-glow focus:outline-none focus-visible:bg-white/[0.03] last:border-b-0">
+                <motion.button
+                  key={r.id}
+                  initial={{ opacity: 0, x: -6 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.02 * i, duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+                  onClick={() => setDetail(r)}
+                  className={cn("grid w-full items-center border-b border-white/[0.04] px-4 py-3 text-left transition-colors duration-200 hover:bg-white/[0.025] focus:outline-none focus-visible:bg-white/[0.035] last:border-b-0", TRADE_JOURNAL_GRID)}
+                >
                   <div className="min-w-0 whitespace-nowrap text-xs text-muted-foreground tabular-nums">{r.date || "—"}</div>
                   <div className="min-w-0 text-center text-xs font-mono text-muted-foreground tabular-nums">#{r.num}</div>
-                  <div className="min-w-0 truncate px-4 text-sm font-semibold">{r.sym || "—"}</div>
-                  <div className="min-w-0 px-4 text-right text-xs font-semibold tabular-nums text-muted-foreground">{r.plannedRR || "—"}</div>
-                  <div className={cn("min-w-0 text-right text-sm font-bold tabular-nums whitespace-nowrap", positive && "text-success", negative && "text-destructive", (!r.hasRR || breakeven) && "text-muted-foreground")}>
+                  <div className="min-w-0 truncate pl-2 text-sm font-bold">{r.sym || "—"}</div>
+                  <div className="min-w-0 text-center text-xs font-semibold tabular-nums text-muted-foreground">{r.plannedRR || "—"}</div>
+                  <div className={cn("min-w-0 text-center text-sm font-bold tabular-nums whitespace-nowrap", positive && "text-success", negative && "text-destructive", (!r.hasRR || breakeven) && "text-muted-foreground")}>
                     {r.hasRR ? `${positive ? "+" : ""}${Math.abs(r.rr).toFixed(2)}R` : "—"}
+                  </div>
+                  <div className="flex min-w-0 justify-end">
+                    <span className={cn(
+                      "inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ring-1",
+                      r.reviewed
+                        ? "bg-primary/12 text-primary ring-primary/25"
+                        : "bg-warning/10 text-warning ring-warning/25",
+                    )}>
+                      {r.reviewed ? "Reviewed" : "Review incomplete"}
+                    </span>
                   </div>
                 </motion.button>
               );
             })}
 
             {visible.length === 0 && rows.length === 0 && (
-              <div className="flex flex-col items-center justify-center gap-5 px-5 py-20 text-center">
-                <div className="grid h-14 w-14 place-items-center rounded-2xl bg-primary/10 ring-1 ring-primary/20">
-                  <LineChart className="h-6 w-6 text-primary" />
-                </div>
-                <h3 className="text-base font-semibold">No trades logged yet</h3>
-                <button onClick={() => setNewOpen(true)} className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] transition-all duration-200 hover:brightness-110">
-                  <Plus className="h-4 w-4" /> Log First Trade
-                </button>
-              </div>
+              <PremiumEmptyState
+                icon={LineChart}
+                title="No trades logged yet"
+                description="Start with a quick capture. You can complete the deeper review afterward."
+                className="m-4 py-16"
+                action={
+                  <button onClick={() => setNewOpen(true)} className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] transition-all duration-200 hover:brightness-110">
+                    <Plus className="h-4 w-4" /> Log first trade
+                  </button>
+                }
+              />
             )}
             {visible.length === 0 && rows.length > 0 && (
-              <div className="flex flex-col items-center justify-center gap-2 px-5 py-12 text-center">
-                <p className="text-sm text-muted-foreground">No trades match your filters.</p>
+              <div className="m-4 flex flex-col items-center justify-center gap-2 rounded-2xl bg-white/[0.02] px-5 py-12 text-center ring-1 ring-white/[0.04]">
+                <p className="text-sm font-medium text-foreground">No trades match your filters.</p>
                 <button onClick={() => { setQ(""); setFilter("ALL"); setActiveCategory("ALL"); }} className="text-xs font-medium text-primary hover:underline">Clear filters</button>
+              </div>
+            )}
+            {hasMoreRows && (
+              <div className="border-t border-white/[0.04] px-4 py-4 text-center">
+                <button
+                  onClick={() => setVisibleCount((count) => count + 10)}
+                  className="rounded-xl bg-white/[0.04] px-4 py-2 text-xs font-semibold text-muted-foreground ring-1 ring-white/[0.06] transition-all duration-200 hover:text-foreground hover:ring-white/[0.1]"
+                >
+                  Show more
+                </button>
               </div>
             )}
           </div>
@@ -267,6 +331,9 @@ function TradesPage() {
             onClose={() => setNewOpen(false)}
             onSaved={() => {
               qc.invalidateQueries({ queryKey: ["trades"] });
+            }}
+            onReviewNow={(savedId) => {
+              setDetail({ id: savedId, num: rows.length + 1 });
             }}
           />
         )}
@@ -308,7 +375,7 @@ function TradesPage() {
         loading={removeM.isPending}
         onConfirm={() => { if (confirmDelete) { removeM.mutate(confirmDelete.id); setConfirmDelete(null); } }}
       />
-    </div>
+    </PageShell>
   );
 }
 
@@ -318,21 +385,12 @@ function CategoryManager({
   taxonomy: Taxonomy; base: Taxonomy; onClose: () => void; onChange: (t: Taxonomy) => void;
 }) {
   const [newCat, setNewCat] = useState("");
-  const [newSub, setNewSub] = useState<Record<string, string>>({});
 
   const addCategory = () => {
     const n = newCat.trim();
     if (!n || taxonomy[n]) return;
     onChange({ ...base, [n]: base[n] ?? [] });
     setNewCat("");
-  };
-  const addSub = (cat: string) => {
-    const n = (newSub[cat] ?? "").trim();
-    if (!n) return;
-    const subs = new Set(base[cat] ?? []);
-    subs.add(n);
-    onChange({ ...base, [cat]: Array.from(subs) });
-    setNewSub({ ...newSub, [cat]: "" });
   };
 
   const inputClass = "flex-1 rounded-lg bg-white/[0.04] px-2.5 py-2 text-xs ring-1 ring-white/[0.06] transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary/40";
@@ -345,8 +403,6 @@ function CategoryManager({
           <button onClick={onClose} aria-label="Close category manager" className="rounded-lg p-1.5 text-muted-foreground transition-colors duration-200 hover:bg-white/[0.06] hover:text-foreground"><X className="h-4 w-4" /></button>
 
         </div>
-        <p className="mt-2 text-xs text-muted-foreground">Categories shown here include those derived from your existing trades plus any new ones you add for use when logging.</p>
-
         <div className="mt-5 flex gap-2">
           <input value={newCat} onChange={(e) => setNewCat(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addCategory()} placeholder="New category name" className={inputClass} />
           <button onClick={addCategory} className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] transition-all duration-200 hover:brightness-110">Add</button>
@@ -361,22 +417,9 @@ function CategoryManager({
               <div className="flex items-center gap-2">
                 <div className="flex-1 text-sm font-semibold text-primary">{c}</div>
               </div>
-              <div className="mt-2.5 flex flex-wrap gap-1.5">
-                {(taxonomy[c] ?? []).map((s) => (
-                  <div key={s} className="inline-flex items-center gap-1 rounded-full bg-white/[0.04] px-2.5 py-0.5 text-[11px] ring-1 ring-white/[0.06]">
-                    <span className="text-muted-foreground">{s}</span>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-2.5 flex gap-2">
-                <input value={newSub[c] ?? ""} onChange={(e) => setNewSub({ ...newSub, [c]: e.target.value })} onKeyDown={(e) => e.key === "Enter" && addSub(c)} placeholder="New sub-category" className={inputClass} />
-                <button onClick={() => addSub(c)} className="rounded-lg bg-white/[0.06] px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors duration-200 hover:text-foreground">Add</button>
-              </div>
             </div>
           ))}
         </div>
-
-        <p className="mt-4 text-[11px] text-muted-foreground/60">Tip: removing categories isn't supported here — the list mirrors what's used by your trades plus any you add. Edit a trade's categories to remove unused ones.</p>
       </motion.div>
     </motion.div>
   );

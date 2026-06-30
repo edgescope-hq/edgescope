@@ -27,6 +27,7 @@ import { getTradingPreferences, type TradingPreferences } from "@/lib/trading-pr
 import { listTradingAccounts, type TradingAccount } from "@/lib/trading-accounts.functions";
 import { useISTGreeting } from "@/lib/use-ist-greeting";
 import { AnimatedNumber } from "@/components/dashboard/animated-number";
+import { PageHeader, PageShell, PremiumEmptyState } from "@/components/ui/premium";
 import { cn } from "@/lib/utils";
 import {
   overview, categoryStats, equityCurve, sessionStats, fmtPct,
@@ -69,6 +70,8 @@ const card = {
   animate: { opacity: 1, y: 0 },
 };
 
+const motionTransition = { duration: 0.22, ease: [0.16, 1, 0.3, 1] as const };
+
 function StatCard({
   icon: Icon, label, value, decimals = 0, suffix = "", tone, sub,
 }: {
@@ -78,7 +81,7 @@ function StatCard({
   return (
     <motion.div
       {...card}
-      transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+      transition={motionTransition}
       className="glow-card interactive-card group relative overflow-hidden rounded-2xl p-5 hover:border-white/[0.1]"
     >
       <div className="flex items-start gap-4">
@@ -255,29 +258,22 @@ export function DashboardView() {
   };
 
   return (
-    <div className="px-6 py-8 md:px-10 md:py-10">
-      {/* Header */}
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <motion.h1
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-            className="text-3xl font-bold tracking-tight md:text-4xl"
+    <PageShell>
+      <PageHeader
+        eyebrow="Dashboard"
+        title={`${greeting}, ${displayName}`}
+        description="Your trading overview, journal gaps, account health, and review momentum."
+        actions={
+          <button
+            onClick={() => setNewOpen(true)}
+            className="group relative inline-flex items-center gap-2 rounded-xl bg-gradient-to-br from-primary to-primary/85 px-5 py-2.5 text-sm font-semibold text-primary-foreground ring-1 ring-primary/40 shadow-[0_0_0_1px_oklch(0.68_0.23_295/0.35),0_8px_28px_-6px_oklch(0.68_0.23_295/0.55),0_0_44px_-10px_oklch(0.68_0.23_295/0.65)] transition-all duration-200 hover:-translate-y-px hover:brightness-110 hover:shadow-[0_0_0_1px_oklch(0.68_0.23_295/0.5),0_12px_36px_-6px_oklch(0.68_0.23_295/0.7),0_0_64px_-12px_oklch(0.68_0.23_295/0.85)]"
           >
-            {greeting}, {displayName} <span aria-hidden>👋</span>
-          </motion.h1>
-          <p className="mt-1.5 text-sm text-muted-foreground">Here's your trading overview.</p>
-        </div>
-        <button
-          onClick={() => setNewOpen(true)}
-          className="group relative inline-flex items-center gap-2 rounded-xl bg-gradient-to-br from-primary to-primary/85 px-5 py-2.5 text-sm font-semibold text-primary-foreground ring-1 ring-primary/40 shadow-[0_0_0_1px_oklch(0.68_0.23_295/0.35),0_8px_28px_-6px_oklch(0.68_0.23_295/0.55),0_0_44px_-10px_oklch(0.68_0.23_295/0.65)] transition-all duration-300 hover:brightness-110 hover:shadow-[0_0_0_1px_oklch(0.68_0.23_295/0.5),0_12px_36px_-6px_oklch(0.68_0.23_295/0.7),0_0_64px_-12px_oklch(0.68_0.23_295/0.85)] hover:-translate-y-px"
-        >
-          <span aria-hidden className="pointer-events-none absolute -inset-px rounded-xl bg-gradient-to-br from-white/15 to-transparent opacity-60 mix-blend-overlay" />
-          <Plus className="relative h-4 w-4 transition-transform duration-300 group-hover:rotate-90" />
-          <span className="relative">New trade</span>
-        </button>
-      </div>
+            <span aria-hidden className="pointer-events-none absolute -inset-px rounded-xl bg-gradient-to-br from-white/15 to-transparent opacity-60 mix-blend-overlay" />
+            <Plus className="relative h-4 w-4 transition-transform duration-200 group-hover:rotate-90" />
+            <span className="relative">New trade</span>
+          </button>
+        }
+      />
 
       <AnimatePresence>
         {welcomeOpen && (
@@ -303,7 +299,7 @@ export function DashboardView() {
                   { step: "2", text: "Log your first trade" },
                   { step: "3", text: "Review your execution" },
                   { step: "4", text: "Track emotions and mistakes" },
-                  { step: "5", text: "Use Analytics and AI Discovery as your journal grows" },
+                  { step: "5", text: "Use Analytics and Scope as your journal grows" },
                 ].map((item) => (
                   <div key={item.step} className="flex items-center gap-3 rounded-xl bg-white/[0.045] px-4 py-3 ring-1 ring-white/[0.07]">
                     <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-primary/15 text-xs font-bold text-primary ring-1 ring-primary/20">{item.step}</span>
@@ -457,14 +453,19 @@ export function DashboardView() {
 
       {/* Recent trades + Monthly performance */}
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <motion.div {...card} transition={{ delay: 0.1, duration: 0.5, ease: [0.16, 1, 0.3, 1] }} className="glow-card rounded-2xl p-5">
+        <motion.div {...card} transition={{ ...motionTransition, delay: 0.04 }} className="glow-card rounded-2xl p-5">
           <div className="flex items-center justify-between">
             <h3 className="flex items-center gap-2 text-sm font-semibold"><Clock className="h-4 w-4 text-primary" /> Recent trades</h3>
             <Link to="/trades" className="text-xs font-medium text-primary transition-colors duration-200 hover:text-primary-glow">View all →</Link>
           </div>
           <div className="mt-4 space-y-1">
             {recent.length === 0 && (
-              <div className="py-10 text-center text-sm text-muted-foreground">No trades logged yet.</div>
+              <PremiumEmptyState
+                icon={Clock}
+                title="No trades logged yet"
+                description="Log your first trade to start building an execution record."
+                compact
+              />
             )}
             {recent.map((t) => {
               const rr = rrNum(t.achieved_rr);
@@ -501,6 +502,9 @@ export function DashboardView() {
       {/* Trading streak */}
       <TradingStreakSection s={streak} />
 
+      {/* Overall Equity Curve */}
+      <OverallEquitySection data={equityAll} />
+
       {/* Trades by setup */}
       <div className="mt-4 grid grid-cols-1 gap-4">
         <div className="glow-card rounded-2xl p-5">
@@ -530,10 +534,7 @@ export function DashboardView() {
           )}
         </div>
       </div>
-
-      {/* Overall Equity Curve */}
-      <OverallEquitySection data={equityAll} />
-    </div>
+    </PageShell>
   );
 }
 
@@ -582,7 +583,7 @@ function MonthlyPerformanceTabbed({
   return (
     <motion.div
       {...card}
-      transition={{ delay: 0.15, duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+      transition={{ ...motionTransition, delay: 0.08 }}
       className="glow-card rounded-2xl p-5"
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -609,7 +610,7 @@ function MonthlyPerformanceTabbed({
 
       <div className="mt-4 h-[260px]">
         {tab === "growth" && (growth.length === 0 ? (
-          <div className="grid h-full place-items-center text-sm text-muted-foreground">No closed trades yet.</div>
+          <PremiumChartEmpty text="No closed trades yet." />
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={growth} margin={{ top: 10, right: 8, left: -8, bottom: 8 }}>
@@ -629,7 +630,7 @@ function MonthlyPerformanceTabbed({
         ))}
 
         {tab === "monthly" && (monthlyPnl.length === 0 ? (
-          <div className="grid h-full place-items-center text-sm text-muted-foreground">No monthly data yet.</div>
+          <PremiumChartEmpty text="No monthly data yet." />
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={monthlyPnl} margin={{ top: 10, right: 8, left: -8, bottom: 8 }}>
@@ -647,7 +648,7 @@ function MonthlyPerformanceTabbed({
         ))}
 
         {tab === "current" && (monthChart.length === 0 ? (
-          <div className="grid h-full place-items-center text-sm text-muted-foreground">No trades this month yet.</div>
+          <PremiumChartEmpty text="No trades this month yet." />
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={monthChart} margin={{ top: 10, right: 8, left: -16, bottom: 8 }}>
@@ -675,7 +676,7 @@ function OverallEquitySection({ data }: { data: { d: string; v: number }[] }) {
   return (
     <motion.div
       {...card}
-      transition={{ delay: 0.2, duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+      transition={{ ...motionTransition, delay: 0.1 }}
       className="mt-4 glow-card rounded-2xl p-5"
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -688,7 +689,7 @@ function OverallEquitySection({ data }: { data: { d: string; v: number }[] }) {
       </div>
       <div className="mt-4 h-[320px]">
         {data.length === 0 ? (
-          <div className="grid h-full place-items-center text-sm text-muted-foreground">No closed trades yet.</div>
+          <PremiumChartEmpty text="No closed trades yet." />
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={data} margin={{ top: 10, right: 8, left: -16, bottom: 8 }}>
@@ -712,6 +713,14 @@ function OverallEquitySection({ data }: { data: { d: string; v: number }[] }) {
         )}
       </div>
     </motion.div>
+  );
+}
+
+function PremiumChartEmpty({ text }: { text: string }) {
+  return (
+    <div className="grid h-full place-items-center rounded-xl bg-white/[0.02] text-sm text-muted-foreground ring-1 ring-white/[0.04]">
+      {text}
+    </div>
   );
 }
 

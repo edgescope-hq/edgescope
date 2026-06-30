@@ -1,22 +1,19 @@
 import { motion } from "framer-motion";
 import { useState } from "react";
 import type { MouseEvent } from "react";
-import { Plus, X, AlertTriangle } from "lucide-react";
+import { X, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { supabase } from "@/integrations/supabase/client";
 import {
   createTrade,
   updateTrade,
-  addScreenshot,
   listTrades,
 } from "@/lib/trades.functions";
 import { SESSIONS } from "@/lib/trade-constants";
 import type { DbTrade } from "@/lib/trade-mappers";
-import { validateScreenshotFile } from "@/lib/file-validation";
-import { confirmDiscard, useUnsavedChanges } from "@/hooks/use-unsaved-changes";
+import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 import { listTradingAccounts } from "@/lib/trading-accounts.functions";
 import { getGuardrails } from "@/lib/guardrails.functions";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -26,6 +23,8 @@ import { EMOTIONS } from "@/lib/emotions";
 export type Grade = "A+" | "A" | "B+" | "B" | "C" | "D";
 export const GRADES: Grade[] = ["A+", "A", "B+", "B", "C", "D"];
 export type Taxonomy = Record<string, string[]>;
+
+const modalTransition = { duration: 0.22, ease: [0.16, 1, 0.3, 1] as const };
 
 /**
  * Quick-capture trade form.
@@ -38,18 +37,19 @@ export function TradeFormModal({
   nextNum,
   onClose,
   onSaved,
+  onReviewNow,
   editing,
 }: {
   taxonomy?: Taxonomy;
   nextNum: number;
   onClose: () => void;
   onSaved: (savedId?: string) => void;
+  onReviewNow?: (savedId: string) => void;
   editing?: DbTrade;
 }) {
   const qc = useQueryClient();
   const create = useServerFn(createTrade);
   const update = useServerFn(updateTrade);
-  const addShot = useServerFn(addScreenshot);
   void taxonomy;
 
   const initSide: "LONG" | "SHORT" = editing?.direction === "short" ? "SHORT" : "LONG";
@@ -77,19 +77,17 @@ export function TradeFormModal({
     ? (editing!.session as string)
     : "";
   const [session, setSession] = useState<string>(initSession);
-  const [shareCommunity, setShareCommunity] = useState<boolean>(!!editing?.is_shared);
   const [emotionTags, setEmotionTags] = useState<string[]>(editing?.emotion_tags ?? []);
   const toggleEmotion = (key: string) => {
     markDirty();
     setEmotionTags((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
   };
 
-
-  const [files, setFiles] = useState<File[]>([]);
-  const [previews, setPreviews] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [attemptedSubmit, setAttemptedSubmit] = useState(false);
+  const [savedTradeId, setSavedTradeId] = useState<string | null>(null);
+  const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
   useUnsavedChanges(dirty);
   const markDirty = () => { if (!dirty) setDirty(true); };
 
@@ -103,7 +101,7 @@ export function TradeFormModal({
     : NaN;
   const plannedRRNum = parseFloat(plannedRR);
 
-  // Only instrument is strictly required. Session and screenshot are optional in Quick Capture.
+  // Only instrument is strictly required. Detailed review fields stay in the review screen.
   const errors: string[] = [];
   if (!sym.trim()) errors.push("Instrument is required.");
   if (Number.isFinite(riskNum) && riskNum < 0) errors.push("Risk amount must be positive.");
@@ -111,7 +109,11 @@ export function TradeFormModal({
   const canSubmit = !saving;
 
   const handleClose = () => {
-    if (confirmDiscard(dirty)) onClose();
+    if (dirty) {
+      setDiscardConfirmOpen(true);
+      return;
+    }
+    onClose();
   };
 
   const saveM = useMutation({
@@ -143,52 +145,29 @@ export function TradeFormModal({
         categories: editing?.categories ?? [],
         subcategories: editing?.subcategories ?? [],
         mistake_tags: editing?.mistake_tags ?? [],
-        is_shared: shareCommunity,
+        is_shared: editing?.is_shared ?? false,
       };
 
       const trade = editing
         ? await update({ data: { id: editing.id, patch: payload } })
         : await create({ data: payload });
 
-      if (files.length && trade?.id) {
-        let hasInvalid = false;
-        for (const f of files) {
-          const errMsg = validateScreenshotFile(f);
-          if (errMsg) {
-            toast.error(`"${f.name}": ${errMsg}`);
-            hasInvalid = true;
-            break;
-          }
-        }
-        if (hasInvalid) return;
-        const { data: u } = await supabase.auth.getUser();
-        const uid = u.user?.id;
-        if (uid) {
-          for (const f of files) {
-            const safe = f.name.replace(/[^a-zA-Z-9._-]/g, "_");
-            const path = `${uid}/${trade.id}/${Date.now()}-${safe}`;
-            const { error: upErr } = await supabase.storage.from("trade-screenshots").upload(path, f, { upsert: false });
-            if (upErr) { toast.error(`Screenshot upload failed: ${upErr.message}`); continue; }
-            try {
-              await addShot({ data: { trade_id: trade.id, storage_path: path, kind: "before" } });
-            } catch (e) {
-              const msg = e instanceof Error ? e.message : String(e);
-              toast.error(`Screenshot record failed: ${msg}`);
-            }
-          }
-        }
-      }
       return trade;
     },
     onSuccess: (trade) => {
       qc.invalidateQueries({ queryKey: ["trades"] });
       qc.invalidateQueries({ queryKey: ["account-stats"] });
       if (editing?.id) qc.invalidateQueries({ queryKey: ["trade", editing.id] });
-      toast.success(editing ? "Trade updated" : "Trade saved");
       setDirty(false);
       const savedId = (trade as { id?: string } | null | undefined)?.id;
-      onSaved(editing ? undefined : savedId);
-      onClose();
+      if (editing) {
+        toast.success("Trade updated");
+        onSaved();
+        onClose();
+        return;
+      }
+      toast.success("Trade logged successfully.");
+      setSavedTradeId(savedId ?? null);
     },
     onError: (e: Error) => {
       toast.error(e.message ?? "Failed to save trade");
@@ -264,9 +243,46 @@ export function TradeFormModal({
   const inputClass = "mt-1.5 w-full rounded-xl bg-white/[0.04] px-3 py-2.5 text-sm ring-1 ring-white/[0.06] transition-all duration-200 placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/40";
   const labelClass = "text-[10px] font-semibold tracking-[0.16em] text-muted-foreground";
 
+  if (!editing && savedTradeId !== null) {
+    const closeSuccess = () => {
+      onSaved(savedTradeId);
+      onClose();
+    };
+    const reviewNow = () => {
+      if (!savedTradeId) return;
+      onSaved(savedTradeId);
+      onReviewNow?.(savedTradeId);
+      onClose();
+    };
+
+    return (
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={closeSuccess} className="fixed inset-0 z-50 grid place-items-center bg-black/55 backdrop-blur-sm p-4">
+        <motion.div initial={{ scale: 0.98, y: 8 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.98, y: 8 }} transition={modalTransition} onClick={(e: MouseEvent) => e.stopPropagation()} className="glow-card w-full max-w-md rounded-2xl p-6">
+          <div className="flex items-start gap-3">
+            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/15 text-primary ring-1 ring-primary/25">
+              <CheckCircle2 className="h-5 w-5" />
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-lg font-bold">Trade logged successfully.</h2>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                Complete the review now to record your reasoning, mistakes, grade, and chart screenshot.
+              </p>
+            </div>
+          </div>
+          <div className="mt-6 flex justify-end gap-2">
+            <button onClick={closeSuccess} className="rounded-xl bg-white/[0.04] px-4 py-2.5 text-sm font-medium text-muted-foreground ring-1 ring-white/[0.06] transition-all duration-200 hover:text-foreground hover:ring-white/[0.1]">Later</button>
+            <button disabled={!savedTradeId} onClick={reviewNow} className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] transition-all duration-200 hover:brightness-110 disabled:opacity-40">
+              Review now
+            </button>
+          </div>
+        </motion.div>
+      </motion.div>
+    );
+  }
+
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={handleClose} className="fixed inset-0 z-50 grid place-items-center bg-black/70 backdrop-blur-md p-4">
-      <motion.div initial={{ scale: 0.96, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.96, y: 10 }} transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }} onClick={(e: MouseEvent) => e.stopPropagation()} className="glow-card w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl p-6">
+      <motion.div initial={{ scale: 0.98, y: 8 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.98, y: 8 }} transition={modalTransition} onClick={(e: MouseEvent) => e.stopPropagation()} className="glow-card w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl p-6 shadow-[var(--shadow-elevated)]">
         <div className="flex items-start justify-between">
           <div>
             <div className="text-[10px] font-semibold tracking-[0.16em] text-primary">QUICK CAPTURE</div>
@@ -373,66 +389,6 @@ export function TradeFormModal({
             </div>
           </div>
 
-          <div>
-            <label className={labelClass}>SCREENSHOT</label>
-            <div className="mt-1.5">
-              <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-white/[0.04] px-3.5 py-2.5 text-sm font-medium text-muted-foreground ring-1 ring-white/[0.06] transition-all duration-200 hover:text-foreground hover:ring-white/[0.1]">
-                <Plus className="h-4 w-4" /> Upload chart
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  className="hidden"
-                  onChange={(e) => {
-                    markDirty();
-                    const picked = Array.from(e.target.files ?? []);
-                    setFiles((prev) => [...prev, ...picked]);
-                    picked.forEach((file) => {
-                      const reader = new FileReader();
-                      reader.onload = () => {
-                        const result = reader.result;
-                        if (typeof result === "string") setPreviews((prev) => [...prev, result]);
-                      };
-                      reader.readAsDataURL(file);
-                    });
-                    e.target.value = "";
-                  }}
-                />
-              </label>
-            </div>
-            {previews.length > 0 && (
-              <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {previews.map((url, idx) => (
-                  <div key={idx} className="group relative overflow-hidden rounded-lg ring-1 ring-white/[0.06]">
-                    <img src={url} alt={`Screenshot ${idx + 1}`} className="h-24 w-full object-cover" />
-                    <button
-                      type="button"
-                      onClick={() => { setPreviews((p) => p.filter((_, i) => i !== idx)); setFiles((p) => p.filter((_, i) => i !== idx)); }}
-                      className="absolute right-1 top-1 grid h-6 w-6 place-items-center rounded-full bg-black/70 text-white opacity-0 ring-1 ring-white/10 transition-all duration-200 group-hover:opacity-100 hover:bg-destructive"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <label className="flex cursor-pointer items-start gap-3 rounded-xl bg-white/[0.025] p-3.5 ring-1 ring-white/[0.04] transition hover:bg-white/[0.04]">
-            <input
-              type="checkbox"
-              checked={shareCommunity}
-              onChange={(e) => { markDirty(); setShareCommunity(e.target.checked); }}
-              className="mt-0.5 h-4 w-4 cursor-pointer accent-primary"
-            />
-            <div className="min-w-0">
-              <div className="text-sm font-semibold">Share with Community</div>
-              <div className="mt-0.5 text-[11px] text-muted-foreground">
-                Members of your groups see the screenshot, instrument, side, result, and reasoning. Risk, P&amp;L, balance, emotions, and notes stay private.
-              </div>
-            </div>
-          </label>
-
           {errors.length > 0 && attemptedSubmit && (
             <div className="rounded-lg bg-warning/[0.06] px-3 py-2 ring-1 ring-warning/20 space-y-1">
               {errors.map((w) => (
@@ -471,6 +427,19 @@ export function TradeFormModal({
           setGuardrailConfirmOpen(false);
           setSaving(true);
           saveM.mutate();
+        }}
+      />
+      <ConfirmDialog
+        open={discardConfirmOpen}
+        onOpenChange={setDiscardConfirmOpen}
+        title="Discard unsaved trade?"
+        description="Your unsaved Quick Capture changes will be lost."
+        confirmLabel="Discard changes"
+        destructive
+        onConfirm={() => {
+          setDirty(false);
+          setDiscardConfirmOpen(false);
+          onClose();
         }}
       />
     </motion.div>

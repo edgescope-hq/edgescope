@@ -6,6 +6,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { updateScreenshotAnnotations } from "@/lib/trades.functions";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 export type AnnotationShape = {
   id: string;
@@ -100,6 +101,7 @@ function AnnotatorCanvas({
   const [shapes, setShapes] = useState<AnnotationShape[]>(initial ?? []);
   const [drawing, setDrawing] = useState<AnnotationShape | null>(null);
   const [textBuf, setTextBuf] = useState<string>("");
+  const [confirmClear, setConfirmClear] = useState(false);
   const svgRef = useRef<SVGSVGElement | null>(null);
 
   useEffect(() => { setShapes(initial ?? []); }, [screenshotId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -143,7 +145,7 @@ function AnnotatorCanvas({
   }
 
   const undo = () => setShapes((s) => s.slice(0, -1));
-  const clear = () => { if (confirm("Clear all annotations?")) setShapes([]); };
+  const clear = () => setConfirmClear(true);
 
   const ToolBtn = ({ t, icon: Icon, lbl }: { t: Tool; icon: typeof MousePointer2; lbl: string }) => (
     <button
@@ -234,6 +236,18 @@ function AnnotatorCanvas({
           {[...shapes, ...(drawing ? [drawing] : [])].map((s) => renderShape(s))}
         </svg>
       </div>
+      <ConfirmDialog
+        open={confirmClear}
+        onOpenChange={setConfirmClear}
+        title="Clear annotations?"
+        description="All annotation marks on this screenshot will be removed from the canvas."
+        confirmLabel="Clear annotations"
+        destructive
+        onConfirm={() => {
+          setShapes([]);
+          setConfirmClear(false);
+        }}
+      />
     </div>
   );
 }

@@ -28,6 +28,7 @@ export type DbTrade = {
   in_killzone: boolean | null;
   account_id?: string | null;
   created_at?: string;
+  trade_screenshots?: { id: string }[] | null;
 };
 
 

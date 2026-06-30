@@ -103,7 +103,8 @@ export const deleteTrade = createServerFn({ method: "POST" })
     if (shots?.length) {
       const paths = shots.map((s) => s.storage_path).filter(Boolean) as string[];
       if (paths.length) {
-        await context.supabase.storage.from("trade-screenshots").remove(paths);
+        const { error: storageError } = await context.supabase.storage.from("trade-screenshots").remove(paths);
+        if (storageError) throw safeError(storageError);
       }
     }
     // Delete the trade (cascades to trade_screenshots DB rows).
@@ -121,7 +122,7 @@ export const listTrades = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { data, error } = await context.supabase
       .from("trades")
-      .select("*")
+      .select("*, trade_screenshots(id)")
       .eq("user_id", context.userId)
       .order("trade_date", { ascending: false })
       .order("created_at", { ascending: false })
@@ -180,6 +181,15 @@ export const addScreenshot = createServerFn({ method: "POST" })
       .maybeSingle();
     if (!trade) throw new Error("Forbidden");
 
+    const { count, error: countError } = await context.supabase
+      .from("trade_screenshots")
+      .select("id", { count: "exact", head: true })
+      .eq("trade_id", data.trade_id)
+      .eq("user_id", context.userId);
+    if (countError) throw safeError(countError);
+    if ((count ?? 0) >= 3) {
+      throw new Error("Each trade can have up to 3 screenshots. Remove one before adding another.");
+    }
 
     const { data: row, error } = await context.supabase
       .from("trade_screenshots")
@@ -208,7 +218,8 @@ export const deleteScreenshot = createServerFn({ method: "POST" })
       .maybeSingle();
     if (!shot) throw new Error("Forbidden");
     if (shot.storage_path) {
-      await context.supabase.storage.from("trade-screenshots").remove([shot.storage_path]);
+      const { error: storageError } = await context.supabase.storage.from("trade-screenshots").remove([shot.storage_path]);
+      if (storageError) throw safeError(storageError);
     }
     const { error } = await context.supabase
       .from("trade_screenshots")
@@ -236,7 +247,7 @@ export const updateScreenshotTimeframe = createServerFn({ method: "POST" })
   .inputValidator((d) =>
     z.object({
       id: z.string().uuid(),
-      timeframe: z.enum(["HTF", "MTF", "LTF", "Other"]).nullable(),
+      timeframe: z.enum(["HTF", "MTF", "LTF"]).nullable(),
     }).parse(d),
   )
   .handler(async ({ data, context }) => {

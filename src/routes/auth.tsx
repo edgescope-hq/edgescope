@@ -40,7 +40,7 @@ function AuthPage() {
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      transition={{ duration: 0.5, ease: easing }}
+      transition={{ duration: 0.22, ease: easing }}
       className="relative min-h-screen bg-transparent"
     >
       <Premium3DBackground scale="auth" />
@@ -48,7 +48,7 @@ function AuthPage() {
       <motion.header
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, ease: easing }}
+        transition={{ duration: 0.22, ease: easing }}
         className="relative z-10 px-6 py-5"
       >
         <Link to="/" className="inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors duration-200 hover:text-foreground">
@@ -60,7 +60,7 @@ function AuthPage() {
         <motion.div
           initial={{ opacity: 0, y: 16, scale: 0.985 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
-          transition={{ duration: 0.55, ease: easing, delay: 0.05 }}
+          transition={{ duration: 0.24, ease: easing, delay: 0.04 }}
           className="w-full max-w-[400px]"
         >
           {/* Logo + heading */}
@@ -68,7 +68,7 @@ function AuthPage() {
             <motion.div
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, ease: easing, delay: 0.1 }}
+              transition={{ duration: 0.22, ease: easing, delay: 0.06 }}
               className="mx-auto mb-5 flex items-center justify-center"
             >
               <img src={logo.url} alt="EdgeScope" className="h-14 w-auto object-contain" />
@@ -99,8 +99,8 @@ function AuthPage() {
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, ease: easing, delay: 0.15 }}
-            className="rounded-2xl border border-white/[0.08] bg-[oklch(0.11_0.018_270/0.78)] p-6 shadow-[0_24px_60px_-20px_oklch(0_0_0/0.7),0_0_40px_-12px_oklch(0.68_0.23_295/0.25)] backdrop-blur-2xl"
+            transition={{ duration: 0.22, ease: easing, delay: 0.08 }}
+            className="rounded-2xl border border-white/[0.08] bg-[oklch(0.11_0.018_270/0.78)] p-6 shadow-[0_24px_60px_-20px_oklch(0_0_0/0.7),0_0_40px_-12px_oklch(0.68_0.23_295/0.25)] ring-1 ring-white/[0.04] backdrop-blur-2xl"
           >
             <AnimatePresence mode="wait">
               <motion.div
@@ -121,7 +121,7 @@ function AuthPage() {
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            transition={{ duration: 0.4, ease: easing, delay: 0.25 }}
+            transition={{ duration: 0.22, ease: easing, delay: 0.1 }}
             className="mt-6 text-center text-sm text-muted-foreground"
           >
             {mode === "signin" && (
