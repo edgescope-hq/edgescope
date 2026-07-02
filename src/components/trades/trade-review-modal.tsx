@@ -15,6 +15,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 type AnnotationShape = unknown;
 import { GRADES, type Grade } from "@/components/trades/trade-form-modal";
 import { rrNum, formatTradeWhen, type DbTrade } from "@/lib/trade-mappers";
+import { sessionLabel } from "@/lib/trade-constants";
 import { EMOTIONS } from "@/lib/emotions";
 
 const DEFAULT_MISTAKE_TAGS = [
@@ -93,7 +94,6 @@ export function TradeReviewModal({
   const [category, setCategory] = useState("");
   const [grade, setGrade] = useState<Grade | "">("");
   const [mistakeTags, setMistakeTags] = useState<string[]>([]);
-  const [emotionTags, setEmotionTags] = useState<string[]>([]);
   const [inKillzone, setInKillzone] = useState(false);
   const [tradeDate, setTradeDate] = useState<string>("");
   const [shareCommunity, setShareCommunity] = useState(false);
@@ -108,7 +108,6 @@ export function TradeReviewModal({
     const g = GRADES.includes((trade.grade ?? "") as Grade) ? (trade.grade as Grade) : "";
     setGrade(g);
     setMistakeTags(trade.mistake_tags ?? []);
-    setEmotionTags(trade.emotion_tags ?? []);
     setInKillzone(trade.in_killzone === true);
     setTradeDate(trade.trade_date ?? "");
     setShareCommunity(!!trade.is_shared);
@@ -143,7 +142,6 @@ export function TradeReviewModal({
             reasoning: reasoning || null,
             grade: grade || null,
             mistake_tags: mistakeTags,
-            emotion_tags: emotionTags,
             in_killzone: inKillzone,
             is_shared: shareCommunity,
             categories: category.trim() ? [category.trim()] : [],
@@ -222,7 +220,9 @@ export function TradeReviewModal({
   const when = formatTradeWhen(trade.trade_date, trade.trade_time);
 
   const toggleMistake = (tag: string) => setMistakeTags((p) => p.includes(tag) ? p.filter((t) => t !== tag) : [...p, tag]);
-  const toggleEmotion = (key: string) => setEmotionTags((p) => p.includes(key) ? p.filter((t) => t !== key) : [...p, key]);
+  const quickCaptureEmotions = (trade.emotion_tags ?? [])
+    .map((key) => EMOTIONS.find((emotion) => emotion.key === key))
+    .filter(Boolean) as typeof EMOTIONS;
   
 
   const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
@@ -256,7 +256,7 @@ export function TradeReviewModal({
           {[
             { label: "SIDE", value: side, className: cn("text-sm font-bold", side === "LONG" ? "text-success" : "text-destructive") },
             { label: "RESULT", value: res, className: cn("text-sm font-bold", res === "WIN" && "text-success", res === "LOSS" && "text-destructive", res === "BE" && "text-info") },
-            { label: "SESSION", value: trade.session ?? "—", className: "text-sm font-semibold" },
+            { label: "SESSION", value: sessionLabel(trade.session), className: "text-sm font-semibold" },
             { label: "REALIZED R", value: trade.achieved_rr != null ? `${positive ? "+" : ""}${r.toFixed(2)}R` : "—", className: cn("text-sm font-bold tabular-nums", positive && "text-success", negative && "text-destructive", !positive && !negative && "text-muted-foreground") },
           ].map((item) => (
             <div key={item.label} className="rounded-xl bg-white/[0.03] p-3 ring-1 ring-white/[0.04]">
@@ -429,33 +429,23 @@ export function TradeReviewModal({
         </div>
 
 
-        {/* Emotions */}
-        <div className="mt-3">
-          <Section title="EMOTIONS">
-            <div className="flex flex-wrap gap-1.5">
-              {EMOTIONS.map((emotion) => {
-                const active = emotionTags.includes(emotion.key);
-                return (
-                  <button
+        {quickCaptureEmotions.length > 0 && (
+          <div className="mt-3">
+            <Section title="QUICK CAPTURE EMOTIONS">
+              <div className="flex flex-wrap gap-1.5">
+                {quickCaptureEmotions.map((emotion) => (
+                  <span
                     key={emotion.key}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => toggleEmotion(emotion.key)}
-                    className={cn(
-                      "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[11px] font-medium ring-1 transition-all duration-200",
-                      active
-                        ? "bg-primary/20 text-foreground shadow-[0_0_18px_hsl(var(--primary)/0.18)] ring-primary/50"
-                        : "bg-white/[0.04] text-muted-foreground ring-white/[0.06] hover:text-foreground",
-                    )}
+                    className="inline-flex items-center gap-1.5 rounded-full bg-white/[0.035] px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground ring-1 ring-white/[0.06]"
                   >
                     <span className="text-sm leading-none">{emotion.emoji}</span>
                     <span>{emotion.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </Section>
-        </div>
+                  </span>
+                ))}
+              </div>
+            </Section>
+          </div>
+        )}
 
 
         {/* Mistakes */}

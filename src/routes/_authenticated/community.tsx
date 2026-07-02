@@ -46,7 +46,7 @@ import {
 } from "@/lib/groups.functions";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { cn } from "@/lib/utils";
-import { PageShell, PremiumEmptyState } from "@/components/ui/premium";
+import { PageHeader, PageShell, PremiumEmptyState } from "@/components/ui/premium";
 
 export const Route = createFileRoute("/_authenticated/community")({
   head: () => ({
@@ -59,11 +59,21 @@ export const Route = createFileRoute("/_authenticated/community")({
   component: CommunityPage,
 });
 
+function roleLabel(role: "owner" | "member") {
+  return role === "owner" ? "Admin" : "Member";
+}
+
 function CommunityPage() {
   const [activeGroup, setActiveGroup] = useState<GroupSummary | null>(null);
 
   return (
     <PageShell>
+      <PageHeader
+        icon={Users}
+        eyebrow="Review circles"
+        title="Community"
+        description="Review trades with a trusted circle. Your journal stays private by default."
+      />
       <Header />
       {activeGroup ? (
         <GroupDetail group={activeGroup} onBack={() => setActiveGroup(null)} />
@@ -99,47 +109,36 @@ function Header() {
   };
 
   return (
-    <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
-      <div>
-        <motion.h1
-          initial={{ opacity: 0, y: 6 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-          className="text-3xl font-bold tracking-tight md:text-4xl"
-        >
-          Community
-        </motion.h1>
-        <p className="mt-1.5 text-sm text-muted-foreground">
-          Review trades with a trusted circle. Your journal stays private by default.
-        </p>
-      </div>
-      <div className="flex items-center gap-3">
-        {profile?.edge_id && (
-          <button
-            onClick={copyEdgeId}
-            className="group flex items-center gap-2 rounded-xl bg-white/[0.04] px-3 py-2 text-xs ring-1 ring-white/[0.06] transition hover:bg-white/[0.07]"
-          >
-            <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-              Your ID
-            </span>
-            <span className="font-mono text-sm font-semibold">{profile.edge_id}</span>
-            <Copy className="h-3.5 w-3.5 text-muted-foreground transition group-hover:text-foreground" />
-          </button>
-        )}
-        <button
-          onClick={() => setShowNotifs(true)}
-          className="relative rounded-xl bg-white/[0.04] p-2.5 ring-1 ring-white/[0.06] transition hover:bg-white/[0.07]"
-          aria-label="Notifications"
-        >
-          <Bell className="h-4 w-4" />
-          {unread > 0 && (
-            <span className="absolute -right-1 -top-1 grid h-4 min-w-[16px] place-items-center rounded-full bg-primary px-1 text-[9px] font-bold text-primary-foreground">
-              {unread}
-            </span>
+    <div className="mb-6 space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          {profile?.edge_id && (
+            <button
+              onClick={copyEdgeId}
+              className="group flex items-center gap-2 rounded-xl bg-white/[0.04] px-3 py-2 text-xs ring-1 ring-white/[0.06] transition hover:bg-white/[0.07]"
+            >
+              <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                Your ID
+              </span>
+              <span className="font-mono text-sm font-semibold">{profile.edge_id}</span>
+              <Copy className="h-3.5 w-3.5 text-muted-foreground transition group-hover:text-foreground" />
+            </button>
           )}
-        </button>
+          <button
+            onClick={() => setShowNotifs(true)}
+            className="relative rounded-xl bg-white/[0.04] p-2.5 ring-1 ring-white/[0.06] transition hover:bg-white/[0.07]"
+            aria-label="Notifications"
+          >
+            <Bell className="h-4 w-4" />
+            {unread > 0 && (
+              <span className="absolute -right-1 -top-1 grid h-4 min-w-[16px] place-items-center rounded-full bg-primary px-1 text-[9px] font-bold text-primary-foreground">
+                {unread}
+              </span>
+            )}
+          </button>
+        </div>
+        <InvitationsBar />
       </div>
-      <InvitationsBar />
       <AnimatePresence>
         {showNotifs && <NotificationsPanel onClose={() => setShowNotifs(false)} />}
       </AnimatePresence>
@@ -157,8 +156,7 @@ function InvitationsBar() {
   });
   const respondFn = useServerFn(respondInvitation);
   const respond = useMutation({
-    mutationFn: (vars: { id: string; accept: boolean }) =>
-      respondFn({ data: vars }),
+    mutationFn: (vars: { id: string; accept: boolean }) => respondFn({ data: vars }),
     onSuccess: (_d, vars) => {
       toast.success(vars.accept ? "Joined group" : "Invitation declined");
       qc.invalidateQueries({ queryKey: ["my-invitations"] });
@@ -184,7 +182,8 @@ function InvitationsBar() {
               <div className="min-w-0 text-sm">
                 <div className="font-semibold">{i.group_name}</div>
                 <div className="text-[11px] text-muted-foreground">
-                  from <span className="font-mono text-foreground/80">{i.inviter_edge_id}</span> · {i.inviter_display}
+                  from <span className="font-mono text-foreground/80">{i.inviter_edge_id}</span> ·{" "}
+                  {i.inviter_display}
                 </div>
               </div>
               <div className="flex gap-2">
@@ -282,17 +281,39 @@ function NotificationsPanel({ onClose }: { onClose: () => void }) {
   );
 }
 
-function NotificationText({ n }: { n: { type: string; payload: Record<string, string | number | boolean | null> } }) {
+function NotificationText({
+  n,
+}: {
+  n: { type: string; payload: Record<string, string | number | boolean | null> };
+}) {
   const p = n.payload;
   switch (n.type) {
     case "invite_received":
-      return <>You were invited to <b>{String(p.group_name ?? "a group")}</b>.</>;
+      return (
+        <>
+          You were invited to <b>{String(p.group_name ?? "a group")}</b>.
+        </>
+      );
     case "invite_accepted":
-      return <><span className="font-mono">{String(p.invitee_edge_id ?? "")}</span> joined your group.</>;
+      return (
+        <>
+          <span className="font-mono">{String(p.invitee_edge_id ?? "")}</span> joined your group.
+        </>
+      );
     case "trade_shared":
-      return <><span className="font-mono">{String(p.trader_edge_id ?? "")}</span> shared a trade on <b>{String(p.instrument ?? "")}</b>.</>;
+      return (
+        <>
+          <span className="font-mono">{String(p.trader_edge_id ?? "")}</span> shared a trade on{" "}
+          <b>{String(p.instrument ?? "")}</b>.
+        </>
+      );
     case "comment_added":
-      return <><span className="font-mono">{String(p.author_edge_id ?? "")}</span> commented on your <b>{String(p.instrument ?? "")}</b> trade.</>;
+      return (
+        <>
+          <span className="font-mono">{String(p.author_edge_id ?? "")}</span> commented on your{" "}
+          <b>{String(p.instrument ?? "")}</b> trade.
+        </>
+      );
     default:
       return <>{n.type}</>;
   }
@@ -366,7 +387,7 @@ function GroupsList({ onOpen }: { onOpen: (g: GroupSummary) => void }) {
                       : "bg-white/[0.04] text-muted-foreground ring-white/[0.08]",
                   )}
                 >
-                  {g.role}
+                  {roleLabel(g.role)}
                 </span>
                 <span className="text-[11px] text-muted-foreground">
                   {g.member_count} member{g.member_count === 1 ? "" : "s"}
@@ -398,6 +419,7 @@ function GroupsList({ onOpen }: { onOpen: (g: GroupSummary) => void }) {
                 <input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g. Weekly trade review"
                   maxLength={60}
                   className="mt-1.5 w-full rounded-xl bg-white/[0.04] px-3 py-2.5 text-sm ring-1 ring-white/[0.06] focus:outline-none focus:ring-2 focus:ring-primary/40"
                 />
@@ -495,7 +517,9 @@ function GroupDetail({ group, onBack }: { group: GroupSummary; onBack: () => voi
               onClick={() => setTab(t)}
               className={cn(
                 "rounded-lg px-3 py-1.5 text-xs font-semibold capitalize transition",
-                tab === t ? "bg-white/[0.08] text-foreground" : "text-muted-foreground hover:text-foreground",
+                tab === t
+                  ? "bg-white/[0.08] text-foreground"
+                  : "text-muted-foreground hover:text-foreground",
               )}
             >
               {t}
@@ -550,7 +574,11 @@ function TradeCard({ trade, onOpen }: { trade: GroupTrade; onOpen: () => void })
     >
       {shot ? (
         <div className="relative h-44 w-full overflow-hidden bg-black/40">
-          <img src={shot} alt={trade.instrument} className="h-full w-full object-cover opacity-90 transition group-hover:scale-[1.02] group-hover:opacity-100" />
+          <img
+            src={shot}
+            alt={trade.instrument}
+            className="h-full w-full object-cover opacity-90 transition group-hover:scale-[1.02] group-hover:opacity-100"
+          />
         </div>
       ) : (
         <div className="grid h-44 w-full place-items-center bg-white/[0.02] text-[11px] text-muted-foreground">
@@ -822,7 +850,9 @@ function CommentNode({
         <div>
           <span className="font-mono text-foreground/80">{comment.author_edge_id}</span>
           <span className="ml-2">{new Date(comment.created_at).toLocaleString()}</span>
-          {comment.updated_at !== comment.created_at && <span className="ml-1 italic">· edited</span>}
+          {comment.updated_at !== comment.created_at && (
+            <span className="ml-1 italic">· edited</span>
+          )}
         </div>
         <div className="flex gap-1.5">
           <button
@@ -859,7 +889,10 @@ function CommentNode({
           />
           <div className="flex justify-end gap-2">
             <button
-              onClick={() => { setEditing(false); setDraft(comment.body); }}
+              onClick={() => {
+                setEditing(false);
+                setDraft(comment.body);
+              }}
               className="rounded-lg bg-white/[0.04] px-3 py-1 text-[11px] text-muted-foreground"
             >
               Cancel
@@ -890,7 +923,9 @@ function CommentNode({
                   <button
                     onClick={() => {
                       const fn = async () => {
-                        await (await import("@/lib/groups.functions")).deleteComment({ data: { id: r.id } });
+                        await (
+                          await import("@/lib/groups.functions")
+                        ).deleteComment({ data: { id: r.id } });
                         qc.invalidateQueries({ queryKey: ["trade-comments", tradeId, groupId] });
                       };
                       fn();
@@ -917,7 +952,13 @@ function MembersTab({
   members,
 }: {
   group: GroupSummary;
-  members: { user_id: string; edge_id: string; display_name: string | null; username: string; role: "owner" | "member" }[];
+  members: {
+    user_id: string;
+    edge_id: string;
+    display_name: string | null;
+    username: string;
+    role: "owner" | "member";
+  }[];
 }) {
   const qc = useQueryClient();
   const isOwner = group.role === "owner";
@@ -966,7 +1007,10 @@ function MembersTab({
             Enter their EdgeScope ID (e.g. <span className="font-mono">EDGE-8F42A1</span>).
           </p>
           <form
-            onSubmit={(e) => { e.preventDefault(); if (edgeId.trim()) invite.mutate(); }}
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (edgeId.trim()) invite.mutate();
+            }}
             className="mt-3 flex gap-2"
           >
             <input
@@ -991,10 +1035,15 @@ function MembersTab({
               </div>
               <div className="mt-2 space-y-1.5">
                 {pending.map((p) => (
-                  <div key={p.id} className="flex items-center justify-between rounded-lg bg-white/[0.025] px-3 py-2 text-sm ring-1 ring-white/[0.04]">
+                  <div
+                    key={p.id}
+                    className="flex items-center justify-between rounded-lg bg-white/[0.025] px-3 py-2 text-sm ring-1 ring-white/[0.04]"
+                  >
                     <div>
                       <span className="font-mono text-foreground/80">{p.invitee_edge_id}</span>
-                      <span className="ml-2 text-xs text-muted-foreground">{p.invitee_display}</span>
+                      <span className="ml-2 text-xs text-muted-foreground">
+                        {p.invitee_display}
+                      </span>
                     </div>
                     <button
                       onClick={() => cancel.mutate(p.id)}
@@ -1033,7 +1082,7 @@ function MembersTab({
                       : "bg-white/[0.04] text-muted-foreground ring-white/[0.08]",
                   )}
                 >
-                  {m.role}
+                  {roleLabel(m.role)}
                 </span>
                 {isOwner && m.role !== "owner" && (
                   <button
@@ -1085,7 +1134,7 @@ function SettingsTab({ group, onDeleted }: { group: GroupSummary; onDeleted: () 
   if (!isOwner) {
     return (
       <div className="mt-6 glow-card rounded-2xl p-6 text-sm text-muted-foreground">
-        Only the group owner can manage settings.
+        Only the group admin can manage settings.
       </div>
     );
   }
@@ -1113,16 +1162,16 @@ function SettingsTab({ group, onDeleted }: { group: GroupSummary; onDeleted: () 
         </div>
       </div>
 
-      <div className="rounded-2xl bg-destructive/[0.04] p-5 ring-1 ring-destructive/20">
-        <h3 className="flex items-center gap-2 text-sm font-semibold text-destructive">
-          <Trash2 className="h-4 w-4" /> Danger zone
+      <div className="rounded-2xl bg-white/[0.02] p-5 ring-1 ring-white/[0.06]">
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
+          <Trash2 className="h-4 w-4 text-destructive/70" /> Danger zone
         </h3>
-        <p className="mt-1 text-xs text-muted-foreground">
+        <p className="mt-1 text-xs text-muted-foreground/70">
           Deleting a group removes all its members, invitations, and comments permanently.
         </p>
         <button
           onClick={() => setConfirmDelete(true)}
-          className="mt-3 rounded-xl bg-destructive/15 px-4 py-2 text-sm font-semibold text-destructive ring-1 ring-destructive/30 hover:bg-destructive/20"
+          className="mt-3 rounded-xl bg-destructive/10 px-4 py-2 text-sm font-semibold text-destructive/80 ring-1 ring-destructive/20 hover:bg-destructive/15 hover:text-destructive"
         >
           Delete group
         </button>
@@ -1135,7 +1184,10 @@ function SettingsTab({ group, onDeleted }: { group: GroupSummary; onDeleted: () 
         description="This cannot be undone."
         confirmLabel="Delete group"
         destructive
-        onConfirm={() => { setConfirmDelete(false); del.mutate(); }}
+        onConfirm={() => {
+          setConfirmDelete(false);
+          del.mutate();
+        }}
       />
     </div>
   );
@@ -1175,7 +1227,10 @@ function ModalShell({
       >
         <div className="flex items-start justify-between">
           <h3 className="text-lg font-bold">{title}</h3>
-          <button onClick={onClose} className="rounded-lg p-1.5 text-muted-foreground transition hover:bg-white/[0.06] hover:text-foreground">
+          <button
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-muted-foreground transition hover:bg-white/[0.06] hover:text-foreground"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>

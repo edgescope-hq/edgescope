@@ -59,7 +59,9 @@ export const getAccountStats = createServerFn({ method: "GET" })
 
     const { data: rows, error } = await context.supabase
       .from("trades")
-      .select("achieved_rr, risk_percentage, account_size, result, trade_date, is_paper, reward_amount")
+      .select(
+        "achieved_rr, risk_percentage, account_size, result, trade_date, is_paper, reward_amount",
+      )
       .eq("user_id", context.userId)
       .eq("account_id", data.account_id);
     if (error) throw safeError(error);
@@ -114,7 +116,7 @@ export const getAccountStats = createServerFn({ method: "GET" })
       current_balance: equity,
       net_pnl: equity - startingBalance,
       win_rate: decided > 0 ? (wins / decided) * 100 : 0,
-      profit_factor: grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? null : 0,
+      profit_factor: grossWin > 0 && grossLoss > 0 ? grossWin / grossLoss : null,
       avg_r_multiple: rCount > 0 ? rSum / rCount : null,
       max_drawdown: maxDrawdown,
       days_traded: dayCounter.size,

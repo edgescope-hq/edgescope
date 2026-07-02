@@ -26,7 +26,10 @@ export const Route = createFileRoute("/_authenticated/edge-discovery")({
   head: () => ({
     meta: [
       { title: "Scope — EdgeScope" },
-      { name: "description", content: "Find hidden patterns in your trading journal without signals or predictions." },
+      {
+        name: "description",
+        content: "Find hidden patterns in your trading journal without signals or predictions.",
+      },
       { name: "robots", content: "noindex, nofollow" },
     ],
   }),
@@ -205,12 +208,14 @@ function makeComparisonInsight(
   secondaryLabel: string,
   secondaryTrades: ReviewedTrade[],
 ): ScopeInsight | null {
-  if (primaryTrades.length < MIN_PATTERN_SAMPLE || secondaryTrades.length < MIN_PATTERN_SAMPLE) return null;
+  if (primaryTrades.length < MIN_PATTERN_SAMPLE || secondaryTrades.length < MIN_PATTERN_SAMPLE)
+    return null;
   const primary = summarize(primaryTrades);
   const secondary = summarize(secondaryTrades);
   if (primary.netR == null || secondary.netR == null) return null;
   const difference = Math.abs(primary.netR - secondary.netR);
-  const oppositeSigns = (primary.netR > 0 && secondary.netR < 0) || (primary.netR < 0 && secondary.netR > 0);
+  const oppositeSigns =
+    (primary.netR > 0 && secondary.netR < 0) || (primary.netR < 0 && secondary.netR > 0);
   if (!oppositeSigns && difference < 1.5) return null;
 
   const related = uniqueTrades([...primaryTrades, ...secondaryTrades]);
@@ -230,14 +235,22 @@ function makeComparisonInsight(
   };
 }
 
-function pushIfUseful(list: ScopeInsight[], insight: ScopeInsight | null, want: "positive" | "negative" | "either" = "either") {
+function pushIfUseful(
+  list: ScopeInsight[],
+  insight: ScopeInsight | null,
+  want: "positive" | "negative" | "either" = "either",
+) {
   if (!insight) return;
   if (want === "positive" && (insight.netR ?? 0) <= 0) return;
   if (want === "negative" && (insight.netR ?? 0) >= 0) return;
   list.push(insight);
 }
 
-function groupBy(trades: ReviewedTrade[], getKey: (t: ReviewedTrade) => string | null, getLabel: (key: string) => string): Array<{ key: string; label: string; trades: ReviewedTrade[] }> {
+function groupBy(
+  trades: ReviewedTrade[],
+  getKey: (t: ReviewedTrade) => string | null,
+  getLabel: (key: string) => string,
+): Array<{ key: string; label: string; trades: ReviewedTrade[] }> {
   const map = new Map<string, ReviewedTrade[]>();
   for (const trade of trades) {
     const key = getKey(trade);
@@ -245,7 +258,11 @@ function groupBy(trades: ReviewedTrade[], getKey: (t: ReviewedTrade) => string |
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(trade);
   }
-  return Array.from(map.entries()).map(([key, value]) => ({ key, label: getLabel(key), trades: value }));
+  return Array.from(map.entries()).map(([key, value]) => ({
+    key,
+    label: getLabel(key),
+    trades: value,
+  }));
 }
 
 function bestWorst(groups: Array<{ key: string; label: string; trades: ReviewedTrade[] }>) {
@@ -276,7 +293,7 @@ function strongestPatterns(trades: ReviewedTrade[]): ScopeInsight[] {
   const groups = [
     ...groupBy(
       trades,
-      (t) => t.instrument && t.session ? `instrument-session:${t.instrument}|${t.session}` : null,
+      (t) => (t.instrument && t.session ? `instrument-session:${t.instrument}|${t.session}` : null),
       (key) => {
         const [, data] = key.split(":");
         const [instrument, session] = data.split("|");
@@ -285,7 +302,7 @@ function strongestPatterns(trades: ReviewedTrade[]): ScopeInsight[] {
     ),
     ...groupBy(
       trades,
-      (t) => t.category && t.session ? `setup-session:${t.category}|${t.session}` : null,
+      (t) => (t.category && t.session ? `setup-session:${t.category}|${t.session}` : null),
       (key) => {
         const [, data] = key.split(":");
         const [category, session] = data.split("|");
@@ -294,17 +311,18 @@ function strongestPatterns(trades: ReviewedTrade[]): ScopeInsight[] {
     ),
     ...groupBy(
       trades,
-      (t) => t.instrument ? `direction-instrument:${t.directionLabel}|${t.instrument}` : null,
+      (t) => (t.instrument ? `direction-instrument:${t.directionLabel}|${t.instrument}` : null),
       (key) => key.split(":")[1].replace("|", " "),
     ),
     ...groupBy(
       trades,
-      (t) => t.instrument && t.in_killzone === true ? `instrument-killzone:${t.instrument}` : null,
+      (t) =>
+        t.instrument && t.in_killzone === true ? `instrument-killzone:${t.instrument}` : null,
       (key) => `${key.split(":")[1]} during killzone`,
     ),
     ...groupBy(
       trades,
-      (t) => t.category && t.in_killzone === true ? `killzone-setup:${t.category}` : null,
+      (t) => (t.category && t.in_killzone === true ? `killzone-setup:${t.category}` : null),
       (key) => `${key.split(":")[1]} during killzone`,
     ),
   ];
@@ -332,7 +350,8 @@ function strongestPatterns(trades: ReviewedTrade[]): ScopeInsight[] {
     "Non-killzone",
     nonKillzone,
   );
-  if (killzoneComparison && (summarize(killzone).netR ?? 0) > (summarize(nonKillzone).netR ?? 0)) insights.push(killzoneComparison);
+  if (killzoneComparison && (summarize(killzone).netR ?? 0) > (summarize(nonKillzone).netR ?? 0))
+    insights.push(killzoneComparison);
 
   for (const instrumentGroup of groupBy(
     trades,
@@ -359,12 +378,18 @@ function strongestPatterns(trades: ReviewedTrade[]): ScopeInsight[] {
     if (insight) insights.push(insight);
   }
 
-  for (const setupGroup of groupBy(trades, (t) => t.category || null, (key) => key)) {
-    const split = bestWorst(groupBy(
-      setupGroup.trades,
-      (t) => t.session || null,
-      (key) => sessionLabel(key),
-    ));
+  for (const setupGroup of groupBy(
+    trades,
+    (t) => t.category || null,
+    (key) => key,
+  )) {
+    const split = bestWorst(
+      groupBy(
+        setupGroup.trades,
+        (t) => t.session || null,
+        (key) => sessionLabel(key),
+      ),
+    );
     if (!split) continue;
     const insight = makeComparisonInsight(
       "opportunities",
@@ -381,14 +406,16 @@ function strongestPatterns(trades: ReviewedTrade[]): ScopeInsight[] {
 
   for (const directionInstrumentGroup of groupBy(
     trades,
-    (t) => t.instrument && t.session ? `${t.instrument}|${t.directionLabel}` : null,
+    (t) => (t.instrument && t.session ? `${t.instrument}|${t.directionLabel}` : null),
     (key) => key.replace("|", " "),
   )) {
-    const split = bestWorst(groupBy(
-      directionInstrumentGroup.trades,
-      (t) => t.session || null,
-      (key) => sessionLabel(key),
-    ));
+    const split = bestWorst(
+      groupBy(
+        directionInstrumentGroup.trades,
+        (t) => t.session || null,
+        (key) => sessionLabel(key),
+      ),
+    );
     if (!split) continue;
     const insight = makeComparisonInsight(
       "opportunities",
@@ -417,7 +444,13 @@ function hiddenRisks(trades: ReviewedTrade[]): ScopeInsight[] {
     const prev = chronological[i - 1];
     const currentMs = tradeTimeMs(current);
     const prevMs = prev ? tradeTimeMs(prev) : null;
-    if (prev?.result === "loss" && currentMs != null && prevMs != null && currentMs > prevMs && currentMs - prevMs <= 20 * 60 * 1000) {
+    if (
+      prev?.result === "loss" &&
+      currentMs != null &&
+      prevMs != null &&
+      currentMs > prevMs &&
+      currentMs - prevMs <= 20 * 60 * 1000
+    ) {
       soonAfterLoss.push(current);
     }
     if (current.trade_date) {
@@ -430,7 +463,8 @@ function hiddenRisks(trades: ReviewedTrade[]): ScopeInsight[] {
   const normalDayTrades: ReviewedTrade[] = [];
   for (const sameDayTrades of dayMap.values()) {
     if (sameDayTrades.length >= 5) heavyDayTrades.push(...sameDayTrades);
-    if (sameDayTrades.length >= 1 && sameDayTrades.length <= 3) normalDayTrades.push(...sameDayTrades);
+    if (sameDayTrades.length >= 1 && sameDayTrades.length <= 3)
+      normalDayTrades.push(...sameDayTrades);
   }
 
   pushIfUseful(
@@ -455,7 +489,8 @@ function hiddenRisks(trades: ReviewedTrade[]): ScopeInsight[] {
     "1-3 trade days",
     normalDayTrades,
   );
-  if (overtrading && (summarize(heavyDayTrades).netR ?? 0) < (summarize(normalDayTrades).netR ?? 0)) insights.push(overtrading);
+  if (overtrading && (summarize(heavyDayTrades).netR ?? 0) < (summarize(normalDayTrades).netR ?? 0))
+    insights.push(overtrading);
 
   pushIfUseful(
     insights,
@@ -483,7 +518,8 @@ function hiddenRisks(trades: ReviewedTrade[]): ScopeInsight[] {
 
   for (const group of groupBy(
     trades,
-    (t) => t.instrument && t.session ? `weak-instrument-session:${t.instrument}|${t.session}` : null,
+    (t) =>
+      t.instrument && t.session ? `weak-instrument-session:${t.instrument}|${t.session}` : null,
     (key) => {
       const [, data] = key.split(":");
       const [instrument, session] = data.split("|");
@@ -505,7 +541,7 @@ function hiddenRisks(trades: ReviewedTrade[]): ScopeInsight[] {
 
   for (const group of groupBy(
     trades,
-    (t) => t.instrument ? `weak-instrument-direction:${t.instrument}|${t.directionLabel}` : null,
+    (t) => (t.instrument ? `weak-instrument-direction:${t.instrument}|${t.directionLabel}` : null),
     (key) => key.split(":")[1].replace("|", " "),
   )) {
     pushIfUseful(
@@ -529,7 +565,7 @@ function setupConditions(trades: ReviewedTrade[]): ScopeInsight[] {
   const groups = [
     ...groupBy(
       trades,
-      (t) => t.category && t.session ? `setup-session:${t.category}|${t.session}` : null,
+      (t) => (t.category && t.session ? `setup-session:${t.category}|${t.session}` : null),
       (key) => {
         const [, data] = key.split(":");
         const [category, session] = data.split("|");
@@ -538,17 +574,17 @@ function setupConditions(trades: ReviewedTrade[]): ScopeInsight[] {
     ),
     ...groupBy(
       trades,
-      (t) => t.category && t.instrument ? `setup-instrument:${t.category}|${t.instrument}` : null,
+      (t) => (t.category && t.instrument ? `setup-instrument:${t.category}|${t.instrument}` : null),
       (key) => key.split(":")[1].replace("|", " + "),
     ),
     ...groupBy(
       trades,
-      (t) => t.category && t.in_killzone === true ? `setup-killzone:${t.category}` : null,
+      (t) => (t.category && t.in_killzone === true ? `setup-killzone:${t.category}` : null),
       (key) => `${key.split(":")[1]} + killzone`,
     ),
     ...groupBy(
       trades,
-      (t) => t.category ? `setup-direction:${t.category}|${t.directionLabel}` : null,
+      (t) => (t.category ? `setup-direction:${t.category}|${t.directionLabel}` : null),
       (key) => key.split(":")[1].replace("|", " + "),
     ),
     ...groupBy(
@@ -575,7 +611,11 @@ function setupConditions(trades: ReviewedTrade[]): ScopeInsight[] {
     pushIfUseful(insights, insight);
   }
 
-  for (const setupGroup of groupBy(trades, (t) => t.category || null, (key) => key)) {
+  for (const setupGroup of groupBy(
+    trades,
+    (t) => t.category || null,
+    (key) => key,
+  )) {
     const inside = setupGroup.trades.filter((t) => t.in_killzone === true);
     const outside = setupGroup.trades.filter((t) => t.in_killzone !== true);
     const insideStats = summarize(inside);
@@ -594,12 +634,18 @@ function setupConditions(trades: ReviewedTrade[]): ScopeInsight[] {
     if (insight) insights.push(insight);
   }
 
-  for (const setupGroup of groupBy(trades, (t) => t.category || null, (key) => key)) {
-    const split = bestWorst(groupBy(
-      setupGroup.trades,
-      (t) => t.instrument || null,
-      (key) => key,
-    ));
+  for (const setupGroup of groupBy(
+    trades,
+    (t) => t.category || null,
+    (key) => key,
+  )) {
+    const split = bestWorst(
+      groupBy(
+        setupGroup.trades,
+        (t) => t.instrument || null,
+        (key) => key,
+      ),
+    );
     if (!split) continue;
     const insight = makeComparisonInsight(
       "conditions",
@@ -641,7 +687,12 @@ function behaviorPatterns(trades: ReviewedTrade[]): ScopeInsight[] {
     }
     const currentMs = tradeTimeMs(current);
     const prevMs = prev ? tradeTimeMs(prev) : null;
-    if (currentMs != null && prevMs != null && currentMs > prevMs && currentMs - prevMs <= 20 * 60 * 1000) {
+    if (
+      currentMs != null &&
+      prevMs != null &&
+      currentMs > prevMs &&
+      currentMs - prevMs <= 20 * 60 * 1000
+    ) {
       fastFollowUp.push(current);
       if (prev?.result === "loss") soonAfterLoss.push(current);
     }
@@ -734,11 +785,13 @@ function behaviorPatterns(trades: ReviewedTrade[]): ScopeInsight[] {
     "negative",
   );
 
-  const timeSplit = bestWorst(groupBy(
-    trades,
-    (t) => timeWindow(t),
-    (key) => key,
-  ));
+  const timeSplit = bestWorst(
+    groupBy(
+      trades,
+      (t) => timeWindow(t),
+      (key) => key,
+    ),
+  );
   if (timeSplit) {
     const timeInsight = makeComparisonInsight(
       "behavior",
@@ -780,7 +833,9 @@ function behaviorPatterns(trades: ReviewedTrade[]): ScopeInsight[] {
   return topInsights(insights, 6);
 }
 
-function selectStrongInsights(candidates: Record<SectionKey, ScopeInsight[]>): Record<SectionKey, ScopeInsight[]> {
+function selectStrongInsights(
+  candidates: Record<SectionKey, ScopeInsight[]>,
+): Record<SectionKey, ScopeInsight[]> {
   const selected: ScopeInsight[] = [];
   const used = new Set<string>();
   const sectionOrder: SectionKey[] = ["opportunities", "risks", "conditions", "behavior"];
@@ -824,7 +879,7 @@ function buildScopeInsights(trades: ReviewedTrade[]) {
 function ScopePage() {
   const list = useServerFn(listTrades);
   const { data } = useSuspenseQuery({ queryKey: ["trades"], queryFn: () => list() });
-  const trades = (data ?? []) as DbTrade[];
+  const trades = useMemo(() => (data ?? []) as DbTrade[], [data]);
   const reviewedTrades = useMemo(() => trades.filter(isReviewed).map(asReviewed), [trades]);
   const insights = useMemo(() => buildScopeInsights(reviewedTrades), [reviewedTrades]);
   const [related, setRelated] = useState<ScopeInsight | null>(null);
@@ -836,7 +891,12 @@ function ScopePage() {
   }, [related, reviewedTrades]);
 
   const reviewedCount = reviewedTrades.length;
-  const allInsights = [...insights.opportunities, ...insights.risks, ...insights.conditions, ...insights.behavior];
+  const allInsights = [
+    ...insights.opportunities,
+    ...insights.risks,
+    ...insights.conditions,
+    ...insights.behavior,
+  ];
   const pageConfidence = confidenceFor(reviewedCount);
 
   return (
@@ -844,70 +904,67 @@ function ScopePage() {
       <div className="w-full max-w-6xl">
         <PageHeader
           icon={Sparkles}
-          eyebrow="Personal trading intelligence"
+          eyebrow="Pattern discovery"
           title="Scope"
-          description={
-            <>
-              Find hidden patterns across setups, sessions, instruments, timing, and behavior.
-              <span className="mt-2 block font-semibold text-primary/85">
-                No signals. No predictions. Only your journal data.
-              </span>
-            </>
-          }
+          description="Find hidden patterns across setups, sessions, instruments, timing, and behavior — driven entirely by your reviewed journal data."
         />
 
-          <div className="min-w-0">
-            {reviewedCount < REQUIRED_REVIEWED ? (
-              <LowDataScope reviewedCount={reviewedCount} />
-            ) : (
-              <>
-                <DiscoverySummary reviewedCount={reviewedCount} confidence={pageConfidence} patternsFound={allInsights.length} />
+        <div className="min-w-0">
+          {reviewedCount < REQUIRED_REVIEWED ? (
+            <LowDataScope reviewedCount={reviewedCount} />
+          ) : (
+            <>
+              <DiscoverySummary
+                reviewedCount={reviewedCount}
+                confidence={pageConfidence}
+                patternsFound={allInsights.length}
+              />
 
-                {allInsights.length === 0 ? (
-                  <PremiumEmptyState
-                    icon={Lightbulb}
-                    title="Discoveries are forming"
-                    description="You have enough reviewed trades to start, but no reliable pattern has reached the minimum sample size yet. Add setup/category, achieved R, timing, killzone, and mistake tags to make patterns easier to detect."
-                    className="mt-6 items-start text-left"
+              {allInsights.length === 0 ? (
+                <PremiumEmptyState
+                  icon={Lightbulb}
+                  title="Discoveries are forming"
+                  description="Scope will surface evidence-backed patterns here once enough reviews are completed."
+                  className="mt-6 items-start text-left"
+                />
+              ) : (
+                <div className="mt-8 space-y-8">
+                  <InsightSection
+                    icon={Target}
+                    title="Journal Patterns"
+                    subtitle="Repeated strengths in reviewed trades."
+                    insights={insights.opportunities}
+                    onRelated={setRelated}
                   />
-                ) : (
-                  <div className="mt-8 space-y-8">
+                  <InsightSection
+                    icon={AlertTriangle}
+                    title="Risk Tendencies"
+                    subtitle="Repeated conditions that cost R."
+                    insights={insights.risks}
+                    onRelated={setRelated}
+                  />
+                  <InsightSection
+                    icon={Layers}
+                    title="Setup Conditions"
+                    subtitle="Setup context across sessions and instruments."
+                    insights={insights.conditions}
+                    onRelated={setRelated}
+                  />
+                  {insights.behavior.length > 0 && (
                     <InsightSection
-                      icon={Target}
-                      title="Pattern Opportunities"
-                      subtitle="What appears to be working in your reviewed journal."
-                      insights={insights.opportunities}
+                      icon={ShieldCheck}
+                      title="Behavior Patterns"
+                      subtitle="Execution patterns tied to review data."
+                      insights={insights.behavior}
                       onRelated={setRelated}
                     />
-                    <InsightSection
-                      icon={AlertTriangle}
-                      title="Risk Alerts"
-                      subtitle="Behaviors or combinations that are costing R."
-                      insights={insights.risks}
-                      onRelated={setRelated}
-                    />
-                    <InsightSection
-                      icon={Layers}
-                      title="Setup Conditions"
-                      subtitle="Setup/category conditions that are working or failing."
-                      insights={insights.conditions}
-                      onRelated={setRelated}
-                    />
-                    {insights.behavior.length > 0 && (
-                      <InsightSection
-                        icon={ShieldCheck}
-                        title="Behavior Patterns"
-                        subtitle="Execution behaviors connected to R impact and risk."
-                        insights={insights.behavior}
-                        onRelated={setRelated}
-                      />
-                    )}
-                  </div>
-                )}
-                <AboutScopeCompact />
-              </>
-            )}
-          </div>
+                  )}
+                </div>
+              )}
+              <AboutScopeCompact />
+            </>
+          )}
+        </div>
       </div>
 
       <AnimatePresence>
@@ -926,27 +983,35 @@ function ScopePage() {
 const scopePreviewCards = [
   {
     icon: Target,
-    title: "Pattern Opportunities",
-    body: "Setup, session, instrument, and killzone combinations that appear to work.",
+    title: "Journal Patterns",
+    body: "Repeated strengths across reviewed trades.",
   },
   {
     icon: AlertTriangle,
-    title: "Risk Alerts",
-    body: "Loss streaks, fast re-entry, rule breaks, and overtrading patterns.",
+    title: "Risk Tendencies",
+    body: "Conditions that repeatedly cost R.",
   },
   {
     icon: Layers,
     title: "Setup Conditions",
-    body: "Where each setup performs better or worse across sessions and instruments.",
+    body: "Setup context by session and instrument.",
   },
   {
     icon: ShieldCheck,
     title: "Behavior Patterns",
-    body: "Timing, killzone, and execution behaviors affecting R.",
+    body: "Execution habits visible in reviews.",
   },
 ];
 
-function DiscoverySummary({ reviewedCount, confidence, patternsFound }: { reviewedCount: number; confidence: Confidence; patternsFound: number }) {
+function DiscoverySummary({
+  reviewedCount,
+  confidence,
+  patternsFound,
+}: {
+  reviewedCount: number;
+  confidence: Confidence;
+  patternsFound: number;
+}) {
   return (
     <div className="mt-6 rounded-2xl bg-white/[0.03] px-4 py-3 shadow-[var(--shadow-card)] ring-1 ring-white/[0.04]">
       <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
@@ -984,7 +1049,10 @@ function AboutScopeCompact() {
         </div>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {scopePreviewCards.map(({ icon: Icon, title }) => (
-            <div key={title} className="flex items-center gap-2 rounded-xl bg-white/[0.025] px-3 py-2 text-xs font-medium text-muted-foreground ring-1 ring-white/[0.035]">
+            <div
+              key={title}
+              className="flex items-center gap-2 rounded-xl bg-white/[0.025] px-3 py-2 text-xs font-medium text-muted-foreground ring-1 ring-white/[0.035]"
+            >
               <Icon className="h-3.5 w-3.5 shrink-0 text-primary/80" />
               <span>{title}</span>
             </div>
@@ -999,53 +1067,32 @@ function LowDataScope({ reviewedCount }: { reviewedCount: number }) {
   const progress = Math.min(100, (reviewedCount / REQUIRED_REVIEWED) * 100);
   return (
     <div className="mt-7 space-y-6">
-      <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-          className="glow-card rounded-2xl p-5"
-        >
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h2 className="flex items-center gap-2 text-base font-bold">
-                <Gauge className="h-4 w-4 text-primary" />
-                {reviewedCount} / {REQUIRED_REVIEWED} trades reviewed for basic pattern insights
-              </h2>
-            </div>
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+        className="glow-card rounded-2xl p-5"
+      >
+        <div className="flex items-center gap-3">
+          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 ring-1 ring-primary/20">
+            <Gauge className="h-5 w-5 text-primary" />
           </div>
-          <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/[0.06]">
-            <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${progress}%` }} />
-          </div>
-          <p className="mt-3 text-xs text-muted-foreground">
-            More reviewed trades improve confidence and reveal deeper patterns.
-          </p>
-        </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.22, delay: 0.04, ease: [0.16, 1, 0.3, 1] }}
-          className="rounded-2xl bg-white/[0.03] p-5 ring-1 ring-white/[0.05]"
-        >
-          <div className="flex items-start gap-3">
-            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10 ring-1 ring-primary/20">
-              <Sparkles className="h-4 w-4 text-primary" />
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-semibold text-muted-foreground">
+              {reviewedCount} / {REQUIRED_REVIEWED} reviewed trades
             </div>
-            <div>
-              <h2 className="text-base font-bold">Why Scope matters</h2>
-              <p className="mt-3 text-sm font-semibold leading-6 text-foreground/90">
-                Analytics shows what happened.
-                <br />
-                Scope helps explain why it happened.
-              </p>
-              <p className="mt-3 text-xs leading-5 text-muted-foreground">
-                It connects your results with conditions like setup, session, instrument, killzone, timing, and behavior.
-              </p>
+            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
+              <div
+                className="h-full rounded-full bg-primary transition-all duration-500"
+                style={{ width: `${progress}%` }}
+              />
             </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Complete reviews add the setup, session, behavior, and mistake context Scope needs.
+            </p>
           </div>
-        </motion.div>
-      </section>
+        </div>
+      </motion.div>
 
       <section>
         <h2 className="text-lg font-bold tracking-tight">What Scope looks for</h2>
@@ -1074,7 +1121,7 @@ function LowDataScope({ reviewedCount }: { reviewedCount: number }) {
         </h2>
         <div className="mt-3 rounded-2xl bg-white/[0.025] p-5 ring-1 ring-white/[0.04]">
           <p className="text-sm text-muted-foreground">
-            Scope will surface evidence-backed patterns here once your journal has enough reviewed trades.
+            Patterns will appear here once enough reviews are completed.
           </p>
         </div>
       </section>
@@ -1130,26 +1177,36 @@ function InsightCard({ insight, onRelated }: { insight: ScopeInsight; onRelated:
           {insight.details && insight.details.length > 0 && (
             <div className="mt-3 space-y-1.5">
               {insight.details.map((detail) => (
-                <div key={detail} className="rounded-lg bg-white/[0.025] px-3 py-2 text-xs text-muted-foreground ring-1 ring-white/[0.04]">
+                <div
+                  key={detail}
+                  className="rounded-lg bg-white/[0.025] px-3 py-2 text-xs text-muted-foreground ring-1 ring-white/[0.04]"
+                >
                   {detail}
                 </div>
               ))}
             </div>
           )}
         </div>
-        <span className={cn(
-          "shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold ring-1",
-          insight.confidence === "High confidence" && "bg-primary/15 text-primary ring-primary/25",
-          insight.confidence === "Medium confidence" && "bg-info/15 text-info ring-info/25",
-          insight.confidence === "Low confidence" && "bg-warning/10 text-warning ring-warning/25",
-        )}>
+        <span
+          className={cn(
+            "shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold ring-1",
+            insight.confidence === "High confidence" &&
+              "bg-primary/15 text-primary ring-primary/25",
+            insight.confidence === "Medium confidence" && "bg-info/15 text-info ring-info/25",
+            insight.confidence === "Low confidence" && "bg-warning/10 text-warning ring-warning/25",
+          )}
+        >
           {insight.confidence}
         </span>
       </div>
       <div className="mt-4 grid grid-cols-3 gap-2">
         <Metric label="Sample" value={`${insight.sampleSize}`} />
         <Metric label="Win rate" value={pct(insight.winRate)} />
-        <Metric label="Net R" value={rLabel(insight.netR)} accent={insight.netR != null && insight.netR < 0 ? "risk" : "good"} />
+        <Metric
+          label="Net R"
+          value={rLabel(insight.netR)}
+          accent={insight.netR != null && insight.netR < 0 ? "risk" : "good"}
+        />
       </div>
       {insight.tradeIds.length > 0 && (
         <button
@@ -1164,15 +1221,27 @@ function InsightCard({ insight, onRelated }: { insight: ScopeInsight; onRelated:
   );
 }
 
-function Metric({ label, value, accent }: { label: string; value: string; accent?: "good" | "risk" }) {
+function Metric({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: string;
+  accent?: "good" | "risk";
+}) {
   return (
     <div className="rounded-xl bg-white/[0.025] p-3 ring-1 ring-white/[0.04]">
-      <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{label}</div>
-      <div className={cn(
-        "mt-1 text-sm font-bold tabular-nums",
-        accent === "good" && "text-primary",
-        accent === "risk" && "text-warning",
-      )}>
+      <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+        {label}
+      </div>
+      <div
+        className={cn(
+          "mt-1 text-sm font-bold tabular-nums",
+          accent === "good" && "text-primary",
+          accent === "risk" && "text-warning",
+        )}
+      >
         {value}
       </div>
     </div>
@@ -1206,13 +1275,19 @@ function RelatedTradesModal({
       >
         <div className="flex items-start justify-between gap-4">
           <div>
-            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-primary">Related trades</div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-primary">
+              Related trades
+            </div>
             <h2 className="mt-1 text-lg font-bold">{insight.title}</h2>
             <p className="mt-1 text-xs text-muted-foreground">
               Private evidence from your journal only.
             </p>
           </div>
-          <button onClick={onClose} aria-label="Close related trades" className="rounded-lg p-1.5 text-muted-foreground transition hover:bg-white/[0.06] hover:text-foreground">
+          <button
+            onClick={onClose}
+            aria-label="Close related trades"
+            className="rounded-lg p-1.5 text-muted-foreground transition hover:bg-white/[0.06] hover:text-foreground"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -1227,14 +1302,28 @@ function RelatedTradesModal({
             <div>Review</div>
           </div>
           {trades.map((trade) => (
-            <div key={trade.id} className="grid grid-cols-[128px_minmax(100px,1fr)_86px_82px_80px_minmax(120px,1fr)_110px] items-center border-b border-white/[0.04] px-3 py-3 text-xs last:border-b-0">
-              <div className="text-muted-foreground">{formatTradeWhen(trade.trade_date, trade.trade_time)}</div>
+            <div
+              key={trade.id}
+              className="grid grid-cols-[128px_minmax(100px,1fr)_86px_82px_80px_minmax(120px,1fr)_110px] items-center border-b border-white/[0.04] px-3 py-3 text-xs last:border-b-0"
+            >
+              <div className="text-muted-foreground">
+                {formatTradeWhen(trade.trade_date, trade.trade_time)}
+              </div>
               <div className="truncate font-semibold">{trade.instrument || "—"}</div>
               <div className="font-semibold">{trade.directionLabel}</div>
-              <div className={cn("font-semibold uppercase", trade.result === "win" && "text-success", trade.result === "loss" && "text-destructive", trade.result === "breakeven" && "text-info")}>
+              <div
+                className={cn(
+                  "font-semibold uppercase",
+                  trade.result === "win" && "text-success",
+                  trade.result === "loss" && "text-destructive",
+                  trade.result === "breakeven" && "text-info",
+                )}
+              >
                 {trade.result ?? "—"}
               </div>
-              <div className="font-semibold tabular-nums">{trade.rr == null ? "—" : rLabel(trade.rr)}</div>
+              <div className="font-semibold tabular-nums">
+                {trade.rr == null ? "—" : rLabel(trade.rr)}
+              </div>
               <div className="truncate text-muted-foreground">{trade.category || "—"}</div>
               <div>
                 <span className="rounded-full bg-primary/10 px-2 py-1 text-[10px] font-semibold text-primary ring-1 ring-primary/20">

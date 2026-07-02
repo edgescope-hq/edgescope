@@ -26,6 +26,16 @@ export type Taxonomy = Record<string, string[]>;
 
 const modalTransition = { duration: 0.22, ease: [0.16, 1, 0.3, 1] as const };
 
+function formatRewardForResult(value: string, result: "WIN" | "LOSS" | "BE"): string {
+  const trimmed = value.trim();
+  if (!trimmed) return result === "BE" ? "0" : value;
+  const numeric = Number(trimmed);
+  if (!Number.isFinite(numeric)) return value;
+  if (result === "BE") return "0";
+  const signed = result === "LOSS" ? -Math.abs(numeric) : Math.abs(numeric);
+  return String(signed);
+}
+
 /**
  * Quick-capture trade form.
  * Goal: log a trade in under 30 seconds. Only the minimum fields are here.
@@ -90,6 +100,11 @@ export function TradeFormModal({
   const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
   useUnsavedChanges(dirty);
   const markDirty = () => { if (!dirty) setDirty(true); };
+  const updateResult = (next: "WIN" | "LOSS" | "BE") => {
+    markDirty();
+    setRes(next);
+    setRewardAmount((current) => formatRewardForResult(current, next));
+  };
 
   const riskNum = parseFloat(riskAmount);
   const rawReward = parseFloat(rewardAmount);
@@ -321,7 +336,7 @@ export function TradeFormModal({
               <label className={labelClass}>RESULT</label>
               <div className="mt-1.5 flex rounded-xl bg-white/[0.03] p-1 ring-1 ring-white/[0.06]">
                 {(["WIN", "LOSS", "BE"] as const).map((r) => (
-                  <button key={r} type="button" onClick={() => { markDirty(); setRes(r); }} className={cn("flex-1 rounded-lg py-1.5 text-[11px] font-bold tracking-wider transition-all duration-200", res === r ? (r === "WIN" ? "bg-success/15 text-success ring-1 ring-success/30" : r === "LOSS" ? "bg-destructive/15 text-destructive ring-1 ring-destructive/30" : "bg-info/15 text-info ring-1 ring-info/30") : "text-muted-foreground hover:text-foreground")}>{r}</button>
+                  <button key={r} type="button" onClick={() => updateResult(r)} className={cn("flex-1 rounded-lg py-1.5 text-[11px] font-bold tracking-wider transition-all duration-200", res === r ? (r === "WIN" ? "bg-success/15 text-success ring-1 ring-success/30" : r === "LOSS" ? "bg-destructive/15 text-destructive ring-1 ring-destructive/30" : "bg-info/15 text-info ring-1 ring-info/30") : "text-muted-foreground hover:text-foreground")}>{r}</button>
                 ))}
               </div>
             </div>
@@ -334,7 +349,14 @@ export function TradeFormModal({
             </div>
             <div>
               <label className={labelClass}>PROFIT / LOSS</label>
-              <input value={rewardAmount} onChange={(e) => { markDirty(); setRewardAmount(e.target.value); }} inputMode="decimal" placeholder="e.g. -10" className={inputClass} />
+              <input
+                value={rewardAmount}
+                onChange={(e) => { markDirty(); setRewardAmount(e.target.value); }}
+                onBlur={() => setRewardAmount((current) => formatRewardForResult(current, res))}
+                inputMode="decimal"
+                placeholder={res === "LOSS" ? "e.g. -10" : res === "BE" ? "0" : "e.g. 25"}
+                className={inputClass}
+              />
             </div>
           </div>
 
@@ -347,7 +369,7 @@ export function TradeFormModal({
               <label className={labelClass}>ACHIEVED R</label>
               <div className={cn(inputClass, "flex items-center bg-white/[0.02] text-sm tabular-nums")}>
                 {Number.isFinite(achievedR)
-                  ? <span className={cn("font-semibold", achievedR > 0 && "text-success", achievedR < 0 && "text-destructive")}>{achievedR > 0 ? "+" : ""}{Math.abs(achievedR).toFixed(2)}R</span>
+                  ? <span className={cn("font-semibold", achievedR > 0 && "text-success", achievedR < 0 && "text-destructive")}>{achievedR > 0 ? "+" : ""}{achievedR.toFixed(2)}R</span>
                   : <span className="text-muted-foreground/60">—</span>}
               </div>
             </div>

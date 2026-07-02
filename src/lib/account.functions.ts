@@ -3,14 +3,61 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
+function isMissingIntroSeenColumn(error: { code?: string; message?: string } | null) {
+  return (
+    error?.code === "42703" && error.message?.toLowerCase().includes("profiles.has_seen_intro")
+  );
+}
+
+function isMissingDeletionColumns(error: { code?: string; message?: string } | null) {
+  const message = error?.message?.toLowerCase() ?? "";
+  return (
+    error?.code === "42703" &&
+    (message.includes("profiles.deletion_requested_at") ||
+      message.includes("profiles.deletion_scheduled_for") ||
+      message.includes("profiles.deletion_cancelled_at"))
+  );
+}
+
+function deletionScheduledFor(from = new Date()) {
+  const date = new Date(from);
+  date.setDate(date.getDate() + 15);
+  return date.toISOString();
+}
+
 export const getProfile = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
+    const profileWithIntro = await context.supabase
       .from("profiles")
-      .select("id, username, display_name, notification_preferences")
+      .select(
+        "id, username, display_name, notification_preferences, has_seen_intro, deletion_requested_at, deletion_scheduled_for, deletion_cancelled_at",
+      )
       .eq("id", context.userId)
       .maybeSingle();
+
+    let data = profileWithIntro.data;
+    let error = profileWithIntro.error;
+
+    if (isMissingIntroSeenColumn(error) || isMissingDeletionColumns(error)) {
+      const profileWithoutIntro = await context.supabase
+        .from("profiles")
+        .select("id, username, display_name, notification_preferences")
+        .eq("id", context.userId)
+        .maybeSingle();
+
+      data = profileWithoutIntro.data
+        ? {
+            ...profileWithoutIntro.data,
+            has_seen_intro: true,
+            deletion_requested_at: null,
+            deletion_scheduled_for: null,
+            deletion_cancelled_at: null,
+          }
+        : null;
+      error = profileWithoutIntro.error;
+    }
+
     if (error) throw safeError(error);
     const { data: userResp } = await context.supabase.auth.getUser();
     return data ? { ...data, email: userResp.user?.email ?? null } : null;
@@ -42,6 +89,18 @@ export const updateProfile = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+export const markIntroSeen = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { error } = await context.supabase
+      .from("profiles")
+      .update({ has_seen_intro: true })
+      .eq("id", context.userId);
+    if (isMissingIntroSeenColumn(error)) return { ok: true };
+    if (error) throw safeError(error);
+    return { ok: true };
+  });
+
 export const updateNotificationPreferences = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) =>
@@ -60,7 +119,48 @@ export const updateNotificationPreferences = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+export const scheduleAccountDeletion = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const requestedAt = new Date().toISOString();
+    const scheduledFor = deletionScheduledFor();
+    const { error } = await context.supabase
+      .from("profiles")
+      .update({
+        deletion_requested_at: requestedAt,
+        deletion_scheduled_for: scheduledFor,
+        deletion_cancelled_at: null,
+      })
+      .eq("id", context.userId);
+    if (isMissingDeletionColumns(error)) {
+      throw new Error("Account deletion scheduling requires the latest profile migration.");
+    }
+    if (error) throw safeError(error);
+    return { ok: true, deletion_scheduled_for: scheduledFor };
+  });
+
+export const cancelAccountDeletion = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { error } = await context.supabase
+      .from("profiles")
+      .update({
+        deletion_requested_at: null,
+        deletion_scheduled_for: null,
+        deletion_cancelled_at: new Date().toISOString(),
+      })
+      .eq("id", context.userId);
+    if (isMissingDeletionColumns(error)) {
+      throw new Error("Account deletion cancellation requires the latest profile migration.");
+    }
+    if (error) throw safeError(error);
+    return { ok: true };
+  });
+
 // Permanently deletes the signed-in user and all their data (cascades via FKs).
+// TODO: wire a scheduled server-side job/cron to call this cleanup for accounts
+// whose deletion_scheduled_for is in the past. Keep service-role auth deletion
+// on the server only.
 export const deleteAccount = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
