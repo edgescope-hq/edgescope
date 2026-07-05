@@ -2,6 +2,7 @@
 // Keeps all dashboard/analytics math in one place.
 
 export type TradeRow = {
+  id?: string;
   result: string | null;
   achieved_rr: number | string | null;
   grade: string | null;
@@ -9,6 +10,8 @@ export type TradeRow = {
   killzone: string | null;
   market: string;
   trade_date: string;
+  trade_time?: string | null;
+  created_at?: string | null;
   emotion_before: string | null;
   emotion_during: string | null;
   emotion_after: string | null;
@@ -165,16 +168,27 @@ export function monthStats(trades: TradeRow[]): GroupStat[] {
   return groupBy(trades, (t) => monthKey(t.trade_date)).sort((a, b) => a.key.localeCompare(b.key));
 }
 
-// Cumulative R "equity curve" ordered by date.
-export function equityCurve(trades: TradeRow[]): { date: string; cumR: number }[] {
+function tradeOrderKey(trade: TradeRow): string {
+  return [
+    trade.trade_date,
+    trade.trade_time ?? "",
+    trade.created_at ?? "",
+    trade.id ?? "",
+  ].join("|");
+}
+
+// Cumulative R equity curve ordered by trade sequence, preserving same-date trades.
+export function equityCurve(trades: TradeRow[]): { date: string; cumR: number; tradeIndex: number }[] {
   const sorted = [...trades]
     .filter((t) => num(t.achieved_rr) !== null)
-    .sort((a, b) => a.trade_date.localeCompare(b.trade_date));
+    .sort((a, b) => tradeOrderKey(a).localeCompare(tradeOrderKey(b)));
   let cum = 0;
-  return sorted.map((t) => {
+  const points = [{ date: "Start", cumR: 0, tradeIndex: 0 }];
+  sorted.forEach((t, index) => {
     cum += num(t.achieved_rr)!;
-    return { date: t.trade_date, cumR: Number(cum.toFixed(2)) };
+    points.push({ date: t.trade_date, cumR: Number(cum.toFixed(2)), tradeIndex: index + 1 });
   });
+  return points;
 }
 
 export const fmtPct = (v: number | null): string => (v == null ? "—" : `${v.toFixed(1)}%`);

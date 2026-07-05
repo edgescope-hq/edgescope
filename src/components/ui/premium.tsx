@@ -7,7 +7,7 @@ const ease = [0.16, 1, 0.3, 1] as const;
 
 export function PageShell({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div className={cn("px-6 py-8 md:px-10 md:py-10", className)}>
+    <div className={cn("relative mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 md:px-10 md:py-10", className)}>
       {children}
     </div>
   );
@@ -35,27 +35,29 @@ export function PageHeader({
       initial={reduced ? false : { opacity: 0, y: 8 }}
       animate={reduced ? undefined : { opacity: 1, y: 0 }}
       transition={{ duration: 0.22, ease }}
-      className={cn("flex flex-wrap items-start justify-between gap-4", className)}
+      className={cn("flex flex-wrap items-start justify-between gap-5 pb-1", className)}
     >
       <div className="min-w-0">
         {(eyebrow || Icon) && (
-          <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary/85">
+          <div className="mb-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-primary/90">
             {Icon && (
-              <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary/10 ring-1 ring-primary/20">
+              <span className="grid h-7 w-7 place-items-center rounded-lg bg-primary/10 text-primary shadow-[0_0_24px_-14px_oklch(0.68_0.23_295/0.8)] ring-1 ring-primary/20">
                 <Icon className="h-3.5 w-3.5" />
               </span>
             )}
             {eyebrow && <span>{eyebrow}</span>}
           </div>
         )}
-        <h1 className="text-3xl font-bold tracking-tight md:text-4xl">{title}</h1>
+        <h1 className="max-w-4xl text-3xl font-bold tracking-[-0.01em] text-foreground md:text-4xl">
+          {title}
+        </h1>
         {description && (
-          <p className="mt-1.5 max-w-2xl text-sm leading-6 text-muted-foreground">
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
             {description}
           </p>
         )}
       </div>
-      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+      {actions && <div className="flex flex-wrap items-center justify-end gap-2 pt-1">{actions}</div>}
     </motion.div>
   );
 }
@@ -76,7 +78,7 @@ export function SectionHeader({
   return (
     <div className={cn("flex flex-wrap items-end justify-between gap-3", className)}>
       <div className="min-w-0">
-        <h2 className="flex items-center gap-2 text-sm font-semibold">
+        <h2 className="flex items-center gap-2 text-sm font-bold tracking-tight">
           {Icon && <Icon className="h-4 w-4 text-primary" />}
           {title}
         </h2>
@@ -128,7 +130,7 @@ export function PremiumEmptyState({
   return (
     <div
       className={cn(
-        "flex flex-col items-center justify-center rounded-2xl border border-white/[0.06] bg-white/[0.025] text-center",
+        "glow-card flex flex-col items-center justify-center rounded-2xl text-center",
         compact ? "gap-3 px-5 py-8" : "gap-4 px-6 py-12",
         className,
       )}

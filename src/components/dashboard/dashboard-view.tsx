@@ -16,25 +16,26 @@ import {
   Target,
   Briefcase,
   TrendingUp,
+  TrendingDown,
   Calendar,
   Trophy,
-  XOctagon,
-  Scale,
   Crosshair,
-  Clock,
-  PieChart as PieIcon,
+  History,
   Flame,
   Plus,
   Wallet,
   Shield,
   AlertTriangle,
+  ClipboardCheck,
   ClipboardList,
   Sparkles,
   User,
+  Check,
   type LucideIcon,
 } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { TradeFormModal } from "@/components/trades/trade-form-modal";
+import { TradeReviewModal } from "@/components/trades/trade-review-modal";
 import { useSuspenseQuery, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { listTrades } from "@/lib/trades.functions";
@@ -44,13 +45,12 @@ import {
   type TradingPreferences,
 } from "@/lib/trading-preferences.functions";
 import { listTradingAccounts, type TradingAccount } from "@/lib/trading-accounts.functions";
-import { useISTGreeting } from "@/lib/use-ist-greeting";
 import { AnimatedNumber } from "@/components/dashboard/animated-number";
 import { PageHeader, PageShell, PremiumEmptyState } from "@/components/ui/premium";
 import { cn } from "@/lib/utils";
-import { overview, categoryStats, equityCurve, sessionStats, fmtPct } from "@/lib/analytics";
-import { toAnalytics, rrNum, streaks, formatTradeWhen, type DbTrade } from "@/lib/trade-mappers";
-import { sessionLabel } from "@/lib/trade-constants";
+import { overview, equityCurve } from "@/lib/analytics";
+import { toAnalytics, rrNum, streaks, type DbTrade } from "@/lib/trade-mappers";
+import { getReviewStatus } from "@/lib/review-status";
 import { toast } from "sonner";
 
 // Convert R-multiples to currency using starting balance × risk %.
@@ -106,7 +106,7 @@ const INTRO_WORKFLOW = [
   {
     icon: Target,
     title: "Complete the review",
-    body: "Add reasoning, screenshots, mistakes, and grade to build useful feedback.",
+    body: "Capture the chart context, reasoning, and review details for this trade.",
   },
 ];
 
@@ -164,7 +164,7 @@ function StatCard({
 }: {
   icon: LucideIcon;
   label: string;
-  value: number;
+  value: number | string;
   decimals?: number;
   suffix?: string;
   tone: Tone;
@@ -175,12 +175,12 @@ function StatCard({
     <motion.div
       {...card}
       transition={motionTransition}
-      className="glow-card interactive-card group relative overflow-hidden rounded-2xl p-5 hover:border-white/[0.1]"
+      className="glow-card group relative overflow-hidden rounded-2xl p-5"
     >
       <div className="flex items-start gap-4">
         <div
           className={cn(
-            "grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br ring-1 ring-white/[0.06] transition-transform duration-300 group-hover:scale-105",
+            "grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br ring-1 ring-white/[0.06]",
             s.icon,
           )}
         >
@@ -191,7 +191,11 @@ function StatCard({
             {label}
           </div>
           <div className="mt-1.5 text-3xl font-bold tracking-tight text-foreground">
-            <AnimatedNumber value={value} decimals={decimals} suffix={suffix} />
+            {typeof value === "number" ? (
+              <AnimatedNumber value={value} decimals={decimals} suffix={suffix} />
+            ) : (
+              <span className="text-2xl">{value}</span>
+            )}
           </div>
           {sub && <div className="mt-1 text-xs text-muted-foreground">{sub}</div>}
         </div>
@@ -215,10 +219,10 @@ function MiniStat({
 }) {
   const s = toneStyles[tone as Tone];
   return (
-    <div className="glow-card interactive-card group flex items-center gap-4 rounded-2xl p-5 hover:border-white/[0.1]">
+    <div className="glow-card group flex items-center gap-4 rounded-2xl p-5">
       <div
         className={cn(
-          "grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br ring-1 ring-white/[0.06] transition-transform duration-300 group-hover:scale-105",
+          "grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br ring-1 ring-white/[0.06]",
           s.icon,
         )}
       >
@@ -366,9 +370,52 @@ function ProfileSetupModal({
   );
 }
 
+function getBrowserLocalGreeting(date = new Date()): string {
+  const hour = date.getHours();
+  if (hour >= 5 && hour < 12) return "Good morning";
+  if (hour >= 12 && hour < 17) return "Good afternoon";
+  if (hour >= 17 && hour < 21) return "Good evening";
+  return "Welcome back";
+}
+
+function formatTradeDateOnly(date: string): string {
+  try {
+    return new Date(`${date}T00:00:00`).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  } catch {
+    return date;
+  }
+}
+
+function formatCurrentStreak(s: { currentWin: number; currentLoss: number }): {
+  value: string;
+  tone: Tone;
+  icon: LucideIcon;
+} {
+  if (s.currentWin > 0) {
+    return {
+      value: `${s.currentWin} ${s.currentWin === 1 ? "Win" : "Wins"}`,
+      tone: "success",
+      icon: Flame,
+    };
+  }
+  if (s.currentLoss > 0) {
+    return {
+      value: `${s.currentLoss} ${s.currentLoss === 1 ? "Loss" : "Losses"}`,
+      tone: "destructive",
+      icon: TrendingDown,
+    };
+  }
+  return { value: "No streak yet", tone: "info", icon: Crosshair };
+}
+
 export function DashboardView() {
-  const greeting = useISTGreeting();
+  const [displayGreeting, setDisplayGreeting] = useState("Welcome back");
   const [newOpen, setNewOpen] = useState(false);
+  const [reviewTrade, setReviewTrade] = useState<{ id: string; number: number } | null>(null);
   const [introOpen, setIntroOpen] = useState(false);
   const [introMarkedLocal, setIntroMarkedLocal] = useState(false);
   const tradesFn = useServerFn(listTrades);
@@ -387,6 +434,13 @@ export function DashboardView() {
   });
   const db = useMemo(() => (trades ?? []) as DbTrade[], [trades]);
 
+  useEffect(() => {
+    const updateGreeting = () => setDisplayGreeting(getBrowserLocalGreeting());
+    updateGreeting();
+    const timer = window.setInterval(updateGreeting, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   const activeAccount: TradingAccount | null = useMemo(
     () => (accounts ?? []).find((a) => a.is_active) ?? null,
     [accounts],
@@ -396,21 +450,19 @@ export function DashboardView() {
   const lifetimeRows = useMemo(() => db.map(toAnalytics), [db]);
 
   // Active-account-scoped rows (for current balance / charts).
+  const activeDb = useMemo(() => {
+    if (!activeAccount) return db;
+    return db.filter((t) => t.account_id === activeAccount.id);
+  }, [db, activeAccount]);
   const activeRows = useMemo(() => {
     if (!activeAccount) return lifetimeRows;
-    return db.filter((t) => t.account_id === activeAccount.id).map(toAnalytics);
-  }, [db, activeAccount, lifetimeRows]);
+    return activeDb.map(toAnalytics);
+  }, [activeAccount, activeDb, lifetimeRows]);
 
   const o = useMemo(() => overview(activeRows), [activeRows]);
   const lifetime = useMemo(() => overview(lifetimeRows), [lifetimeRows]);
-  const cats = useMemo(() => categoryStats(activeRows).slice(0, 6), [activeRows]);
   const eq = useMemo(() => equityCurve(activeRows), [activeRows]);
   const streak = useMemo(() => streaks(db), [db]);
-  const bestSession = useMemo(() => {
-    const stats = sessionStats(lifetimeRows).filter((s) => s.count >= 5 && s.winRate != null);
-    if (!stats.length) return null;
-    return [...stats].sort((a, b) => (b.winRate ?? 0) - (a.winRate ?? 0))[0];
-  }, [lifetimeRows]);
 
   const recent = useMemo(() => [...db].slice(0, 5), [db]);
 
@@ -427,38 +479,31 @@ export function DashboardView() {
   );
 
   // ------ Journal completeness reminder ------
-  // Only flag trades that are missing genuinely important summary fields.
-  // We require: a result (win/loss/BE), an achieved R, and a reasoning note.
-  // Empty journals or fully-filled journals will NOT show the reminder.
+  // Status is derived from quick-capture essentials plus screenshot + reasoning.
   const journalGaps = useMemo(() => {
-    const missingResult = db.filter((t) => !t.result).length;
-    const missingAchievedR = db.filter((t) => t.achieved_rr == null || t.achieved_rr === "").length;
-    const missingReasoning = db.filter((t) => !t.reasoning || !t.reasoning.trim()).length;
-    return { missingResult, missingAchievedR, missingReasoning };
+    const incomplete = db.filter((t) => getReviewStatus(t) === "incomplete").length;
+    const needsReview = db.filter((t) => getReviewStatus(t) === "needs_review").length;
+    const reviewed = db.filter((t) => getReviewStatus(t) === "reviewed").length;
+    return { incomplete, needsReview, reviewed };
   }, [db]);
   const hasJournalGaps =
     db.length > 0 &&
-    journalGaps.missingResult + journalGaps.missingAchievedR + journalGaps.missingReasoning > 0;
+    journalGaps.incomplete + journalGaps.needsReview > 0;
 
   const now = new Date();
   const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   const monthLabel = now.toLocaleString("en-US", { month: "long", year: "numeric" });
+  const currentMonthRows = useMemo(
+    () => activeRows.filter((t) => t.trade_date.startsWith(ym)),
+    [activeRows, ym],
+  );
   const monthChart = useMemo(() => {
-    const monthTrades = activeRows.filter((t) => t.trade_date.startsWith(ym));
-    const eqM = equityCurve(monthTrades);
-    return eqM.map((p) => ({ d: p.date.slice(8), v: p.cumR }));
-  }, [activeRows, ym]);
+    const eqM = equityCurve(currentMonthRows);
+    return eqM.map((p) => ({ d: p.tradeIndex === 0 ? "0" : p.date.slice(8), v: p.cumR }));
+  }, [currentMonthRows]);
 
   const equityAll = useMemo(() => {
-    const byMonth = new Map<string, number>();
-    for (const p of eq) {
-      const k = p.date.slice(0, 7);
-      byMonth.set(k, p.cumR);
-    }
-    return Array.from(byMonth.entries()).map(([k, v]) => {
-      const [, m] = k.split("-");
-      return { d: MONTHS[Number(m) - 1], v };
-    });
+    return eq.map((point) => ({ d: point.tradeIndex === 0 ? "0" : point.date, v: point.cumR }));
   }, [eq]);
 
   // Account overview math (in currency, using active account starting balance + prefs risk %).
@@ -491,7 +536,7 @@ export function DashboardView() {
       const prev = i === 0 ? 0 : eq[i - 1].cumR;
       const incrementR = p.cumR - prev;
       cum += rToCurrency(incrementR, startingBalance, riskPct);
-      return { d: p.date, v: Number(cum.toFixed(2)) };
+      return { d: p.tradeIndex === 0 ? "0" : p.date, v: Number(cum.toFixed(2)) };
     });
   }, [eq, startingBalance, riskPct]);
 
@@ -521,14 +566,7 @@ export function DashboardView() {
   const shouldShowIntroGuide = accounts !== undefined && accountCount === 0 && db.length === 0;
   const displayName = profile?.display_name?.trim() || "Trader";
   const reviewedTradesCount = useMemo(
-    () =>
-      db.filter(
-        (trade) =>
-          !!trade.reasoning?.trim() ||
-          !!trade.grade ||
-          (trade.mistake_tags?.length ?? 0) > 0 ||
-          (trade.trade_screenshots?.length ?? 0) > 0,
-      ).length,
+    () => db.filter((trade) => getReviewStatus(trade) === "reviewed").length,
     [db],
   );
   const [scopeUnlockDismissed, setScopeUnlockDismissed] = useState(() => {
@@ -537,6 +575,52 @@ export function DashboardView() {
   });
   const hasFirstReview = reviewedTradesCount > 0;
   const scopeReady = reviewedTradesCount >= SCOPE_UNLOCK_THRESHOLD;
+  const activeReviewedTradesCount = useMemo(
+    () => activeDb.filter((trade) => getReviewStatus(trade) === "reviewed").length,
+    [activeDb],
+  );
+  const executionFocus = useMemo(() => {
+    const latestTrade = [...db].sort((a, b) =>
+      (b.trade_date + (b.trade_time ?? "")).localeCompare(a.trade_date + (a.trade_time ?? "")),
+    )[0];
+    const latestR = latestTrade ? rrNum(latestTrade.achieved_rr) : 0;
+
+    if (streak.currentLoss >= 3) {
+      return {
+        tone: "warning" as Tone,
+        icon: AlertTriangle,
+        headline: "Losing streak detected",
+        message: `You're on a ${streak.currentLoss}-trade losing streak. Slow down and make sure the next trade fits your plan.`,
+        secondary: "Loss streaks can happen. Keep risk steady.",
+      };
+    }
+    if (streak.currentWin >= 3) {
+      return {
+        tone: "primary" as Tone,
+        icon: Check,
+        headline: "Strong run detected",
+        message: `You've had ${streak.currentWin} winning trades in a row. Keep the next trade planned and risk steady.`,
+        secondary: "Good results should not change your rules.",
+      };
+    }
+    if (latestTrade && latestR <= -2) {
+      return {
+        tone: "warning" as Tone,
+        icon: AlertTriangle,
+        headline: "Large loss logged",
+        message: "Your latest trade was a larger loss. Review what happened before taking the next one.",
+        secondary: "Check whether it was normal setup risk or something to adjust.",
+      };
+    }
+    return {
+      tone: "primary" as Tone,
+      icon: ClipboardCheck,
+      headline: "Stay process-first",
+      message: "Wait for your plan, keep risk steady, and review the trade after execution.",
+      secondary: "Consistent records make your edge easier to see.",
+    };
+  }, [db, streak.currentLoss, streak.currentWin]);
+  const currentStreakStat = useMemo(() => formatCurrentStreak(streak), [streak]);
 
   // Guide stage — only show before first review is complete
   const activationGuide = useMemo(() => {
@@ -565,7 +649,7 @@ export function DashboardView() {
       stage: "review" as const,
       eyebrow: "REVIEW",
       title: "Complete the review",
-      body: "Add reasoning, screenshots, mistakes, and grade.",
+      body: "Capture the chart context, reasoning, and review details for this trade.",
       cta: "Complete review",
       to: "/trades" as const,
     };
@@ -606,7 +690,7 @@ export function DashboardView() {
     <PageShell>
       <PageHeader
         eyebrow="Dashboard"
-        title={`${greeting}, ${displayName}`}
+        title={`${displayGreeting}, ${displayName}`}
         description="Your trading overview, journal gaps, account health, and review momentum."
         actions={
           <button
@@ -751,13 +835,13 @@ export function DashboardView() {
                     Getting started
                   </div>
                   <h2 id="intro-guide-title" className="mt-1 text-2xl font-bold tracking-tight">
-                    Your trading <span className={SOFT_ACCENT}>review</span> starts here.
+                    Your trading review starts here.
                   </h2>
                   {activationGuide && (
                     <div className="mt-4 rounded-xl bg-primary/[0.08] px-4 py-3 ring-1 ring-primary/25">
                       <div className="text-xs font-semibold text-primary">Next step</div>
                       <div className="mt-1 text-sm font-bold text-foreground">{activationGuide.title}</div>
-                      <p className="mt-0.5 text-sm leading-5 text-foreground/68">{activationGuide.body}</p>
+                      <p className="mt-0.5 text-sm leading-5 text-foreground/80">{activationGuide.body}</p>
                     </div>
                   )}
                 </div>
@@ -771,29 +855,39 @@ export function DashboardView() {
                     if (index === 2) return hasFirstReview;
                     return false;
                   })();
+                  const current = !completed && activationGuide?.title === title;
                   return (
                     <div
                       key={title}
-                      className={`flex items-start gap-3 rounded-xl border border-white/[0.08] bg-white/[0.045] px-4 py-3.5 ring-1 ring-white/[0.04] ${INTRO_CARD_HOVER}`}
+                      className={cn(
+                        `flex items-start gap-3 rounded-xl border px-4 py-3.5 ring-1 ${INTRO_CARD_HOVER}`,
+                        completed
+                          ? "border-success/18 bg-success/[0.045] ring-success/[0.08]"
+                          : current
+                            ? "border-primary/28 bg-white/[0.075] ring-primary/[0.18]"
+                            : "border-white/[0.08] bg-white/[0.045] ring-white/[0.04]",
+                      )}
                     >
                       <div className={cn(
                         "grid h-9 w-9 shrink-0 place-items-center rounded-xl ring-1",
                         completed
                           ? "bg-success/15 text-success ring-success/25"
-                          : "bg-primary/12 text-primary ring-primary/20",
+                          : current
+                            ? "bg-primary/18 text-primary ring-primary/30"
+                            : "bg-primary/12 text-primary ring-primary/20",
                       )}>
                         {completed ? <Check className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
                       </div>
                       <div>
                         <div className="flex items-center gap-2">
-                          <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+                          <h3 className={cn("text-sm font-semibold", current ? "text-white" : "text-foreground")}>{title}</h3>
                           {completed && (
                             <span className="rounded-full bg-success/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-success">
                               Done
                             </span>
                           )}
                         </div>
-                        <p className="mt-1 text-sm leading-6 text-foreground/68">{body}</p>
+                        <p className={cn("mt-1 text-sm leading-6", current ? "text-foreground/86" : "text-foreground/68")}>{body}</p>
                       </div>
                     </div>
                   );
@@ -864,6 +958,43 @@ export function DashboardView() {
         </div>
       </div>
 
+      {/* Execution Focus */}
+      {hasFirstReview && (
+        <div
+          className={cn(
+            "mt-4 flex flex-col gap-4 rounded-2xl px-5 py-4 ring-1 sm:flex-row sm:items-center sm:justify-between",
+            executionFocus.tone === "warning"
+              ? "bg-[linear-gradient(135deg,oklch(0.15_0.025_70/0.72),oklch(0.09_0.014_270/0.9))] ring-warning/[0.18]"
+              : "bg-[linear-gradient(135deg,oklch(0.15_0.035_295/0.64),oklch(0.09_0.014_270/0.9))] ring-primary/[0.16]",
+          )}
+        >
+          <div className="flex min-w-0 items-start gap-3">
+            <div
+              className={cn(
+                "grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br ring-1 ring-white/[0.06]",
+                toneStyles[executionFocus.tone].icon,
+              )}
+            >
+              <executionFocus.icon className="h-5 w-5" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground/85">
+                Execution Focus
+              </div>
+              <div className="mt-1 text-sm font-semibold text-foreground">
+                {executionFocus.headline}
+              </div>
+              <p className="mt-0.5 max-w-3xl text-sm leading-5 text-muted-foreground">
+                {executionFocus.message}
+              </p>
+            </div>
+          </div>
+          <div className="rounded-xl bg-white/[0.035] px-3.5 py-2 text-xs font-medium leading-5 text-foreground/76 ring-1 ring-white/[0.055] sm:max-w-[270px]">
+            {executionFocus.secondary}
+          </div>
+        </div>
+      )}
+
       {/* Journal completeness reminder */}
       {hasJournalGaps && (
         <Link
@@ -874,20 +1005,9 @@ export function DashboardView() {
             <ClipboardList className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
             <div>
               <div className="text-sm font-semibold">Journal reminder</div>
-              <div className="mt-0.5 text-xs text-muted-foreground">
-                {journalGaps.missingResult > 0 && (
-                  <>{journalGaps.missingResult} trades missing result · </>
-                )}
-                {journalGaps.missingAchievedR > 0 && (
-                  <>{journalGaps.missingAchievedR} missing achieved R · </>
-                )}
-                {journalGaps.missingReasoning > 0 && (
-                  <>{journalGaps.missingReasoning} missing reasoning</>
-                )}
-              </div>
             </div>
           </div>
-          <span className="text-xs font-medium text-warning">Complete journal →</span>
+          <span className="text-xs font-medium text-warning">Complete journal &rarr;</span>
         </Link>
       )}
 
@@ -909,7 +1029,7 @@ export function DashboardView() {
             </div>
           </div>
           <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <div className="glow-card interactive-card rounded-2xl p-5 ring-1 ring-primary/25 bg-primary/[0.04]">
+            <div className="glow-card rounded-2xl p-5 ring-1 ring-primary/14 bg-primary/[0.025]">
               <div className="text-[10px] font-semibold tracking-[0.16em] text-primary">
                 CURRENT BALANCE
               </div>
@@ -918,7 +1038,7 @@ export function DashboardView() {
               </div>
               <div className="mt-1 text-xs text-muted-foreground">{activeAccount.name}</div>
             </div>
-            <div className="glow-card interactive-card rounded-2xl p-5">
+            <div className="glow-card rounded-2xl p-5">
               <div className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground">
                 STARTING BALANCE
               </div>
@@ -927,7 +1047,7 @@ export function DashboardView() {
               </div>
               <div className="mt-1 text-xs text-muted-foreground">Baseline</div>
             </div>
-            <div className="glow-card interactive-card rounded-2xl p-5">
+            <div className="glow-card rounded-2xl p-5">
               <div className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground">
                 ACCOUNT NET P&amp;L
               </div>
@@ -949,7 +1069,7 @@ export function DashboardView() {
           </div>
 
           {/* Lifetime Performance */}
-          <div className="mt-6 glow-card rounded-2xl p-5">
+          <div className="mt-6 section-card rounded-2xl p-5">
             <div className="flex items-center justify-between">
               <h3 className="flex items-center gap-2 text-sm font-semibold">
                 <Trophy className="h-4 w-4 text-warning" /> Lifetime performance
@@ -981,7 +1101,8 @@ export function DashboardView() {
       )}
 
       {/* KPI Cards */}
-      <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 xl:auto-rows-fr">
+        <StatCard icon={Briefcase} label="TOTAL TRADES" value={o.total} tone="info" />
         <StatCard
           icon={Target}
           label="WIN RATE"
@@ -991,7 +1112,6 @@ export function DashboardView() {
           tone="primary"
           sub={o.winRate == null ? "No closed trades" : undefined}
         />
-        <StatCard icon={Briefcase} label="TOTAL TRADES" value={o.total} tone="info" />
         <StatCard
           icon={TrendingUp}
           label="AVERAGE RR"
@@ -1002,52 +1122,30 @@ export function DashboardView() {
           sub={o.avgRR == null ? "No R recorded" : undefined}
         />
         <StatCard
-          icon={Calendar}
-          label="THIS MONTH"
-          value={o.thisMonth.count}
-          tone="warning"
-          sub={o.thisMonth.count ? `${fmtPct(o.thisMonth.winRate)} win rate` : "No trades yet"}
-        />
-      </div>
-
-      {/* Mini stats */}
-      <div className="mt-4 grid grid-cols-2 gap-4 xl:grid-cols-4">
-        <MiniStat
           icon={Trophy}
-          label="WINS"
-          value={o.wins}
-          sub={o.total ? `${((o.wins / o.total) * 100).toFixed(1)}%` : "0%"}
-          tone="success"
+          label="NET R"
+          value={sumR}
+          decimals={2}
+          suffix="R"
+          tone={sumR >= 0 ? "success" : "destructive"}
         />
-        <MiniStat
-          icon={XOctagon}
-          label="LOSSES"
-          value={o.losses}
-          sub={o.total ? `${((o.losses / o.total) * 100).toFixed(1)}%` : "0%"}
-          tone="destructive"
+        <StatCard
+          icon={ClipboardList}
+          label="REVIEWED TRADES"
+          value={activeReviewedTradesCount}
+          tone="warning"
+          sub={o.total ? `${activeReviewedTradesCount} of ${o.total}` : "No trades yet"}
         />
-        <MiniStat
-          icon={Scale}
-          label="BREAKEVEN"
-          value={o.breakeven}
-          sub={o.total ? `${((o.breakeven / o.total) * 100).toFixed(1)}%` : "0%"}
-          tone="primary"
-        />
-        <MiniStat
-          icon={Crosshair}
-          label="BEST SESSION"
-          value={bestSession ? sessionLabel(bestSession.key) : "—"}
-          sub={
-            bestSession
-              ? `${fmtPct(bestSession.winRate)} · ${bestSession.count} trades`
-              : "Not enough data"
-          }
-          tone="info"
+        <StatCard
+          icon={currentStreakStat.icon}
+          label="CURRENT STREAK"
+          value={currentStreakStat.value}
+          tone={currentStreakStat.tone}
         />
       </div>
 
       {hasActiveAccount && (
-        <div className="mt-6 glow-card rounded-2xl p-5">
+        <div className="mt-6 section-card rounded-2xl p-5">
           <h3 className="flex items-center gap-2 text-sm font-semibold">
             <Shield className="h-4 w-4 text-primary" /> Risk overview
           </h3>
@@ -1074,15 +1172,15 @@ export function DashboardView() {
       )}
 
       {/* Recent trades + Monthly performance */}
-      <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-12">
         <motion.div
           {...card}
           transition={{ ...motionTransition, delay: 0.04 }}
-          className="glow-card rounded-2xl p-5"
+          className="section-card rounded-2xl p-5 lg:col-span-5"
         >
           <div className="flex items-center justify-between">
             <h3 className="flex items-center gap-2 text-sm font-semibold">
-              <Clock className="h-4 w-4 text-primary" /> Recent trades
+              <History className="h-4 w-4 text-primary" /> Recent trades
             </h3>
             <Link
               to="/trades"
@@ -1094,14 +1192,15 @@ export function DashboardView() {
           <div className="mt-4 space-y-1">
             {recent.length === 0 && (
               <PremiumEmptyState
-                icon={Clock}
+                icon={History}
                 title="No trades logged yet"
                 description="Log your first trade to start building an execution record."
                 compact
               />
             )}
-            {recent.map((t) => {
+            {recent.map((t, index) => {
               const rr = rrNum(t.achieved_rr);
+              const tradeNumber = db.length - index;
               const tone: Tone =
                 t.result === "win" ? "success" : t.result === "loss" ? "destructive" : "info";
               const label =
@@ -1113,19 +1212,21 @@ export function DashboardView() {
                       ? "BE"
                       : "—";
               return (
-                <div
+                <button
                   key={t.id}
-                  className="grid grid-cols-[1.4fr_auto_auto] items-center gap-3 rounded-xl px-2 py-2.5 transition-all duration-200 hover:bg-white/[0.04]"
+                  type="button"
+                  onClick={() => setReviewTrade({ id: t.id, number: tradeNumber })}
+                  className="grid w-full grid-cols-[minmax(0,1fr)_minmax(64px,76px)_minmax(68px,78px)] items-center gap-4 rounded-xl px-2 py-2.5 text-left transition-all duration-200 hover:bg-white/[0.04] focus:outline-none focus-visible:bg-white/[0.05] focus-visible:ring-1 focus-visible:ring-primary/30"
                 >
                   <div className="min-w-0 leading-tight">
                     <div className="truncate text-sm font-medium">{t.instrument}</div>
                     <div className="text-[11px] text-muted-foreground">
-                      {formatTradeWhen(t.trade_date, t.trade_time)}
+                      {formatTradeDateOnly(t.trade_date)}
                     </div>
                   </div>
                   <span
                     className={cn(
-                      "shrink-0 rounded-md px-2 py-0.5 text-[10px] font-bold tracking-wider",
+                      "shrink-0 justify-self-start rounded-md px-2 py-0.5 text-[10px] font-bold tracking-wider",
                       toneStyles[tone].badge,
                     )}
                   >
@@ -1133,7 +1234,7 @@ export function DashboardView() {
                   </span>
                   <span
                     className={cn(
-                      "shrink-0 text-sm font-semibold tabular-nums",
+                      "shrink-0 justify-self-end text-sm font-semibold tabular-nums",
                       tone === "success" && "text-success",
                       tone === "destructive" && "text-destructive",
                       tone === "info" && "text-muted-foreground",
@@ -1142,68 +1243,37 @@ export function DashboardView() {
                     {rr > 0 ? "+" : ""}
                     {rr.toFixed(2)}R
                   </span>
-                </div>
+                </button>
               );
             })}
           </div>
         </motion.div>
 
-        <MonthlyPerformanceTabbed
-          monthChart={monthChart}
-          monthLabel={monthLabel}
-          growth={growthSeries}
-          monthlyPnl={monthlyPnlSeries}
-          hasActiveAccount={hasActiveAccount}
-        />
-      </div>
-
-      {/* Trading streak */}
-      <TradingStreakSection s={streak} />
-
-      {/* Overall Equity Curve */}
-      <OverallEquitySection data={equityAll} />
-
-      {/* Trades by setup */}
-      <div className="mt-4 grid grid-cols-1 gap-4">
-        <div className="glow-card rounded-2xl p-5">
-          <div className="flex items-center justify-between">
-            <h3 className="flex items-center gap-2 text-sm font-semibold">
-              <PieIcon className="h-4 w-4 text-primary" /> Trades by setup
-            </h3>
-            <Link
-              to="/analytics"
-              className="text-xs font-medium text-primary transition-colors duration-200 hover:text-primary-glow"
-            >
-              View analytics →
-            </Link>
-          </div>
-          {cats.length === 0 ? (
-            <p className="mt-4 text-sm text-muted-foreground">
-              No categories yet. Add a category when logging a trade.
-            </p>
-          ) : (
-            <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-              {cats.map((s) => {
-                const max = Math.max(...cats.map((c) => c.count));
-                return (
-                  <div key={s.key}>
-                    <div className="mb-1.5 flex items-center justify-between text-xs">
-                      <span className="text-muted-foreground">{s.key}</span>
-                      <span className="font-semibold tabular-nums">{s.count}</span>
-                    </div>
-                    <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.05]">
-                      <div
-                        className="h-full rounded-full bg-gradient-to-r from-primary to-primary-glow transition-all duration-700 ease-out"
-                        style={{ width: `${(s.count / max) * 100}%` }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+        <div className="lg:col-span-7">
+          <MonthlyPerformanceTabbed
+            monthChart={monthChart}
+            monthLabel={monthLabel}
+            growth={growthSeries}
+            monthlyPnl={monthlyPnlSeries}
+            hasActiveAccount={hasActiveAccount}
+            tradeCount={activeRows.length}
+            currentMonthTradeCount={currentMonthRows.length}
+          />
         </div>
       </div>
+
+      {/* Overall Equity Curve */}
+      <OverallEquitySection data={equityAll} tradeCount={activeRows.length} />
+
+      <AnimatePresence>
+        {reviewTrade && (
+          <TradeReviewModal
+            tradeId={reviewTrade.id}
+            number={reviewTrade.number}
+            onClose={() => setReviewTrade(null)}
+          />
+        )}
+      </AnimatePresence>
     </PageShell>
   );
 }
@@ -1250,12 +1320,16 @@ function MonthlyPerformanceTabbed({
   growth,
   monthlyPnl,
   hasActiveAccount,
+  tradeCount,
+  currentMonthTradeCount,
 }: {
   monthChart: { d: string; v: number }[];
   monthLabel: string;
   growth: { d: string; v: number }[];
   monthlyPnl: { d: string; v: number }[];
   hasActiveAccount: boolean;
+  tradeCount: number;
+  currentMonthTradeCount: number;
 }) {
   const [tab, setTab] = useState<"growth" | "monthly" | "current">(
     hasActiveAccount ? "growth" : "current",
@@ -1271,7 +1345,7 @@ function MonthlyPerformanceTabbed({
     <motion.div
       {...card}
       transition={{ ...motionTransition, delay: 0.08 }}
-      className="glow-card rounded-2xl p-5"
+      className="section-card rounded-2xl p-5"
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="flex items-center gap-2 text-sm font-semibold">
@@ -1303,8 +1377,8 @@ function MonthlyPerformanceTabbed({
 
       <div className="mt-4 h-[260px]">
         {tab === "growth" &&
-          (growth.length === 0 ? (
-            <PremiumChartEmpty text="No closed trades yet." />
+          (tradeCount < 3 ? (
+            <DashboardLowDataState description="Log at least 3 trades to make monthly performance useful." />
           ) : (
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={growth} margin={{ top: 10, right: 8, left: -8, bottom: 8 }}>
@@ -1353,8 +1427,8 @@ function MonthlyPerformanceTabbed({
           ))}
 
         {tab === "monthly" &&
-          (monthlyPnl.length === 0 ? (
-            <PremiumChartEmpty text="No monthly data yet." />
+          (tradeCount < 3 ? (
+            <DashboardLowDataState description="Log at least 3 trades to make monthly performance useful." />
           ) : (
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={monthlyPnl} margin={{ top: 10, right: 8, left: -8, bottom: 8 }}>
@@ -1398,8 +1472,8 @@ function MonthlyPerformanceTabbed({
           ))}
 
         {tab === "current" &&
-          (monthChart.length === 0 ? (
-            <PremiumChartEmpty text="No trades this month yet." />
+          (currentMonthTradeCount < 3 ? (
+            <DashboardLowDataState description="Log at least 3 trades to make monthly performance useful." />
           ) : (
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={monthChart} margin={{ top: 10, right: 8, left: -16, bottom: 8 }}>
@@ -1450,12 +1524,12 @@ function MonthlyPerformanceTabbed({
   );
 }
 
-function OverallEquitySection({ data }: { data: { d: string; v: number }[] }) {
+function OverallEquitySection({ data, tradeCount }: { data: { d: string; v: number }[]; tradeCount: number }) {
   return (
     <motion.div
       {...card}
       transition={{ ...motionTransition, delay: 0.1 }}
-      className="mt-4 glow-card rounded-2xl p-5"
+      className="mt-4 section-card rounded-2xl p-5"
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="flex items-center gap-2 text-sm font-semibold">
@@ -1466,8 +1540,8 @@ function OverallEquitySection({ data }: { data: { d: string; v: number }[] }) {
         </span>
       </div>
       <div className="mt-4 h-[320px]">
-        {data.length === 0 ? (
-          <PremiumChartEmpty text="No closed trades yet." />
+        {tradeCount < 3 ? (
+          <DashboardLowDataState description="Log at least 3 trades to make the equity curve useful." />
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={data} margin={{ top: 10, right: 8, left: -16, bottom: 8 }}>
@@ -1516,66 +1590,18 @@ function OverallEquitySection({ data }: { data: { d: string; v: number }[] }) {
   );
 }
 
-function PremiumChartEmpty({ text }: { text: string }) {
-  return (
-    <div className="grid h-full place-items-center rounded-xl bg-white/[0.02] text-sm text-muted-foreground ring-1 ring-white/[0.04]">
-      {text}
-    </div>
-  );
-}
-
-function TradingStreakSection({
-  s,
+function DashboardLowDataState({
+  title = "More trades needed",
+  description,
 }: {
-  s: { currentWin: number; currentLoss: number; longestWin: number; longestLoss: number };
+  title?: string;
+  description: string;
 }) {
-  const streaks = [
-    { label: "CURRENT WINNING STREAK", value: s.currentWin, tone: "success" as Tone, icon: Flame },
-    {
-      label: "CURRENT LOSING STREAK",
-      value: s.currentLoss,
-      tone: "destructive" as Tone,
-      icon: XOctagon,
-    },
-    { label: "LONGEST WINNING STREAK", value: s.longestWin, tone: "success" as Tone, icon: Trophy },
-    {
-      label: "LONGEST LOSING STREAK",
-      value: s.longestLoss,
-      tone: "destructive" as Tone,
-      icon: XOctagon,
-    },
-  ];
   return (
-    <div className="ambient-halo mt-4 glow-card rounded-2xl p-5">
-      <h3 className="flex items-center gap-2 text-sm font-semibold">
-        <Flame className="h-4 w-4 text-warning" /> Trading streak
-      </h3>
-      <div className="mt-4 grid grid-cols-2 gap-4 xl:grid-cols-4">
-        {streaks.map((st) => {
-          const Icon = st.icon;
-          const s = toneStyles[st.tone];
-          return (
-            <div
-              key={st.label}
-              className="flex items-center gap-4 rounded-xl bg-white/[0.025] p-4 ring-1 ring-white/[0.04]"
-            >
-              <div
-                className={cn(
-                  "grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br ring-1 ring-white/[0.06]",
-                  s.icon,
-                )}
-              >
-                <Icon className="h-5 w-5" />
-              </div>
-              <div className="min-w-0">
-                <div className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground">
-                  {st.label}
-                </div>
-                <div className="mt-1 text-2xl font-bold tabular-nums">{st.value}</div>
-              </div>
-            </div>
-          );
-        })}
+    <div className="grid h-full min-h-[160px] place-items-center rounded-xl bg-white/[0.02] px-5 py-8 text-center ring-1 ring-white/[0.04]">
+      <div>
+        <div className="text-sm font-semibold text-foreground">{title}</div>
+        <p className="mt-1 text-sm leading-5 text-muted-foreground">{description}</p>
       </div>
     </div>
   );

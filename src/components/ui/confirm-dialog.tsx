@@ -47,7 +47,7 @@ export function ConfirmDialog({
 }) {
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent className="rounded-2xl border-white/[0.08] bg-[oklch(0.09_0.015_270)]">
+      <AlertDialogContent className="border-white/[0.08]">
         <AlertDialogHeader>
           <AlertDialogTitle className="text-base font-bold">{title}</AlertDialogTitle>
           {description ? (
@@ -58,7 +58,7 @@ export function ConfirmDialog({
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel
-            className="rounded-xl bg-white/[0.04] text-muted-foreground ring-1 ring-white/[0.06] hover:bg-white/[0.07] hover:text-foreground"
+            className="rounded-xl border-white/[0.06] bg-white/[0.04] text-muted-foreground ring-1 ring-white/[0.06] hover:bg-white/[0.07] hover:text-foreground"
             disabled={loading}
           >
             {cancelLabel}
@@ -72,11 +72,11 @@ export function ConfirmDialog({
             className={cn(
               "rounded-xl font-semibold",
               destructive
-                ? "bg-destructive/90 text-destructive-foreground ring-1 ring-destructive/40 hover:bg-destructive"
+                ? "bg-destructive/[0.42] text-destructive-foreground ring-1 ring-destructive/[0.18] hover:bg-destructive/[0.55]"
                 : "bg-primary text-primary-foreground shadow-[var(--shadow-glow)] hover:brightness-110",
             )}
           >
-            {loading ? "Working…" : confirmLabel}
+            {loading ? "Working..." : confirmLabel}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

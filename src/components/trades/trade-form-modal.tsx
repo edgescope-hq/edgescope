@@ -17,6 +17,13 @@ import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 import { listTradingAccounts } from "@/lib/trading-accounts.functions";
 import { getGuardrails } from "@/lib/guardrails.functions";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { EMOTIONS } from "@/lib/emotions";
 
 // These types are re-exported because other modules import them from this file.
@@ -271,7 +278,7 @@ export function TradeFormModal({
     };
 
     return (
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={closeSuccess} className="fixed inset-0 z-50 grid place-items-center bg-black/55 backdrop-blur-sm p-4">
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={closeSuccess} className="fixed inset-0 z-50 grid place-items-center bg-black/25 backdrop-blur-[2px] p-4">
         <motion.div initial={{ scale: 0.98, y: 8 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.98, y: 8 }} transition={modalTransition} onClick={(e: MouseEvent) => e.stopPropagation()} className="glow-card w-full max-w-md rounded-2xl p-6">
           <div className="flex items-start gap-3">
             <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/15 text-primary ring-1 ring-primary/25">
@@ -315,12 +322,26 @@ export function TradeFormModal({
 
           <div>
             <label className={labelClass}>SESSION</label>
-            <select value={session} onChange={(e) => { markDirty(); setSession(e.target.value); }} className={cn(inputClass, "appearance-none", session && "text-foreground/90")}>
-              <option value="">Select session</option>
-              {SESSIONS.map((s) => (
-                <option key={s.v} value={s.v} className="bg-background text-foreground">{s.l}</option>
-              ))}
-            </select>
+            {/* Themed listbox instead of a native select — native option rows
+                render with the OS default (white) background and can't be styled reliably. */}
+            <Select value={session || "none"} onValueChange={(v) => { markDirty(); setSession(v === "none" ? "" : v); }}>
+              <SelectTrigger
+                className={cn(
+                  inputClass,
+                  "h-auto justify-between border-0 shadow-none data-[placeholder]:text-muted-foreground/50",
+                )}
+              >
+                <SelectValue placeholder="Select session" />
+              </SelectTrigger>
+              <SelectContent className="rounded-xl border-white/[0.08] bg-popover">
+                <SelectItem value="none">Select session</SelectItem>
+                {SESSIONS.map((s) => (
+                  <SelectItem key={s.v} value={s.v}>
+                    {s.l}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="grid grid-cols-2 gap-3">

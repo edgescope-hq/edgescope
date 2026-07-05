@@ -26,8 +26,6 @@ import {
   Trash2,
   X,
   ChevronRight,
-  ChevronLeft,
-  MoreHorizontal,
 } from "lucide-react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -41,13 +39,7 @@ import { PageHeader, PageShell, PremiumEmptyState } from "@/components/ui/premiu
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
-  DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Sheet,
-  SheetContent,
-} from "@/components/ui/sheet";
 
 export const Route = createFileRoute("/_authenticated/playbook")({
   head: () => ({
@@ -74,10 +66,10 @@ type Entry = {
 };
 
 const TYPE_OPTIONS: { v: NoteType; l: string }[] = [
+  { v: "general", l: "General" },
   { v: "setup", l: "Setup" },
   { v: "lesson", l: "Lesson" },
   { v: "review", l: "Review" },
-  { v: "general", l: "General" },
 ];
 
 type Tab = "notes" | "templates" | "meditation";
@@ -143,6 +135,33 @@ const NOTE_TYPE_ICONS: Record<NoteType, typeof NotebookPen> = {
 function noteTypeIcon(type: NoteType | null | undefined) {
   return NOTE_TYPE_ICONS[type ?? "general"] ?? NotebookPen;
 }
+
+function noteContentPlaceholder(type: NoteType) {
+  switch (type) {
+    case "setup":
+      return "Describe the setup, entry conditions, and invalidation rules.";
+    case "lesson":
+      return "Capture the lesson, mistake, or improvement to remember.";
+    case "review":
+      return "Summarize what worked, what failed, and what to adjust.";
+    default:
+      return "Write a trading note, reminder, or observation.";
+  }
+}
+
+function normalizeTitle(value: string | null | undefined) {
+  return (value ?? "").trim().toLocaleLowerCase();
+}
+
+function notePreview(value: string | null | undefined) {
+  return (value ?? "").replace(/\s+/g, " ").trim();
+}
+
+const TEMPLATE_PREVIEWS: Record<string, string> = {
+  "trading-in-the-zone": "Edge is statistical. Trust the process, not one result.",
+  "if-then-cheat-sheet": "If a repeated mistake appears, then define one execution rule.",
+  "only-patterns-you-should-spot": "Track only patterns tied to entries, exits, and behavior.",
+};
 
 function NotesTab() {
   const qc = useQueryClient();
@@ -219,7 +238,7 @@ function NotesTab() {
             />
           </div>
           <div className="flex items-center gap-1 rounded-xl bg-white/[0.03] p-1 ring-1 ring-white/[0.06]">
-            {(["ALL", "setup", "lesson", "review", "general"] as const).map((f) => (
+            {(["ALL", "general", "setup", "lesson", "review"] as const).map((f) => (
               <button
                 key={f}
                 onClick={() => setTypeFilter(f)}
@@ -258,6 +277,8 @@ function NotesTab() {
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((e) => {
             const Icon = noteTypeIcon(e.note_type);
+            const preview = notePreview(e.content);
+            const tags = e.tags ?? [];
             return (
               <button
                 key={e.id}
@@ -265,42 +286,55 @@ function NotesTab() {
                   setSelectedId(e.id);
                   setShowEditor(true);
                 }}
-                className="glow-card group flex flex-col items-start justify-between rounded-2xl p-4 text-left border border-white/[0.04] bg-white/[0.01] transition-all duration-200 hover:border-primary/20 hover:ring-1 hover:ring-primary/10"
+                className="glow-card interactive-card group flex min-h-[180px] flex-col items-start justify-between rounded-2xl p-4 text-left"
               >
                 <div className="space-y-3 w-full">
                   <div className="flex w-full items-start justify-between gap-2">
                     <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary ring-1 ring-primary/20">
                       <Icon className="h-4 w-4" />
                     </div>
-                    <span className="shrink-0 rounded-full bg-white/[0.04] border border-white/[0.05] px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted-foreground/80">
+                    <span className="max-w-[9rem] shrink-0 truncate rounded-full bg-white/[0.04] border border-white/[0.05] px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted-foreground/80">
                       {e.note_type ?? "general"}
                     </span>
                   </div>
                   <div className="min-w-0 flex-1">
-                    <h4 className="text-sm font-bold leading-snug text-foreground group-hover:text-primary transition-colors line-clamp-2">
+                    <h4 className="line-clamp-2 break-words text-sm font-bold leading-snug text-foreground transition-colors [overflow-wrap:anywhere]">
                       {e.title?.trim() || "Untitled note"}
                     </h4>
-                    <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground/60 line-clamp-2">
-                      {e.content?.trim() || "No content"}
-                    </p>
+                    {preview ? (
+                      <p className="mt-2 line-clamp-3 break-words text-xs leading-5 text-muted-foreground [overflow-wrap:anywhere]">
+                        {preview}
+                      </p>
+                    ) : (
+                      <p className="mt-2 text-xs italic leading-5 text-muted-foreground/78">
+                        No note content yet
+                      </p>
+                    )}
                   </div>
                 </div>
-                <div className="mt-4 text-[10px] text-muted-foreground/50 w-full flex items-center justify-between">
-                  <span>
+                <div className="mt-4 flex w-full flex-col gap-3 text-[10px] text-muted-foreground/72">
+                  {tags.length > 0 && (
+                    <div className="flex max-w-full flex-wrap gap-1.5">
+                      {tags.slice(0, 4).map((t, tid) => (
+                        <span
+                          key={tid}
+                          className="max-w-full truncate rounded-md bg-white/[0.035] px-2 py-1 text-[10px] font-medium text-muted-foreground/78 ring-1 ring-white/[0.05]"
+                          title={t}
+                        >
+                          {t}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <span className="text-muted-foreground/72">
                     {e.updated_at
                       ? new Date(e.updated_at).toLocaleDateString("en-US", {
-                          month: "short",
+                          month: "long",
                           day: "numeric",
+                          year: "numeric",
                         })
                       : ""}
                   </span>
-                  <div className="flex gap-1.5 flex-wrap">
-                    {(e.tags ?? []).slice(0, 2).map((t, tid) => (
-                      <span key={tid} className="text-[9px] px-1.5 py-0.5 rounded bg-white/[0.03] text-muted-foreground/70">
-                        {t}
-                      </span>
-                    ))}
-                  </div>
                 </div>
               </button>
             );
@@ -308,13 +342,31 @@ function NotesTab() {
         </div>
       )}
 
-      {/* Note Editor sliding sheet */}
-      <Sheet open={showEditor} onOpenChange={(open) => { if (!open) { setShowEditor(false); setSelectedId(null); } }}>
-        <SheetContent className="rounded-l-2xl border-l border-white/[0.08] bg-[oklch(0.09_0.015_270)] sm:max-w-xl p-6 overflow-y-auto z-50">
+      {/* Note Editor modal */}
+      <Dialog
+        open={showEditor}
+        onOpenChange={(open) => {
+          if (!open) {
+            setShowEditor(false);
+            setSelectedId(null);
+          }
+        }}
+      >
+        <DialogContent className="max-h-[88vh] max-w-2xl overflow-hidden rounded-2xl border-white/[0.08] bg-[oklch(0.09_0.015_270)] p-0 [&>button]:hidden">
           {selected && (
             <NoteEditor
               entry={selected}
+              isDuplicateTitle={(title) => {
+                const nextTitle = normalizeTitle(title);
+                return nextTitle
+                  ? entries.some((entry) => entry.id !== selected.id && normalizeTitle(entry.title) === nextTitle)
+                  : false;
+              }}
               onSave={async (patch) => {
+                if (patch.title && entries.some((entry) => entry.id !== selected.id && normalizeTitle(entry.title) === normalizeTitle(patch.title))) {
+                  toast.error("You already have a note with this title.");
+                  return;
+                }
                 await upd({ data: { id: selected.id, patch } });
                 invalidate();
                 toast.success("Saved");
@@ -326,15 +378,27 @@ function NotesTab() {
               }}
             />
           )}
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
 
       {/* Create Note modal */}
       <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
-        <DialogContent className="rounded-2xl border-white/[0.08] bg-[oklch(0.09_0.015_270)] max-w-md p-6">
+        <DialogContent className="rounded-2xl border-white/[0.08] bg-[oklch(0.09_0.015_270)] max-w-md p-6 [&>button]:hidden">
           <CreateNoteModal
             onClose={() => setShowCreateModal(false)}
-            onCreate={(init) => addM.mutate(init)}
+            onCreate={(init) => {
+              if (entries.some((entry) => normalizeTitle(entry.title) === normalizeTitle(init.title))) {
+                toast.error("You already have a note with this title.");
+                return;
+              }
+              addM.mutate(init);
+            }}
+            isDuplicateTitle={(title) => {
+              const nextTitle = normalizeTitle(title);
+              return nextTitle
+                ? entries.some((entry) => normalizeTitle(entry.title) === nextTitle)
+                : false;
+            }}
             loading={addM.isPending}
           />
         </DialogContent>
@@ -349,7 +413,9 @@ function NotesTab() {
         confirmLabel="Delete note"
         destructive
         loading={delM.isPending}
-        onConfirm={() => selected && delM.mutate(selected.id)}
+        onConfirm={() => {
+          if (selected) delM.mutate(selected.id);
+        }}
       />
     </div>
   );
@@ -357,11 +423,13 @@ function NotesTab() {
 
 function NoteEditor({
   entry,
+  isDuplicateTitle,
   onSave,
   onDelete,
   onClose,
 }: {
   entry: Entry;
+  isDuplicateTitle: (title: string) => boolean;
   onSave: (p: { title: string | null; content: string; tags: string[]; note_type: NoteType }) => Promise<void>;
   onDelete: () => void;
   onClose: () => void;
@@ -377,33 +445,43 @@ function NoteEditor({
     content !== (entry.content ?? "") ||
     tagsText !== (entry.tags ?? []).join(", ") ||
     noteType !== (entry.note_type ?? "general");
+  const duplicateTitle = isDuplicateTitle(title);
 
   useUnsavedChanges(dirty);
 
   return (
-    <div className="flex flex-col h-full gap-5">
-      <div className="flex items-center justify-between border-b border-white/[0.04] pb-4">
+    <div className="flex max-h-[88vh] flex-col">
+      <div className="flex items-start justify-between gap-4 border-b border-white/[0.04] px-6 py-5">
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/60">
+            Playbook note
+          </div>
+          <h2 className="mt-1 flex items-center gap-2 text-base font-bold text-foreground">
+            <NotebookPen className="h-4 w-4 text-primary" /> Edit note
+          </h2>
+        </div>
         <button
+          type="button"
           onClick={onClose}
-          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition"
+          aria-label="Close note"
+          className="rounded-lg p-1.5 text-muted-foreground transition hover:bg-white/[0.06] hover:text-foreground"
         >
-          <ChevronLeft className="h-4 w-4" /> Back to library
-        </button>
-        <button
-          onClick={onDelete}
-          className="rounded-lg p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition"
-        >
-          <Trash2 className="h-4 w-4" />
+          <X className="h-4 w-4" />
         </button>
       </div>
 
-      <div className="space-y-4 flex-1 flex flex-col min-h-0">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 py-5">
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Note title"
-          className="w-full bg-transparent text-xl font-bold tracking-tight outline-none border-b border-white/[0.05] pb-2 placeholder:text-muted-foreground/30 focus:border-primary/40 transition"
+          className="w-full border-b border-primary/25 bg-transparent pb-2 text-xl font-bold tracking-tight outline-none transition placeholder:text-muted-foreground/30 focus:border-primary/60"
         />
+        {duplicateTitle && (
+          <p className="-mt-2 text-[11px] text-destructive/85">
+            You already have a note with this title.
+          </p>
+        )}
 
         <div className="space-y-2">
           <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/60">
@@ -430,13 +508,13 @@ function NoteEditor({
 
         <div className="space-y-2">
           <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/60">
-            Tags (comma separated)
+            Tags
           </label>
           <input
             value={tagsText}
             onChange={(e) => setTagsText(e.target.value)}
-            placeholder="e.g. dynamic-structure, pullback"
-            className="w-full rounded-xl bg-white/[0.03] px-3.5 py-2 text-xs text-foreground placeholder:text-muted-foreground/30 ring-1 ring-white/[0.05] focus:outline-none focus:ring-1 focus:ring-primary/35 transition-all"
+            placeholder="Tags separated by commas"
+            className="w-full rounded-xl bg-white/[0.04] px-3.5 py-2 text-xs text-foreground placeholder:text-muted-foreground/55 ring-1 ring-white/[0.06] focus:outline-none focus:ring-1 focus:ring-primary/35 transition-all"
           />
         </div>
 
@@ -447,36 +525,50 @@ function NoteEditor({
           <textarea
             value={content}
             onChange={(e) => setContent(e.target.value)}
+            placeholder={noteContentPlaceholder(noteType)}
             className="w-full flex-1 min-h-[200px] resize-none rounded-xl bg-white/[0.02] px-3.5 py-3 text-sm leading-relaxed outline-none ring-1 ring-white/[0.05] focus:ring-primary/30"
           />
         </div>
       </div>
 
-      <div className="flex justify-end gap-2 border-t border-white/[0.04] pt-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.04] px-6 py-4">
         <button
-          onClick={onClose}
-          className="rounded-xl bg-white/[0.04] px-4 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground border border-white/[0.06] transition"
+          type="button"
+          onClick={onDelete}
+          className="inline-flex items-center gap-1.5 rounded-xl bg-destructive/[0.045] px-3.5 py-2 text-xs font-semibold text-destructive/78 ring-1 ring-destructive/[0.08] transition hover:bg-destructive/[0.07] hover:text-destructive/85"
         >
-          Cancel
+          <Trash2 className="h-3.5 w-3.5" /> Delete note
         </button>
-        <button
-          disabled={saving || !dirty}
-          onClick={async () => {
-            setSaving(true);
-            try {
-              const tags = tagsText
-                .split(",")
-                .map((s) => s.trim())
-                .filter(Boolean);
-              await onSave({ title: title.trim() || null, content, tags, note_type: noteType });
-            } finally {
-              setSaving(false);
-            }
-          }}
-          className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground shadow-[var(--shadow-glow)] hover:brightness-110 disabled:opacity-50 transition"
-        >
-          <Save className="h-3.5 w-3.5" /> {saving ? "Saving…" : "Save changes"}
-        </button>
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            className="rounded-xl border border-white/[0.06] bg-white/[0.04] px-4 py-2 text-xs font-semibold text-muted-foreground transition hover:text-foreground"
+          >
+            Cancel
+          </button>
+          <button
+            disabled={saving || !dirty || duplicateTitle}
+            onClick={async () => {
+              if (duplicateTitle) {
+                toast.error("You already have a note with this title.");
+                return;
+              }
+              setSaving(true);
+              try {
+                const tags = tagsText
+                  .split(",")
+                  .map((s) => s.trim())
+                  .filter(Boolean);
+                await onSave({ title: title.trim() || null, content, tags, note_type: noteType });
+              } finally {
+                setSaving(false);
+              }
+            }}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground shadow-[var(--shadow-glow)] transition hover:brightness-110 disabled:opacity-50"
+          >
+            <Save className="h-3.5 w-3.5" /> {saving ? "Saving..." : "Save changes"}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -485,18 +577,25 @@ function NoteEditor({
 function CreateNoteModal({
   onClose,
   onCreate,
+  isDuplicateTitle,
   loading,
 }: {
   onClose: () => void;
   onCreate: (init: { title: string; content: string; tags: string[]; note_type: NoteType }) => void;
+  isDuplicateTitle: (title: string) => boolean;
   loading: boolean;
 }) {
   const [title, setTitle] = useState("");
   const [noteType, setNoteType] = useState<NoteType>("general");
   const [content, setContent] = useState("");
+  const duplicateTitle = isDuplicateTitle(title);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (duplicateTitle) {
+      toast.error("You already have a note with this title.");
+      return;
+    }
     onCreate({
       title: title.trim(),
       content: content.trim(),
@@ -532,10 +631,18 @@ function CreateNoteModal({
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder=""
+            placeholder="Note title"
             autoFocus
-            className="mt-1.5 block w-full rounded-xl border-0 bg-white/[0.04] px-4 py-2.5 text-sm text-foreground ring-1 ring-white/[0.06] transition focus:outline-none focus:ring-primary/30"
+            className={cn(
+              "mt-1.5 block w-full rounded-xl border-0 bg-white/[0.04] px-4 py-2.5 text-sm text-foreground ring-1 transition focus:outline-none",
+              duplicateTitle ? "ring-destructive/25 focus:ring-destructive/30" : "ring-white/[0.06] focus:ring-primary/30",
+            )}
           />
+          {duplicateTitle && (
+            <p className="mt-1.5 text-[11px] text-destructive/85">
+              You already have a note with this title.
+            </p>
+          )}
         </div>
 
         <div>
@@ -569,7 +676,7 @@ function CreateNoteModal({
             value={content}
             onChange={(e) => setContent(e.target.value)}
             rows={5}
-            placeholder=""
+            placeholder={noteContentPlaceholder(noteType)}
             className="mt-1.5 block w-full resize-none rounded-xl border-0 bg-white/[0.04] px-4 py-2.5 text-sm text-foreground ring-1 ring-white/[0.06] transition focus:outline-none focus:ring-primary/30"
           />
         </div>
@@ -585,7 +692,7 @@ function CreateNoteModal({
           </button>
           <button
             type="submit"
-            disabled={!title.trim() || loading}
+            disabled={!title.trim() || loading || duplicateTitle}
             className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground shadow-[var(--shadow-glow)] hover:brightness-110 disabled:opacity-50 transition"
           >
             {loading ? "Creating…" : "Create"}
@@ -608,6 +715,18 @@ function templateIcon(id: string) {
   return TEMPLATE_ICONS[id] ?? BookOpen;
 }
 
+function templateBlockText(block: (typeof NOTE_TEMPLATES)[number]["blocks"][number]): string {
+  if (block.type === "ifthen") return `${block.ifText} ${block.thenLabel} ${block.thenText}`;
+  return block.text;
+}
+
+function templatePreview(template: (typeof NOTE_TEMPLATES)[number]): string {
+  if (TEMPLATE_PREVIEWS[template.id]) return TEMPLATE_PREVIEWS[template.id];
+  const preview = template.blocks.map(templateBlockText).join(" ").replace(/\s+/g, " ").trim();
+  if (preview.length < 20) return "Template details for review.";
+  return preview.replace(/\.\.\.$/, "");
+}
+
 function TemplatesTab() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = NOTE_TEMPLATES.find((t) => t.id === selectedId) ?? null;
@@ -621,30 +740,23 @@ function TemplatesTab() {
             <button
               key={t.id}
               onClick={() => setSelectedId(t.id)}
-              className="glow-card group flex flex-col justify-between items-start rounded-2xl p-5 text-left border border-white/[0.04] bg-white/[0.01] hover:border-primary/20 transition-all duration-200"
+              className="glow-card interactive-card group flex flex-col justify-between items-start rounded-2xl p-5 text-left"
             >
               <div className="space-y-3 w-full">
                 <div className="flex justify-between items-start gap-2">
                   <div className="grid h-8 w-8 place-items-center rounded-lg bg-primary/10 text-primary ring-1 ring-primary/20">
                     <Icon className="h-4 w-4" />
                   </div>
-                  <span className="rounded-full bg-white/[0.04] border border-white/[0.05] px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted-foreground/80">
-                    Process template
-                  </span>
                 </div>
                 <div>
-                  <h4 className="text-sm font-bold text-foreground group-hover:text-primary transition-colors line-clamp-1">{t.title}</h4>
-                  <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground/60 line-clamp-2">
-                    {t.blocks
-                      .filter((b) => b.type === "paragraph")
-                      .map((b) => b.text)
-                      .join(" ")}
+                  <h4 className="text-sm font-bold text-foreground transition-colors line-clamp-1">{t.title}</h4>
+                  <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground/86 line-clamp-2">
+                    {templatePreview(t)}
                   </p>
                 </div>
               </div>
-              <div className="mt-4 flex w-full justify-end text-xs text-primary/80 font-bold group-hover:text-primary transition-colors items-center gap-1">
-                <span>Open template</span>
-                <ChevronRight className="h-3.5 w-3.5" />
+              <div className="mt-4 flex w-full items-center justify-end text-muted-foreground/70 transition-colors group-hover:text-foreground">
+                <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
               </div>
             </button>
           );
@@ -656,10 +768,7 @@ function TemplatesTab() {
           <DialogContent className="rounded-2xl border-white/[0.08] bg-[oklch(0.09_0.015_270)] max-w-2xl max-h-[85vh] overflow-y-auto p-6">
             <div className="flex items-start justify-between gap-3 border-b border-white/[0.04] pb-4">
               <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/75">
-                  Process template
-                </span>
-                <h2 className="mt-1 text-xl font-bold text-foreground">{selected.title}</h2>
+                <h2 className="text-xl font-bold text-foreground">{selected.title}</h2>
               </div>
             </div>
             <article className="mt-6 space-y-4 text-sm leading-relaxed text-foreground/85">
@@ -771,7 +880,7 @@ function MeditationTab() {
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
-      <div className="glow-card rounded-2xl p-6 border border-white/[0.04] bg-white/[0.01]">
+      <div className="glow-card rounded-2xl p-6">
         <h3 className="text-base font-bold tracking-tight">Daily Meditation</h3>
         <p className="mt-1 text-xs text-muted-foreground">
           A short, focused pause before you trade. Calm mind, clean decisions.
@@ -810,7 +919,7 @@ function MeditationTab() {
                 setRunning(false);
                 setRemaining(duration * 60);
               }}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-destructive/15 px-4 py-2 text-xs font-semibold text-destructive ring-1 ring-destructive/20 hover:bg-destructive/20"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-destructive/[0.045] px-4 py-2 text-xs font-semibold text-destructive/78 ring-1 ring-destructive/[0.08] hover:bg-destructive/[0.07] hover:text-destructive/85"
             >
               <Square className="h-3.5 w-3.5" /> Stop
             </button>
@@ -828,7 +937,7 @@ function MeditationTab() {
         </div>
       </div>
 
-      <div className="glow-card rounded-2xl p-6 border border-white/[0.04] bg-white/[0.01]">
+      <div className="glow-card rounded-2xl p-6">
         <div className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground/75">
           Daily streak
         </div>

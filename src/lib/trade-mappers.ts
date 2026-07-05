@@ -14,9 +14,14 @@ export type DbTrade = {
   killzone: string | null;
   achieved_rr: number | string | null;
   planned_rr: number | string | null;
+  risk_amount: number | string | null;
+  reward_amount: number | string | null;
+  pnl_amount: number | string | null;
   reasoning: string | null;
   lessons_learned: string | null;
   notes: string | null;
+  mistakes_made: string | null;
+  private_notes: string | null;
   emotion_before: string | null;
   emotion_during: string | null;
   emotion_after: string | null;
@@ -35,6 +40,7 @@ export type DbTrade = {
 // Project a DB trade onto the analytics input shape.
 export function toAnalytics(t: DbTrade): TradeRow {
   return {
+    id: t.id,
     result: t.result,
     achieved_rr: t.achieved_rr,
     grade: t.grade,
@@ -42,6 +48,8 @@ export function toAnalytics(t: DbTrade): TradeRow {
     killzone: t.killzone,
     market: t.market,
     trade_date: t.trade_date,
+    trade_time: t.trade_time,
+    created_at: t.created_at ?? null,
     emotion_before: t.emotion_before,
     emotion_during: t.emotion_during,
     emotion_after: t.emotion_after,

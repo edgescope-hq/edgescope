@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   AlertTriangle,
   ArrowRight,
+  Check,
   Gauge,
   Layers,
   Lightbulb,
@@ -19,6 +20,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { listTrades } from "@/lib/trades.functions";
 import { formatTradeWhen, rrNum, type DbTrade } from "@/lib/trade-mappers";
 import { sessionLabel } from "@/lib/trade-constants";
+import { getReviewStatus } from "@/lib/review-status";
 import { cn } from "@/lib/utils";
 import { PageHeader, PageShell, PremiumEmptyState } from "@/components/ui/premium";
 
@@ -77,17 +79,19 @@ function hasItems(value: string[] | null | undefined): boolean {
 function reviewedFieldCount(t: DbTrade): number {
   return [
     hasText(t.reasoning),
-    hasItems(t.categories),
-    t.achieved_rr != null && t.achieved_rr !== "",
-    hasItems(t.mistake_tags),
-    hasItems(t.emotion_tags),
-    t.in_killzone === true,
+    hasText(t.lessons_learned),
+    hasText(t.notes),
+    hasText(t.mistakes_made),
+    hasText(t.private_notes),
+    hasText(t.emotion_before),
+    hasText(t.emotion_during),
+    hasText(t.emotion_after),
     (t.trade_screenshots?.length ?? 0) > 0,
   ].filter(Boolean).length;
 }
 
 function isReviewed(t: DbTrade): boolean {
-  return reviewedFieldCount(t) > 0;
+  return getReviewStatus(t) === "reviewed";
 }
 
 function asReviewed(t: DbTrade): ReviewedTrade {
@@ -108,6 +112,12 @@ function confidenceFor(sampleSize: number): Confidence {
   if (sampleSize >= 75) return "High confidence";
   if (sampleSize >= 30) return "Medium confidence";
   return "Low confidence";
+}
+
+function scopeStatusLabel(reviewedCount: number) {
+  if (reviewedCount >= REQUIRED_REVIEWED) return "Ready";
+  if (reviewedCount > 0) return "Building sample";
+  return "Early";
 }
 
 function confidenceShort(value: Confidence): string {
@@ -984,22 +994,22 @@ const scopePreviewCards = [
   {
     icon: Target,
     title: "Journal Patterns",
-    body: "Repeated strengths across reviewed trades.",
+    body: "Repeated strengths and weaknesses across reviewed trades.",
   },
   {
     icon: AlertTriangle,
     title: "Risk Tendencies",
-    body: "Conditions that repeatedly cost R.",
+    body: "Risk behaviors that repeatedly cost or protect R.",
   },
   {
     icon: Layers,
     title: "Setup Conditions",
-    body: "Setup context by session and instrument.",
+    body: "Setup context across sessions, instruments, and categories.",
   },
   {
     icon: ShieldCheck,
     title: "Behavior Patterns",
-    body: "Execution habits visible in reviews.",
+    body: "Execution habits visible in completed reviews.",
   },
 ];
 
@@ -1013,8 +1023,9 @@ function DiscoverySummary({
   patternsFound: number;
 }) {
   return (
-    <div className="mt-6 rounded-2xl bg-white/[0.03] px-4 py-3 shadow-[var(--shadow-card)] ring-1 ring-white/[0.04]">
-      <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
+    <div className="surface-card mt-6 rounded-2xl px-4 py-3">
+      <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
+        <SummaryMetric label="Status" value={scopeStatusLabel(reviewedCount)} />
         <SummaryMetric label="Reviewed trades" value={`${reviewedCount}`} />
         <SummaryMetric label="Confidence" value={confidenceShort(confidence)} />
         <SummaryMetric label="Patterns found" value={`${patternsFound}`} />
@@ -1025,7 +1036,7 @@ function DiscoverySummary({
 
 function SummaryMetric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-xl bg-white/[0.025] px-3 py-2 ring-1 ring-white/[0.035]">
+    <div className="flex items-center justify-between gap-3 rounded-xl bg-white/[0.045] px-3 py-2 ring-1 ring-white/[0.065]">
       <span className="text-xs font-medium text-muted-foreground">{label}</span>
       <span className="text-sm font-bold text-foreground">{value}</span>
     </div>
@@ -1034,7 +1045,7 @@ function SummaryMetric({ label, value }: { label: string; value: string }) {
 
 function AboutScopeCompact() {
   return (
-    <section className="mt-8 rounded-2xl bg-white/[0.025] p-4 ring-1 ring-white/[0.04]">
+    <section className="surface-card mt-8 rounded-2xl p-4">
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
         <div className="flex items-start gap-3">
           <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/10 ring-1 ring-primary/20">
@@ -1051,7 +1062,7 @@ function AboutScopeCompact() {
           {scopePreviewCards.map(({ icon: Icon, title }) => (
             <div
               key={title}
-              className="flex items-center gap-2 rounded-xl bg-white/[0.025] px-3 py-2 text-xs font-medium text-muted-foreground ring-1 ring-white/[0.035]"
+              className="flex items-center gap-2 rounded-xl bg-white/[0.045] px-3 py-2 text-xs font-medium text-muted-foreground ring-1 ring-white/[0.065]"
             >
               <Icon className="h-3.5 w-3.5 shrink-0 text-primary/80" />
               <span>{title}</span>
@@ -1066,33 +1077,81 @@ function AboutScopeCompact() {
 function LowDataScope({ reviewedCount }: { reviewedCount: number }) {
   const progress = Math.min(100, (reviewedCount / REQUIRED_REVIEWED) * 100);
   return (
-    <div className="mt-7 space-y-6">
-      <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-        className="glow-card rounded-2xl p-5"
-      >
-        <div className="flex items-center gap-3">
-          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 ring-1 ring-primary/20">
-            <Gauge className="h-5 w-5 text-primary" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="text-xs font-semibold text-muted-foreground">
-              {reviewedCount} / {REQUIRED_REVIEWED} reviewed trades
+    <div className="mt-5 space-y-5">
+      <div className="inline-flex items-center gap-2 rounded-full bg-white/[0.035] px-3 py-1.5 text-xs font-medium text-muted-foreground ring-1 ring-white/[0.07]">
+        <Check className="h-3.5 w-3.5 text-success/75" />
+        No signals. No predictions. Only your journal data.
+      </div>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+          className="glow-card rounded-2xl p-6"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 ring-1 ring-primary/20">
+              <Gauge className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <h2 className="text-base font-bold">Scope readiness</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {reviewedCount} / {REQUIRED_REVIEWED} complete reviews
+                </p>
+              </div>
             </div>
-            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
+            <span className="rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-primary ring-1 ring-primary/20">
+              {scopeStatusLabel(reviewedCount)}
+            </span>
+          </div>
+          <div className="mt-5 h-2 overflow-hidden rounded-full bg-white/[0.06]">
+            <div
+              className="h-full rounded-full bg-primary transition-all duration-500"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          <div className="mt-5 grid gap-3 text-xs sm:grid-cols-3">
+            {[
+              { label: "Minimum", value: "10 complete reviews" },
+              { label: "Recommended", value: "30+ complete reviews" },
+              { label: "Source", value: "Reviewed trades only" },
+            ].map((item) => (
               <div
-                className="h-full rounded-full bg-primary transition-all duration-500"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-            <p className="mt-2 text-xs text-muted-foreground">
-              Complete reviews add the setup, session, behavior, and mistake context Scope needs.
-            </p>
+                key={item.label}
+                className="rounded-xl bg-white/[0.025] px-3.5 py-3 ring-1 ring-white/[0.045]"
+              >
+                <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                  {item.label}
+                </div>
+                <div className="mt-1.5 font-semibold leading-5 text-foreground">{item.value}</div>
+              </div>
+            ))}
           </div>
-        </div>
-      </motion.div>
+          <p className="mt-4 text-xs leading-5 text-muted-foreground">
+            Scope becomes more reliable as your completed review sample grows.
+          </p>
+        </motion.div>
+        <section className="surface-card rounded-2xl p-5">
+          <h2 className="text-sm font-bold">Pattern inputs</h2>
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">
+            Complete reviews help Scope inspect patterns with better context.
+          </p>
+          <div className="mt-4 space-y-2 text-xs">
+            {[
+              "Reasoning",
+              "Mistakes / rule breaks",
+              "Session / emotion / category context",
+              "Planned vs achieved R",
+            ].map((item) => (
+              <div key={item} className="flex items-center gap-2 rounded-xl bg-white/[0.045] px-3 py-2 ring-1 ring-white/[0.065]">
+                <Check className="h-3.5 w-3.5 shrink-0 text-primary/75" />
+                <span className="text-muted-foreground">{item}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
 
       <section>
         <h2 className="text-lg font-bold tracking-tight">What Scope looks for</h2>
@@ -1103,7 +1162,7 @@ function LowDataScope({ reviewedCount }: { reviewedCount: number }) {
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-              className="flex h-full min-w-0 flex-col rounded-2xl bg-white/[0.03] p-4 text-left ring-1 ring-white/[0.05]"
+              className="surface-card flex h-full min-w-0 flex-col rounded-2xl p-4 text-left"
             >
               <div className="mb-3 grid h-9 w-9 place-items-center rounded-xl bg-primary/10 ring-1 ring-primary/15">
                 <Icon className="h-4 w-4 text-primary" />
@@ -1119,9 +1178,10 @@ function LowDataScope({ reviewedCount }: { reviewedCount: number }) {
         <h2 className="flex items-center gap-2 text-lg font-bold tracking-tight">
           <Lightbulb className="h-4 w-4 text-primary" /> Discoveries
         </h2>
-        <div className="mt-3 rounded-2xl bg-white/[0.025] p-5 ring-1 ring-white/[0.04]">
-          <p className="text-sm text-muted-foreground">
-            Patterns will appear here once enough reviews are completed.
+        <div className="surface-card mt-3 rounded-2xl p-5">
+          <h3 className="text-sm font-semibold">Not enough reviewed trades yet.</h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Scope will surface patterns after at least 10 complete reviews.
           </p>
         </div>
       </section>

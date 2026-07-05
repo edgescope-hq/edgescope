@@ -186,7 +186,7 @@ function SettingsPage() {
         icon={User}
         eyebrow="Workspace"
         title="Settings"
-        description="Profile, appearance, and security controls for your EdgeScope workspace."
+        description="Manage your profile, display preferences, and account security."
       />
 
       <div className="mt-8 grid grid-cols-1 gap-4 lg:grid-cols-[220px_1fr]">
@@ -282,19 +282,31 @@ function SettingsPage() {
           {active === "appearance" && (
             <div>
               <h2 className="text-lg font-bold">Appearance</h2>
-              <div className="mt-5 rounded-xl bg-white/[0.03] p-4 ring-1 ring-white/[0.06]">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                      Theme
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-primary/20 bg-primary/[0.055] p-4 ring-1 ring-primary/10">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-foreground">Dark theme</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        Active theme for EdgeScope.
+                      </div>
                     </div>
-                    <div className="mt-1 text-sm font-semibold">Dark</div>
+                    <span className="rounded-full bg-primary/15 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-primary ring-1 ring-primary/25">
+                      Active
+                    </span>
                   </div>
-                  <div className="text-right">
-                    <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                      Accent
+                </div>
+                <div className="rounded-2xl border border-primary/12 bg-primary/[0.025] p-4 ring-1 ring-primary/10">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-foreground/80">Light theme</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        Not available yet.
+                      </div>
                     </div>
-                    <div className="mt-1 text-sm font-semibold text-primary">EdgeScope Purple</div>
+                    <span className="rounded-full bg-primary/12 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-primary ring-1 ring-primary/20">
+                      Coming soon
+                    </span>
                   </div>
                 </div>
               </div>
@@ -337,22 +349,22 @@ function SettingsPage() {
                       await supabase.auth.signOut();
                       navigate({ to: "/auth", replace: true });
                     }}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-destructive/15 px-3.5 py-2 text-xs font-semibold text-destructive ring-1 ring-destructive/30 transition hover:bg-destructive/20"
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-destructive/[0.045] px-3.5 py-2 text-xs font-semibold text-destructive/78 ring-1 ring-destructive/[0.08] transition hover:bg-destructive/[0.07] hover:text-destructive/85"
                   >
                     <LogOut className="h-3.5 w-3.5" /> Sign out
                   </button>
                 </div>
               </div>
-              <div className="rounded-xl bg-destructive/[0.04] p-4 ring-1 ring-destructive/20">
-                <div className="flex items-center justify-between gap-4">
+              <div className="rounded-2xl bg-destructive/[0.01] p-5 ring-1 ring-destructive/[0.06]">
+                <div className="flex flex-wrap items-center justify-between gap-5">
                   <div>
-                    <div className="text-sm font-semibold text-destructive">
+                    <div className="text-sm font-semibold text-destructive/78">
                       Delete EdgeScope account
                     </div>
-                    <div className="text-xs leading-5 text-muted-foreground">
+                    <div className="mt-1 text-xs leading-5 text-muted-foreground">
                       {deletionScheduledFor
                         ? `Account deletion scheduled for ${formatDate(deletionScheduledFor)}. You can cancel before that date.`
-                        : "Schedule permanent deletion of your profile, login, trading journals, trades, reviews, screenshots, playbook notes, and private review content."}
+                        : "Schedule permanent deletion of your profile, login, trades, reviews, screenshots, playbook notes, and private review content."}
                     </div>
                   </div>
                   {deletionScheduledFor ? (
@@ -371,7 +383,7 @@ function SettingsPage() {
                         setDeleteConfirmText("");
                         setDeleteOpen(true);
                       }}
-                      className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-destructive/15 px-3.5 py-2 text-xs font-semibold text-destructive ring-1 ring-destructive/30 transition hover:bg-destructive/20"
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-destructive/[0.045] px-3.5 py-2 text-xs font-semibold text-destructive/78 ring-1 ring-destructive/[0.08] transition hover:bg-destructive/[0.07] hover:text-destructive/85"
                     >
                       <Trash2 className="h-3.5 w-3.5" /> Delete EdgeScope account
                     </button>
@@ -393,13 +405,6 @@ function SettingsPage() {
                   />
                   <div className="text-xs text-muted-foreground">Version 1.0.0</div>
                 </div>
-              </div>
-              <div className="rounded-xl bg-white/[0.03] p-5 ring-1 ring-white/[0.06]">
-                <h3 className="text-sm font-semibold">Privacy</h3>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                  Your journal is private by default. Trades are only shared when you explicitly
-                  choose to share them with a review circle.
-                </p>
               </div>
               <div className="rounded-xl bg-white/[0.03] p-5 ring-1 ring-white/[0.06]">
                 <h3 className="text-sm font-semibold">Legal</h3>
@@ -440,7 +445,7 @@ function SettingsPage() {
             className="glow-card w-full max-w-lg rounded-2xl p-6"
           >
             <div className="flex items-start gap-3">
-              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-destructive/15 text-destructive ring-1 ring-destructive/25">
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-destructive/[0.045] text-destructive/75 ring-1 ring-destructive/[0.08]">
                 <Trash2 className="h-5 w-5" />
               </div>
               <div>
@@ -459,7 +464,7 @@ function SettingsPage() {
               <input
                 value={deleteConfirmText}
                 onChange={(event) => setDeleteConfirmText(event.target.value)}
-                className="mt-1.5 w-full rounded-xl bg-white/[0.04] px-3.5 py-2.5 text-sm text-foreground ring-1 ring-white/[0.06] focus:outline-none focus:ring-2 focus:ring-destructive/40"
+                className="mt-1.5 w-full rounded-xl bg-white/[0.04] px-3.5 py-2.5 text-sm text-foreground ring-1 ring-white/[0.06] focus:outline-none focus:ring-2 focus:ring-destructive/25"
               />
             </label>
             <div className="mt-6 flex justify-end gap-2">
@@ -475,7 +480,7 @@ function SettingsPage() {
                 type="button"
                 onClick={() => scheduleDeletionM.mutate()}
                 disabled={deleteConfirmText !== "DELETE" || scheduleDeletionM.isPending}
-                className="rounded-xl bg-destructive px-5 py-2.5 text-sm font-semibold text-destructive-foreground ring-1 ring-destructive/40 transition hover:brightness-110 disabled:opacity-45"
+                className="rounded-xl bg-destructive/[0.48] px-5 py-2.5 text-sm font-semibold text-destructive-foreground ring-1 ring-destructive/[0.14] transition hover:bg-destructive/[0.62] disabled:opacity-45"
               >
                 {scheduleDeletionM.isPending ? "Scheduling..." : "Schedule account deletion"}
               </button>

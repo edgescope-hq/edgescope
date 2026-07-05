@@ -4,6 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { listAllUsers, amIAdmin } from "@/lib/invites.functions";
 import { Loader2, ShieldCheck, UserCog } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { PageHeader, PageShell } from "@/components/ui/premium";
 
 export const Route = createFileRoute("/_authenticated/people")({
   ssr: false,
@@ -56,15 +57,17 @@ function PeoplePage() {
   }
 
   return (
-    <div className="px-6 py-8 md:px-10 md:py-10">
-      <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight md:text-4xl">
-        <UserCog className="h-7 w-7 text-primary" /> People
-      </h1>
-
+    <PageShell>
+      <PageHeader
+        icon={UserCog}
+        eyebrow="Admin"
+        title="People"
+        description="Admin-only user overview for account support and moderation context."
+      />
       <div className="mt-5">
         <UsersTable />
       </div>
-    </div>
+    </PageShell>
   );
 }
 
@@ -81,31 +84,23 @@ function UsersTable() {
       ) : error ? (
         <div className="p-6 text-sm text-rose-300">{(error as Error).message}</div>
       ) : !users?.length ? (
-        <div className="p-6 text-sm text-muted-foreground">No users found.</div>
+        <div className="p-8 text-sm text-muted-foreground">No users found.</div>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-sm">
-            <thead className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <table className="w-full min-w-[640px] text-sm">
+            <thead className="bg-white/[0.012] text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
               <tr className="border-b border-white/[0.06]">
-                <th className="px-4 py-3 text-left">Name</th>
-                <th className="px-4 py-3 text-left">Email</th>
-                <th className="px-4 py-3 text-left">Joined</th>
-                <th className="px-4 py-3 text-left">Community</th>
+                <th className="px-4 py-3.5 text-left">Name</th>
+                <th className="px-4 py-3.5 text-left">Email</th>
+                <th className="px-4 py-3.5 text-left">Joined</th>
               </tr>
             </thead>
             <tbody>
               {users.map((u) => (
-                <tr key={u.id} className="border-b border-white/[0.04] last:border-0 hover:bg-white/[0.02]">
+                <tr key={u.id} className="border-b border-white/[0.045] transition-colors last:border-0 hover:bg-white/[0.025]">
                   <td className="px-4 py-3 font-semibold text-foreground">{u.name || "—"}</td>
                   <td className="px-4 py-3 text-muted-foreground">{u.email}</td>
                   <td className="px-4 py-3 text-muted-foreground tabular-nums">{fmt(u.join_date)}</td>
-                  <td className="px-4 py-3">
-                    {u.community_access ? (
-                      <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/15 px-2 py-0.5 text-[11px] font-bold text-emerald-300">
-                        <ShieldCheck className="h-3 w-3" /> Granted
-                      </span>
-                    ) : <span className="text-[11px] text-muted-foreground">—</span>}
-                  </td>
                 </tr>
               ))}
             </tbody>

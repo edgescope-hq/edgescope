@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { motion, AnimatePresence } from "framer-motion";
 import type { ReactNode } from "react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AreaChart,
   Area,
@@ -27,6 +27,7 @@ import {
   Smile,
   Search,
   X,
+  ChevronDown,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { EMOTIONS } from "@/lib/emotions";
@@ -45,6 +46,7 @@ import {
   weekdayStats,
   killzoneStats,
 } from "@/lib/analytics";
+import { getReviewStatus } from "@/lib/review-status";
 
 export const Route = createFileRoute("/_authenticated/analytics")({
   head: () => ({
@@ -76,7 +78,15 @@ type Report = {
   totalR: number;
   bestSession: string;
   worstSession: string;
-  sessions: { name: string; wins: number; losses: number }[];
+  sessions: {
+    name: string;
+    wins: number;
+    losses: number;
+    count: number;
+    winRate: number | null;
+    netR: number;
+    avgRR: number | null;
+  }[];
   killzones: {
     name: string;
     wins: number;
@@ -99,7 +109,14 @@ type Report = {
   equityInterval?: number;
   grades: { name: string; count: number; avgR: number }[];
   categories: CategoryRow[];
-  weekdays: { name: string; count: number; winRate: number | null; wins: number; losses: number }[];
+  weekdays: {
+    name: string;
+    count: number;
+    winRate: number | null;
+    wins: number;
+    losses: number;
+    netR: number | null;
+  }[];
   bestDay: string | null;
   worstDay: string | null;
   // New breakdowns (Phase 3 cleanup)
@@ -197,12 +214,7 @@ function filterByScope(all: DbTrade[], scope: ReportScope, periodKey: string | n
 }
 
 function isCompletedReview(trade: DbTrade): boolean {
-  return (
-    !!trade.reasoning?.trim() ||
-    !!trade.grade ||
-    (trade.mistake_tags?.length ?? 0) > 0 ||
-    (trade.trade_screenshots?.length ?? 0) > 0
-  );
+  return getReviewStatus(trade) === "reviewed";
 }
 
 function listWeekKeys(all: DbTrade[]): string[] {
@@ -336,7 +348,20 @@ function buildReport(trades: DbTrade[], scope: ReportScope): Report {
   const sessionOrder = SESSIONS.map((s) => ({ key: s.v, label: s.l }));
   const sessions = sessionOrder.map((o) => {
     const s = sStats.find((x) => x.key === o.key);
-    return { name: o.label, wins: s?.wins ?? 0, losses: s?.losses ?? 0 };
+    const subset = trades.filter((t) => t.session === o.key);
+    const rrList = subset
+      .map((t) => rrNum(t.achieved_rr))
+      .filter((_value, index) => subset[index].achieved_rr != null);
+    const netR = rrList.reduce((sum, value) => sum + value, 0);
+    return {
+      name: o.label,
+      wins: s?.wins ?? 0,
+      losses: s?.losses ?? 0,
+      count: s?.count ?? 0,
+      winRate: s?.winRate ?? null,
+      netR: Number(netR.toFixed(2)),
+      avgRR: rrList.length ? Number((netR / rrList.length).toFixed(2)) : null,
+    };
   });
   const eligibleSessions = sStats.filter((s) => s.winRate != null && s.count >= 5);
   const bestSessionStat = [...eligibleSessions].sort(
@@ -490,33 +515,17 @@ function buildReport(trades: DbTrade[], scope: ReportScope): Report {
   let equityInterval = 0;
   if (scope === "weekly") {
     equityChart = eq.map((p) => ({
-      d: new Date(p.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short" }),
+      d: p.tradeIndex === 0
+        ? "0"
+        : new Date(p.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short" }),
       v: p.cumR,
     }));
   } else if (scope === "monthly") {
-    equityChart = eq.map((p) => ({ d: p.date.slice(8), v: p.cumR }));
+    equityChart = eq.map((p) => ({ d: p.tradeIndex === 0 ? "0" : p.date.slice(8), v: p.cumR }));
     equityInterval = Math.max(0, Math.floor(equityChart.length / 8));
   } else {
-    const byMonth = new Map<string, number>();
-    for (const p of eq) byMonth.set(p.date.slice(0, 7), p.cumR);
-    const monthsShort = [
-      "Jan",
-      "Feb",
-      "Mar",
-      "Apr",
-      "May",
-      "Jun",
-      "Jul",
-      "Aug",
-      "Sep",
-      "Oct",
-      "Nov",
-      "Dec",
-    ];
-    equityChart = Array.from(byMonth.entries()).map(([k, v]) => ({
-      d: monthsShort[Number(k.split("-")[1]) - 1],
-      v,
-    }));
+    equityChart = eq.map((p) => ({ d: p.tradeIndex === 0 ? "0" : p.date, v: p.cumR }));
+    equityInterval = Math.max(0, Math.floor(equityChart.length / 8));
   }
 
   // Day-of-week analysis (Mon–Fri primary focus)
@@ -524,12 +533,20 @@ function buildReport(trades: DbTrade[], scope: ReportScope): Report {
   const TRADING_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
   const weekdays = TRADING_DAYS.map((d) => {
     const s = wdStats.find((x) => x.key === d);
+    const subset = trades.filter(
+      (t) => new Date(t.trade_date + "T00:00:00").toLocaleDateString("en-US", { weekday: "long" }) === d,
+    );
+    const rrList = subset
+      .map((t) => rrNum(t.achieved_rr))
+      .filter((_value, index) => subset[index].achieved_rr != null);
+    const netR = rrList.length ? rrList.reduce((sum, value) => sum + value, 0) : null;
     return {
       name: d,
       count: s?.count ?? 0,
       winRate: s?.winRate ?? null,
       wins: s?.wins ?? 0,
       losses: s?.losses ?? 0,
+      netR: netR == null ? null : Number(netR.toFixed(2)),
     };
   });
   const eligibleDays = weekdays.filter((d) => d.count >= 1 && d.winRate != null);
@@ -710,11 +727,11 @@ function Kpi({
   sub?: string;
 }) {
   return (
-    <div className="glow-card interactive-card group rounded-2xl p-5 hover:border-white/[0.1]">
+    <div className="glow-card group rounded-2xl p-5">
       <div className="flex items-center gap-3">
         <div
           className={cn(
-            "grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gradient-to-br ring-1 ring-white/[0.06] transition-transform duration-300 group-hover:scale-105",
+            "grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gradient-to-br ring-1 ring-white/[0.06]",
             toneMap[tone],
           )}
         >
@@ -732,13 +749,79 @@ function Kpi({
   );
 }
 
+function LowDataState({
+  title = "More trades needed",
+  description = "Log at least 3 trades to make this chart useful.",
+}: {
+  title?: string;
+  description?: string;
+}) {
+  return (
+    <div className="grid min-h-[160px] place-items-center rounded-xl bg-white/[0.02] px-5 py-8 text-center ring-1 ring-white/[0.04]">
+      <div>
+        <div className="text-sm font-semibold text-foreground">{title}</div>
+        <p className="mt-1 text-sm leading-5 text-muted-foreground">{description}</p>
+      </div>
+    </div>
+  );
+}
+
+function SimpleSectionState({ children }: { children: ReactNode }) {
+  return (
+    <p className="mt-4 rounded-xl bg-white/[0.02] px-4 py-3 text-sm text-muted-foreground ring-1 ring-white/[0.04]">
+      {children}
+    </p>
+  );
+}
+
+function signedR(value: number | null | undefined, decimals = 2): string {
+  if (value == null) return "—";
+  return `${value >= 0 ? "+" : ""}${value.toFixed(decimals)}R`;
+}
+
 type LifetimeWeekday = {
   name: string;
   count: number;
   winRate: number | null;
   wins: number;
   losses: number;
+  netR: number | null;
 };
+
+function SessionTooltip({
+  active,
+  payload,
+  label,
+}: {
+  active?: boolean;
+  payload?: Array<{ payload?: Report["sessions"][number] }>;
+  label?: string;
+}) {
+  if (!active) return null;
+  const data = payload?.[0]?.payload;
+  if (!data) return null;
+  if (data.count === 0) {
+    return (
+      <div className="rounded-xl border border-white/[0.08] bg-[oklch(0.13_0.018_270)] px-3 py-2 text-xs shadow-2xl shadow-black/40">
+        <div className="font-semibold text-foreground">{label}</div>
+        <div className="mt-1 text-muted-foreground">No trades logged</div>
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-xl border border-white/[0.08] bg-[oklch(0.13_0.018_270)] px-3 py-2 text-xs shadow-2xl shadow-black/40">
+      <div className="font-semibold text-foreground">{label}</div>
+      <div className="mt-2 grid gap-1 text-muted-foreground">
+        <div>Trades: <span className="text-foreground">{data.count}</span></div>
+        <div>Wins: <span className="text-foreground">{data.wins}</span></div>
+        <div>Losses: <span className="text-foreground">{data.losses}</span></div>
+        <div>Win rate: <span className="text-foreground">{data.winRate == null ? "—" : `${data.winRate.toFixed(1)}%`}</span></div>
+        <div>Net R: <span className={data.netR >= 0 ? "text-success" : "text-destructive"}>{signedR(data.netR)}</span></div>
+        <div>Avg R: <span className={data.avgRR == null ? "text-muted-foreground" : data.avgRR >= 0 ? "text-success" : "text-destructive"}>{signedR(data.avgRR)}</span></div>
+      </div>
+    </div>
+  );
+}
 
 function ReportView({
   r,
@@ -765,16 +848,66 @@ function ReportView({
     );
   }
 
+  const hasUsefulEquity = r.totalTrades >= 3;
+  const hasSessionSample = r.totalTrades >= 3;
+  const reviewGap = Math.max(0, r.totalTrades - r.reviewedTrades);
+  const executionGap =
+    r.plannedVsAchieved.plannedAvg != null && r.plannedVsAchieved.achievedAvg != null
+      ? Number((r.plannedVsAchieved.achievedAvg - r.plannedVsAchieved.plannedAvg).toFixed(2))
+      : null;
+  const repeatedCostlyMistake = r.mistakes.find((mistake) => mistake.count >= 2 && mistake.netR < 0);
+  const highlightCards = r.reviewedTrades < 10
+    ? [
+        {
+          title: "Review gap",
+          body: "Tracks trades that still need detailed review.",
+        },
+        {
+          title: "Execution gap",
+          body: "Compares planned R with achieved R.",
+        },
+        {
+          title: "Repeated costly mistake",
+          body: "Finds repeated rule-breaks linked to lost R.",
+        },
+      ]
+    : [
+        {
+          title: "Review gap",
+          body:
+            reviewGap === 0
+              ? "All trades in this period have completed detailed reviews."
+              : `${reviewGap} trade${reviewGap === 1 ? "" : "s"} still need detailed review.`,
+        },
+        {
+          title: "Execution gap",
+          body:
+            executionGap == null
+              ? "Add planned R to more trades to compare intent vs result."
+              : executionGap < 0
+                ? `Achieved R is ${Math.abs(executionGap).toFixed(2)}R below planned R on average.`
+                : executionGap > 0
+                  ? `Achieved R is ${executionGap.toFixed(2)}R above planned R on average.`
+                  : "Achieved R matches planned R on average.",
+        },
+        {
+          title: "Repeated costly mistake",
+          body: repeatedCostlyMistake
+            ? `${repeatedCostlyMistake.name} appeared ${repeatedCostlyMistake.count} times and is linked to ${signedR(repeatedCostlyMistake.netR)}.`
+            : "No repeated costly mistake detected yet.",
+        },
+      ];
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -8 }}
       transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-      className="mt-6 space-y-4"
+      className="mt-6 flex flex-col gap-4"
     >
       {/* Summary stats (first) */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
+      <div className="order-1 grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
         <Kpi icon={BarChart3} label="TOTAL TRADES" value={r.totalTrades} tone="info" />
         <Kpi
           icon={Target}
@@ -827,91 +960,58 @@ function ReportView({
         />
         <Kpi
           icon={Trophy}
-          label="REVIEWED TRADES"
+          label="COMPLETED REVIEWS"
           value={0}
           displayValue={`${r.reviewedTrades} / ${r.totalTrades}`}
           tone="success"
         />
       </div>
 
-      {/* Highlights (best/worst session, etc.) */}
-      <div className="glow-card rounded-2xl p-5">
+      {/* Highlights */}
+      <div className="order-2 section-card rounded-2xl p-5">
         <h3 className="flex items-center gap-2 text-sm font-semibold">
           <CalendarDays className="h-4 w-4 text-primary" /> Highlights
         </h3>
-        <dl className="mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-          <div className="flex items-center justify-between">
-            <dt className="text-muted-foreground">Best session</dt>
-            <dd
-              className={cn(
-                "font-semibold",
-                r.bestSession === "Not enough data" ? "text-muted-foreground/55" : "text-success",
-              )}
-            >
-              {r.bestSession}
-            </dd>
+        {r.reviewedTrades < 10 ? (
+          <div className="mt-4 rounded-xl bg-white/[0.025] p-4 ring-1 ring-white/[0.04]">
+            <div className="text-sm font-semibold">Not enough reviewed trades yet</div>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              Complete more detailed reviews to unlock reliable highlights.
+            </p>
+            <div className="mt-4 grid gap-2 text-xs sm:grid-cols-3">
+              {highlightCards.map((item) => (
+                <div
+                  key={item.title}
+                  className="rounded-lg bg-white/[0.025] px-3 py-2 text-muted-foreground ring-1 ring-white/[0.04]"
+                >
+                  <div className="font-semibold text-foreground/85">{item.title}</div>
+                  <p className="mt-1 leading-5">{item.body}</p>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="flex items-center justify-between">
-            <dt className="text-muted-foreground">Worst session</dt>
-            <dd
-              className={cn(
-                "font-semibold",
-                r.worstSession === "Not enough data"
-                  ? "text-muted-foreground/55"
-                  : "text-destructive",
-              )}
-            >
-              {r.worstSession}
-            </dd>
+        ) : (
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            {highlightCards.map((item) => (
+              <div
+                key={item.title}
+                className="rounded-xl bg-white/[0.025] p-4 ring-1 ring-white/[0.04]"
+              >
+                <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                  {item.title}
+                </div>
+                <p className="mt-2 text-sm leading-6 text-foreground/86">{item.body}</p>
+              </div>
+            ))}
           </div>
-          <div className="flex items-center justify-between">
-            <dt className="text-muted-foreground">Best category</dt>
-            <dd className="font-semibold text-primary">{r.bestCategory}</dd>
-          </div>
-          <div className="flex items-center justify-between">
-            <dt className="text-muted-foreground flex items-center gap-1.5">
-              <Trophy className="h-3.5 w-3.5 text-success" /> Best trade
-            </dt>
-            <dd className="font-semibold text-success">
-              {r.bestTrade ? `${r.bestTrade.sym} · +${r.bestTrade.r.toFixed(2)}R` : "—"}
-            </dd>
-          </div>
-          <div className="flex items-center justify-between">
-            <dt className="text-muted-foreground flex items-center gap-1.5">
-              <Flame className="h-3.5 w-3.5 text-destructive" /> Worst trade
-            </dt>
-            <dd className="font-semibold text-destructive">
-              {r.worstTrade ? `${r.worstTrade.sym} · ${r.worstTrade.r.toFixed(2)}R` : "—"}
-            </dd>
-          </div>
-          <div className="flex items-center justify-between">
-            <dt className="text-muted-foreground">Most traded instrument</dt>
-            <dd className="font-semibold">
-              {(() => {
-                const sorted = [...r.instruments].sort((a, b) => b.count - a.count);
-                return sorted[0] ? `${sorted[0].name} (${sorted[0].count})` : "—";
-              })()}
-            </dd>
-          </div>
-          <div className="flex items-center justify-between">
-            <dt className="text-muted-foreground">Longest win streak</dt>
-            <dd className="font-semibold">{r.longest.wins}</dd>
-          </div>
-          <div className="flex items-center justify-between">
-            <dt className="text-muted-foreground">Longest loss streak</dt>
-            <dd className="font-semibold">{r.longest.losses}</dd>
-          </div>
-        </dl>
+        )}
       </div>
-
       {/* Performance Charts — equity curve */}
-      <div className="glow-card rounded-2xl p-5">
+      <div className="order-3 section-card rounded-2xl p-5">
         <h3 className="text-sm font-semibold">Equity curve</h3>
         <div className="mt-4 h-[280px]">
-          {r.equity.length === 0 ? (
-            <div className="grid h-full place-items-center rounded-xl bg-white/[0.02] text-sm text-muted-foreground/55 ring-1 ring-white/[0.04]">
-              Not enough data.
-            </div>
+          {!hasUsefulEquity ? (
+            <LowDataState description="Log at least 3 trades to make the equity curve useful." />
           ) : (
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={r.equity} margin={{ top: 10, right: 8, left: -16, bottom: 8 }}>
@@ -962,11 +1062,14 @@ function ReportView({
       </div>
 
       {/* Session performance breakdown */}
-      <div className="glow-card rounded-2xl p-5">
+      <div className="order-6 section-card rounded-2xl p-5">
         <h3 className="flex items-center gap-2 text-sm font-semibold">
           <Layers className="h-4 w-4 text-primary" /> Session performance breakdown
         </h3>
         <div className="mt-4 h-[260px]">
+          {!hasSessionSample ? (
+            <LowDataState description="Log at least 3 trades to compare session performance." />
+          ) : (
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={r.sessions} margin={{ top: 10, right: 8, left: -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="oklch(1 0 0 / 0.04)" />
@@ -983,28 +1086,23 @@ function ReportView({
               />
               <Tooltip
                 cursor={{ fill: "oklch(1 0 0 / 0.03)" }}
-                contentStyle={{
-                  background: "oklch(0.13 0.018 270)",
-                  border: "1px solid oklch(1 0 0 / 0.08)",
-                  borderRadius: 12,
-                  fontSize: 12,
-                  boxShadow: "0 8px 32px -8px oklch(0 0 0 / 0.5)",
-                }}
+                content={<SessionTooltip />}
               />
-              <Bar dataKey="wins" stackId="a" fill="oklch(0.74 0.19 152)" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="wins" stackId="a" fill="oklch(0.62 0.13 152)" radius={[4, 4, 0, 0]} />
               <Bar dataKey="losses" stackId="a" fill="oklch(0.64 0.22 22)" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
+          )}
         </div>
       </div>
 
       {/* Category performance breakdown */}
-      <div className="glow-card rounded-2xl p-5">
+      <div className="order-8 section-card rounded-2xl p-5">
         <h3 className="flex items-center gap-2 text-sm font-semibold">
           <Grid3x3 className="h-4 w-4 text-primary" /> Category performance breakdown
         </h3>
         {r.categories.length === 0 ? (
-          <p className="mt-4 text-sm text-muted-foreground">No categories tagged yet.</p>
+          <SimpleSectionState>No categories tagged yet.</SimpleSectionState>
         ) : (
           <div className="mt-4 overflow-x-auto">
             <table className="w-full min-w-[720px] text-sm">
@@ -1054,13 +1152,13 @@ function ReportView({
       </div>
 
       {/* Mistake analysis */}
-      <div className="glow-card rounded-2xl p-5">
+      <div className="order-9 section-card rounded-2xl p-5">
         <h3 className="flex items-center gap-2 text-sm font-semibold">
           <Flame className="h-4 w-4 text-warning" /> Mistake analysis
         </h3>
         {r.mistakes.length === 0 ? (
           <p className="mt-4 text-sm text-muted-foreground">
-            No mistakes tagged yet. Tag rule-breaks when logging trades to see what costs you most.
+            No mistakes tagged yet.
           </p>
         ) : (
           <div className="mt-4 space-y-2">
@@ -1070,7 +1168,7 @@ function ReportView({
                 className="flex items-center justify-between rounded-xl bg-white/[0.03] px-4 py-2.5 ring-1 ring-white/[0.04]"
               >
                 <div className="flex items-center gap-3">
-                  <span className="rounded-md bg-destructive/15 px-2 py-0.5 text-[11px] font-semibold text-destructive">
+                  <span className="rounded-md bg-warning/[0.12] px-2 py-0.5 text-[11px] font-semibold text-warning ring-1 ring-warning/[0.18]">
                     {m.name}
                   </span>
                   <span className="text-xs text-muted-foreground">{m.count} occurrences</span>
@@ -1091,15 +1189,12 @@ function ReportView({
       </div>
 
       {/* Emotion insights */}
-      <div className="glow-card rounded-2xl p-5">
+      <div className="order-10 section-card rounded-2xl p-5">
         <h3 className="flex items-center gap-2 text-sm font-semibold">
           <Smile className="h-4 w-4 text-primary" /> Emotion Insights
         </h3>
         {r.emotions.total === 0 ? (
-          <p className="mt-4 text-sm text-muted-foreground">
-            No emotions logged yet. Tag emotions in Quick Capture to see how your state of mind
-            affects performance.
-          </p>
+          <SimpleSectionState>No emotions tagged yet.</SimpleSectionState>
         ) : (
           <>
             <div className="mt-4 overflow-x-auto">
@@ -1178,7 +1273,7 @@ function ReportView({
       </div>
 
       {/* Day Performance — lifetime */}
-      <div className="glow-card rounded-2xl p-5">
+      <div className="order-11 section-card rounded-2xl p-5">
         <h3 className="flex items-center gap-2 text-sm font-semibold">
           <CalendarDays className="h-4 w-4 text-primary" /> Day Performance
         </h3>
@@ -1209,6 +1304,18 @@ function ReportView({
                 <div className="mt-0.5 text-[11px] text-muted-foreground">
                   {d.count} trade{d.count === 1 ? "" : "s"}
                 </div>
+                <div
+                  className={cn(
+                    "mt-1 text-[11px] font-semibold tabular-nums",
+                    d.netR == null
+                      ? "text-muted-foreground"
+                      : d.netR >= 0
+                        ? "text-success"
+                        : "text-destructive",
+                  )}
+                >
+                  {d.netR == null ? "—" : `${signedR(d.netR)} net`}
+                </div>
               </div>
             );
           })}
@@ -1216,12 +1323,12 @@ function ReportView({
       </div>
 
       {/* Planned vs Achieved R */}
-      <div className="glow-card rounded-2xl p-5">
+      <div className="order-4 section-card rounded-2xl p-5">
         <h3 className="flex items-center gap-2 text-sm font-semibold">
           <Target className="h-4 w-4 text-primary" /> Planned vs Achieved R
         </h3>
         {r.plannedVsAchieved.sampleSize === 0 ? (
-          <p className="mt-4 text-sm text-muted-foreground/55">
+          <p className="mt-4 text-sm text-muted-foreground/82">
             Not enough data — log trades with entry/SL/TP prices to enable this view.
           </p>
         ) : (
@@ -1266,7 +1373,7 @@ function ReportView({
       </div>
 
       {/* Direction breakdown */}
-      <div className="glow-card rounded-2xl p-5">
+      <div className="order-5 section-card rounded-2xl p-5">
         <h3 className="flex items-center gap-2 text-sm font-semibold">
           <Activity className="h-4 w-4 text-primary" /> Direction performance
         </h3>
@@ -1275,15 +1382,15 @@ function ReportView({
             <div
               key={d.name}
               className={cn(
-                "rounded-xl bg-white/[0.03] p-4 ring-1",
-                d.name === "Long" ? "ring-primary/20" : "ring-info/20",
+                "rounded-xl bg-white/[0.025] p-4 ring-1",
+                d.name === "Long" ? "ring-success/12" : "ring-info/12",
               )}
             >
               <div className="flex items-center justify-between">
                 <div
                   className={cn(
                     "text-sm font-bold",
-                    d.name === "Long" ? "text-primary" : "text-info",
+                    d.name === "Long" ? "text-success/90" : "text-info/90",
                   )}
                 >
                   {d.name}
@@ -1293,18 +1400,21 @@ function ReportView({
               <div className="mt-3 grid grid-cols-3 gap-3 text-xs">
                 <div>
                   <div className="text-muted-foreground">Win rate</div>
-                  <div className="mt-0.5 font-semibold tabular-nums">{d.winRate.toFixed(1)}%</div>
+                  <div className="mt-0.5 font-semibold tabular-nums">
+                    {d.count === 0 ? "—" : `${d.winRate.toFixed(1)}%`}
+                  </div>
                 </div>
                 <div>
                   <div className="text-muted-foreground">Net R</div>
                   <div className="mt-0.5 font-semibold tabular-nums text-foreground">
-                    {d.netR >= 0 ? "+" : ""}
-                    {d.netR}R
+                    {d.count === 0 ? "—" : signedR(d.netR)}
                   </div>
                 </div>
                 <div>
                   <div className="text-muted-foreground">Avg R</div>
-                  <div className="mt-0.5 font-semibold tabular-nums">{d.avgRR.toFixed(2)}R</div>
+                  <div className="mt-0.5 font-semibold tabular-nums">
+                    {d.count === 0 ? "—" : signedR(d.avgRR)}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1312,48 +1422,14 @@ function ReportView({
         </div>
       </div>
 
-      {/* Grade distribution */}
-      <div className="glow-card rounded-2xl p-5">
-        <h3 className="flex items-center gap-2 text-sm font-semibold">
-          <Trophy className="h-4 w-4 text-warning" /> Grade distribution
-        </h3>
-        {r.grades.every((g) => g.count === 0) ? (
-          <p className="mt-4 text-sm text-muted-foreground">No grades logged yet.</p>
-        ) : (
-          <div className="mt-4 grid grid-cols-3 gap-3 sm:grid-cols-6">
-            {r.grades
-              .filter((g) => g.count > 0)
-              .map((g) => (
-                <div
-                  key={g.name}
-                  className="rounded-xl bg-white/[0.03] p-4 text-center ring-1 ring-white/[0.05]"
-                >
-                  <div className="text-lg font-bold text-warning">{g.name}</div>
-                  <div className="mt-1 text-2xl font-bold tabular-nums">{g.count}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">trades</div>
-                  <div
-                    className={cn(
-                      "mt-2 text-xs font-semibold",
-                      g.avgR >= 0 ? "text-success" : "text-destructive",
-                    )}
-                  >
-                    {g.avgR >= 0 ? "+" : ""}
-                    {g.avgR.toFixed(2)}R avg
-                  </div>
-                </div>
-              ))}
-          </div>
-        )}
-      </div>
-
       {/* Killzone performance */}
-      <div className="glow-card rounded-2xl p-5">
+      <div className="order-7 section-card rounded-2xl p-5">
         <h3 className="flex items-center gap-2 text-sm font-semibold">
           <Target className="h-4 w-4 text-primary" /> Killzone Performance
         </h3>
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="rounded-xl bg-white/[0.03] p-4 ring-1 ring-primary/20">
-            <div className="text-[10px] font-semibold tracking-[0.16em] text-primary">
+            <div className="rounded-xl bg-white/[0.025] p-4 ring-1 ring-primary/12">
+            <div className="text-[10px] font-semibold tracking-[0.16em] text-primary/85">
               IN KILLZONE
             </div>
             <div className="mt-3 grid grid-cols-3 gap-3 text-xs">
@@ -1405,13 +1481,47 @@ function ReportView({
         </div>
       </div>
 
+      {/* Grade distribution */}
+      <div className="order-12 section-card rounded-2xl p-5">
+        <h3 className="flex items-center gap-2 text-sm font-semibold">
+          <Trophy className="h-4 w-4 text-warning" /> Grade distribution
+        </h3>
+        {r.grades.every((g) => g.count === 0) ? (
+          <SimpleSectionState>No grades assigned yet.</SimpleSectionState>
+        ) : (
+          <div className="mt-4 grid grid-cols-3 gap-3 sm:grid-cols-6">
+            {r.grades
+              .filter((g) => g.count > 0)
+              .map((g) => (
+                <div
+                  key={g.name}
+                  className="rounded-xl bg-white/[0.03] p-4 text-center ring-1 ring-white/[0.05]"
+                >
+                  <div className="text-lg font-bold text-warning">{g.name}</div>
+                  <div className="mt-1 text-2xl font-bold tabular-nums">{g.count}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">trades</div>
+                  <div
+                    className={cn(
+                      "mt-2 text-xs font-semibold",
+                      g.avgR >= 0 ? "text-success" : "text-destructive",
+                    )}
+                  >
+                    {g.avgR >= 0 ? "+" : ""}
+                    {g.avgR.toFixed(2)}R avg
+                  </div>
+                </div>
+              ))}
+          </div>
+        )}
+      </div>
+
       {/* Instrument breakdown */}
-      <div className="glow-card rounded-2xl p-5">
+      <div className="order-13 section-card rounded-2xl p-5">
         <h3 className="flex items-center gap-2 text-sm font-semibold">
           <DollarSign className="h-4 w-4 text-primary" /> Instrument performance
         </h3>
         {r.instruments.length === 0 ? (
-          <p className="mt-4 text-sm text-muted-foreground">No instruments logged yet.</p>
+          <SimpleSectionState>No instruments logged yet.</SimpleSectionState>
         ) : (
           <div className="mt-4 overflow-x-auto">
             <table className="w-full min-w-[560px] text-sm">
@@ -1513,11 +1623,11 @@ function PeriodPickerModal({
               setQuery(event.target.value);
               setVisibleCount(5);
             }}
-            placeholder="Search month or year"
+            placeholder="Search range"
             className="w-full rounded-xl bg-white/[0.04] py-2.5 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground/50 ring-1 ring-white/[0.06] transition focus:outline-none focus:ring-2 focus:ring-primary/40"
           />
         </div>
-        <div className="mt-4 space-y-2">
+        <div className="mt-4 space-y-2 max-h-[300px] overflow-y-auto pr-1 scrollbar-thin">
           {visible.map((key) => {
             const isSelected = selected === key;
             return (
@@ -1543,7 +1653,7 @@ function PeriodPickerModal({
           })}
           {visible.length === 0 && (
             <div className="rounded-xl bg-white/[0.025] px-3.5 py-6 text-center text-sm text-muted-foreground ring-1 ring-white/[0.05]">
-              No ranges match your search.
+              {items.length === 0 ? "No trade history yet." : "No ranges match your search."}
             </div>
           )}
         </div>
@@ -1569,6 +1679,123 @@ function labelMonthKey(key: string): string {
   return d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
 }
 
+function generateWeekKeysInRange(oldestTradeDateStr: string | null): string[] {
+  if (!oldestTradeDateStr) return [];
+
+  const now = new Date();
+  const endWeek = startOfWeekISO(now);
+  const parsedStart = new Date(oldestTradeDateStr + "T00:00:00");
+  let startWeek = endWeek;
+  if (!isNaN(parsedStart.getTime())) {
+    startWeek = startOfWeekISO(parsedStart);
+  }
+
+  if (startWeek > endWeek) {
+    startWeek = endWeek;
+  }
+
+  const keys: string[] = [];
+  let current = new Date(endWeek);
+  const maxIterations = 2000;
+  let iterations = 0;
+  while (current >= startWeek && iterations < maxIterations) {
+    keys.push(weekKey(current));
+    current = addDays(current, -7);
+    iterations++;
+  }
+  return keys;
+}
+
+function generateMonthKeysInRange(oldestTradeDateStr: string | null): string[] {
+  if (!oldestTradeDateStr) return [];
+
+  const now = new Date();
+  const endMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const parsedStart = new Date(oldestTradeDateStr + "T00:00:00");
+  let startMonth = endMonth;
+  if (!isNaN(parsedStart.getTime())) {
+    startMonth = new Date(parsedStart.getFullYear(), parsedStart.getMonth(), 1);
+  }
+
+  if (startMonth > endMonth) {
+    startMonth = endMonth;
+  }
+
+  const keys: string[] = [];
+  let current = new Date(endMonth);
+  const maxIterations = 500;
+  let iterations = 0;
+  while (current >= startMonth && iterations < maxIterations) {
+    keys.push(ymKey(current));
+    current = new Date(current.getFullYear(), current.getMonth() - 1, 1);
+    iterations++;
+  }
+  return keys;
+}
+
+function PeriodDropdown({
+  value,
+  label,
+  options,
+  onChange,
+  ariaLabel,
+}: {
+  value: string;
+  label: string;
+  options: { value: string; label: string }[];
+  onChange: (value: string) => void;
+  ariaLabel: string;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="relative z-[80]">
+      {open && (
+        <button
+          type="button"
+          aria-label="Close period menu"
+          className="fixed inset-0 z-[70] cursor-default"
+          onClick={() => setOpen(false)}
+        />
+      )}
+      <button
+        type="button"
+        aria-label={ariaLabel}
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        className="relative z-[90] inline-flex min-w-[9.5rem] items-center justify-between gap-2 rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary ring-1 ring-primary/20 transition hover:bg-primary/15 focus:outline-none focus:ring-2 focus:ring-primary/35"
+      >
+        <span className="truncate">{label}</span>
+        <ChevronDown
+          className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")}
+        />
+      </button>
+      {open && (
+        <div className="absolute left-0 top-[calc(100%+0.45rem)] z-[90] w-44 overflow-hidden rounded-xl border border-white/[0.08] bg-[oklch(0.105_0.018_270)] p-1 shadow-2xl shadow-black/40">
+          {options.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+              className={cn(
+                "flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-xs font-semibold transition",
+                option.value === value
+                  ? "bg-primary/15 text-primary"
+                  : "text-muted-foreground hover:bg-white/[0.05] hover:text-foreground",
+              )}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AnalyticsPage() {
   const [tab, setTab] = useState<ReportScope>("overall");
   const [weekSel, setWeekSel] = useState<WeeklySelection>("current");
@@ -1581,58 +1808,50 @@ function AnalyticsPage() {
   const { data } = useSuspenseQuery({ queryKey: ["trades"], queryFn: () => fn() });
   const trades = useMemo(() => (data ?? []) as DbTrade[], [data]);
 
-  const monthKeys = useMemo(() => listMonthKeys(trades), [trades]);
-  const weekKeys = useMemo(() => {
-    const merged = new Set([...recentWeekKeys(80), ...listWeekKeys(trades)]);
-    return Array.from(merged).sort((a, b) => b.localeCompare(a));
+  const oldestTradeDate = useMemo(() => {
+    if (trades.length === 0) return null;
+    return trades.reduce((oldest, t) => {
+      if (!t.trade_date) return oldest;
+      return t.trade_date < oldest ? t.trade_date : oldest;
+    }, trades[0].trade_date || new Date().toISOString().split("T")[0]);
   }, [trades]);
-  const monthPickerKeys = useMemo(() => {
-    const merged = new Set([...recentMonthKeys(48), ...monthKeys]);
-    return Array.from(merged).sort((a, b) => b.localeCompare(a));
-  }, [monthKeys]);
 
-  // Week-ordering for custom week picker
-  const allWeekKeysSorted = useMemo(
-    () => [...weekKeys].sort(),
-    [weekKeys],
-  );
-  const weekNumber = useMemo(() => {
-    const map = new Map<string, number>();
-    allWeekKeysSorted.forEach((k, i) => map.set(k, i + 1));
-    return map;
-  }, [allWeekKeysSorted]);
+  const weekKeys = useMemo(() => {
+    return generateWeekKeysInRange(oldestTradeDate);
+  }, [oldestTradeDate]);
+
+  const monthPickerKeys = useMemo(() => {
+    return generateMonthKeysInRange(oldestTradeDate);
+  }, [oldestTradeDate]);
+
   const labelCustomWeek = useCallback(
     (key: string) => {
-      const num = weekNumber.get(key);
-      const range = labelWeekRange(key);
-      return num ? `Week ${num} · ${range}` : range;
+      return labelWeekRange(key);
     },
-    [weekNumber],
+    [],
   );
 
-  // Month-ordering for custom month picker
-  const allMonthKeysSorted = useMemo(
-    () => [...monthPickerKeys].sort(),
-    [monthPickerKeys],
-  );
-  const monthNumber = useMemo(() => {
-    const map = new Map<string, number>();
-    allMonthKeysSorted.forEach((k, i) => map.set(k, i + 1));
-    return map;
-  }, [allMonthKeysSorted]);
   const labelCustomMonth = useCallback(
     (key: string) => {
-      const num = monthNumber.get(key);
-      const label = labelMonthKey(key);
-      return num ? `Month ${num} · ${label}` : label;
+      return labelMonthKey(key);
     },
-    [monthNumber],
+    [],
   );
 
   const currentWeekKey = weekKey(new Date());
   const prevWeekKey = weekKey(addDays(new Date(), -7));
   const currentMonthKey = ymKey(new Date());
   const prevMonthKey = ymKey(new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1));
+  const hasPreviousWeek = weekKeys.includes(prevWeekKey);
+  const hasPreviousMonth = monthPickerKeys.includes(prevMonthKey);
+
+  useEffect(() => {
+    if (weekSel === "previous" && !hasPreviousWeek) setWeekSel("current");
+  }, [hasPreviousWeek, weekSel]);
+
+  useEffect(() => {
+    if (monthSel === "previous" && !hasPreviousMonth) setMonthSel("current");
+  }, [hasPreviousMonth, monthSel]);
 
   const activeKey =
     tab === "weekly"
@@ -1661,15 +1880,36 @@ function AnalyticsPage() {
     const ALL_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
     return ALL_DAYS.map((d) => {
       const s = stats.find((x) => x.key === d);
+      const subset = trades.filter(
+        (trade) =>
+          new Date(trade.trade_date + "T00:00:00").toLocaleDateString("en-US", {
+            weekday: "long",
+          }) === d,
+      );
+      const rrList = subset
+        .map((trade) => rrNum(trade.achieved_rr))
+        .filter((_value, index) => subset[index].achieved_rr != null);
+      const netR = rrList.length ? rrList.reduce((sum, value) => sum + value, 0) : null;
       return {
         name: d,
         count: s?.count ?? 0,
         winRate: s?.winRate ?? null,
         wins: s?.wins ?? 0,
         losses: s?.losses ?? 0,
+        netR: netR == null ? null : Number(netR.toFixed(2)),
       };
     });
   }, [trades]);
+
+  const handleWeekSelection = (value: WeeklySelection) => {
+    setWeekSel(value);
+    if (value === "custom") setWeekPickerOpen(true);
+  };
+
+  const handleMonthSelection = (value: MonthSelection) => {
+    setMonthSel(value);
+    if (value === "custom") setMonthPickerOpen(true);
+  };
 
   return (
     <PageShell>
@@ -1680,7 +1920,7 @@ function AnalyticsPage() {
         description="Performance organized into overall, weekly, monthly, and longer-horizon reports."
       />
 
-      <div className="glow-card mt-6 flex flex-wrap items-center gap-3 rounded-2xl p-3">
+      <div className="glow-card relative z-50 mt-6 flex flex-wrap items-center gap-3 overflow-visible rounded-2xl p-3">
         <div className="inline-flex flex-wrap rounded-xl bg-white/[0.03] p-1 ring-1 ring-white/[0.06]">
           <button
             onClick={() => setTab("overall")}
@@ -1718,88 +1958,51 @@ function AnalyticsPage() {
         </div>
 
         {tab === "weekly" && (
-          <div className="inline-flex flex-wrap items-center gap-1.5 rounded-xl bg-white/[0.03] px-2 py-1.5 ring-1 ring-white/[0.06]">
-            <span className="mr-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-              Period
-            </span>
-            {(
-              [
-                { id: "current" as WeeklySelection, label: "This week" },
-                { id: "previous" as WeeklySelection, label: "Last week" },
-              ]
-            ).map((item) => (
+          <div className="inline-flex flex-wrap items-center gap-2 rounded-xl bg-white/[0.03] px-2 py-1.5 ring-1 ring-white/[0.06]">
+            <PeriodDropdown
+              value={weekSel}
+              label={weekSel === "custom" ? "Custom week" : weekSel === "previous" ? "Previous week" : "This week"}
+              options={[
+                { value: "current", label: "This week" },
+                { value: "custom", label: "Custom week" },
+                ...(hasPreviousWeek ? [{ value: "previous", label: "Previous week" }] : []),
+              ]}
+              onChange={(value) => handleWeekSelection(value as WeeklySelection)}
+              ariaLabel="Weekly report period"
+            />
+            {weekSel === "custom" && (
               <button
-                key={item.id}
                 type="button"
-                onClick={() => setWeekSel(item.id)}
-                className={cn(
-                  "rounded-lg px-2.5 py-1.5 text-xs font-semibold transition",
-                  weekSel === item.id
-                    ? "bg-primary/20 text-primary"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
+                onClick={() => setWeekPickerOpen(true)}
+                className="rounded-lg px-2 py-1 text-xs font-semibold text-muted-foreground transition hover:bg-white/[0.05] hover:text-foreground"
               >
-                {item.label}
+                {labelWeekRange(customWeekKey)}
               </button>
-            ))}
-            <button
-              type="button"
-              onClick={() => {
-                setWeekSel("custom");
-                setWeekPickerOpen(true);
-              }}
-              className={cn(
-                "rounded-lg px-2.5 py-1.5 text-xs font-semibold transition",
-                weekSel === "custom"
-                  ? "bg-primary/20 text-primary"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {weekSel === "custom" ? "Custom" : "Custom"}
-            </button>
+            )}
           </div>
         )}
-
         {tab === "monthly" && (
-          <div className="inline-flex flex-wrap items-center gap-1.5 rounded-xl bg-white/[0.03] px-2 py-1.5 ring-1 ring-white/[0.06]">
-            <span className="mr-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-              Period
-            </span>
-            {(
-              [
-                { id: "current" as MonthSelection, label: "This month" },
-                { id: "previous" as MonthSelection, label: "Last month" },
-              ]
-            ).map((item) => (
+          <div className="inline-flex flex-wrap items-center gap-2 rounded-xl bg-white/[0.03] px-2 py-1.5 ring-1 ring-white/[0.06]">
+            <PeriodDropdown
+              value={monthSel}
+              label={monthSel === "custom" ? "Custom month" : monthSel === "previous" ? "Previous month" : "This month"}
+              options={[
+                { value: "current", label: "This month" },
+                { value: "custom", label: "Custom month" },
+                ...(hasPreviousMonth ? [{ value: "previous", label: "Previous month" }] : []),
+              ]}
+              onChange={(value) => handleMonthSelection(value as MonthSelection)}
+              ariaLabel="Monthly report period"
+            />
+            {monthSel === "custom" && (
               <button
-                key={item.id}
                 type="button"
-                onClick={() => setMonthSel(item.id)}
-                className={cn(
-                  "rounded-lg px-2.5 py-1.5 text-xs font-semibold transition",
-                  monthSel === item.id
-                    ? "bg-primary/20 text-primary"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
+                onClick={() => setMonthPickerOpen(true)}
+                className="rounded-lg px-2 py-1 text-xs font-semibold text-muted-foreground transition hover:bg-white/[0.05] hover:text-foreground"
               >
-                {item.label}
+                {cleanMonthLabel(customMonthKey)}
               </button>
-            ))}
-            <button
-              type="button"
-              onClick={() => {
-                setMonthSel("custom");
-                setMonthPickerOpen(true);
-              }}
-              className={cn(
-                "rounded-lg px-2.5 py-1.5 text-xs font-semibold transition",
-                monthSel === "custom"
-                  ? "bg-primary/20 text-primary"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {monthSel === "custom" ? "Custom" : "Custom"}
-            </button>
+            )}
           </div>
         )}
       </div>

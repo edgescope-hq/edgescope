@@ -45,9 +45,10 @@ function AuthenticatedLayout() {
   };
 
   return (
-    <div className="relative flex min-h-screen w-full flex-col md:flex-row bg-background text-foreground">
-      {/* Subtle aurora background */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-[420px] bg-[radial-gradient(ellipse_at_top,oklch(0.68_0.23_295/0.06),transparent_60%)] opacity-80" />
+    <div className="edgescope-app relative flex min-h-screen w-full flex-col overflow-hidden bg-[oklch(0.065_0.012_270)] text-foreground [--muted-foreground:oklch(0.70_0.018_270)] md:flex-row">
+      <div className="pointer-events-none absolute inset-0 app-orbit-texture opacity-80" aria-hidden />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-[520px] bg-[radial-gradient(ellipse_at_top,oklch(0.68_0.23_295/0.105),transparent_64%)]" aria-hidden />
+      <div className="pointer-events-none absolute right-[-18rem] top-[-16rem] h-[42rem] w-[42rem] rounded-full bg-primary/[0.035] blur-3xl" aria-hidden />
       <AppSidebar />
       <main className="relative flex-1 overflow-x-hidden">
         <Outlet />

@@ -9,10 +9,10 @@ import {
   Bell,
   Check,
   Copy,
+  PencilLine,
   MessageCircle,
   Plus,
   Send,
-  Settings as SettingsIcon,
   Trash2,
   UserMinus,
   Users,
@@ -63,6 +63,10 @@ function roleLabel(role: "owner" | "member") {
   return role === "owner" ? "Admin" : "Member";
 }
 
+function normalizeGroupName(value: string | null | undefined) {
+  return (value ?? "").trim().toLocaleLowerCase();
+}
+
 function CommunityPage() {
   const [activeGroup, setActiveGroup] = useState<GroupSummary | null>(null);
 
@@ -87,11 +91,6 @@ function CommunityPage() {
 // ============ Header (Edge ID + notifications + invitations) ============
 
 function Header() {
-  const profileFn = useServerFn(getMyProfile);
-  const { data: profile } = useQuery({
-    queryKey: ["my-profile"],
-    queryFn: () => profileFn(),
-  });
   const [showNotifs, setShowNotifs] = useState(false);
 
   const notifFn = useServerFn(listNotifications);
@@ -102,28 +101,10 @@ function Header() {
   });
   const unread = notifications.filter((n) => !n.read_at).length;
 
-  const copyEdgeId = () => {
-    if (!profile?.edge_id) return;
-    navigator.clipboard.writeText(profile.edge_id);
-    toast.success("EdgeScope ID copied");
-  };
-
   return (
     <div className="mb-6 space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          {profile?.edge_id && (
-            <button
-              onClick={copyEdgeId}
-              className="group flex items-center gap-2 rounded-xl bg-white/[0.04] px-3 py-2 text-xs ring-1 ring-white/[0.06] transition hover:bg-white/[0.07]"
-            >
-              <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                Your ID
-              </span>
-              <span className="font-mono text-sm font-semibold">{profile.edge_id}</span>
-              <Copy className="h-3.5 w-3.5 text-muted-foreground transition group-hover:text-foreground" />
-            </button>
-          )}
+      <div className="flex flex-wrap items-center justify-end gap-3">
+        <div className="ml-auto flex items-center gap-3">
           <button
             onClick={() => setShowNotifs(true)}
             className="relative rounded-xl bg-white/[0.04] p-2.5 ring-1 ring-white/[0.06] transition hover:bg-white/[0.07]"
@@ -137,8 +118,8 @@ function Header() {
             )}
           </button>
         </div>
-        <InvitationsBar />
       </div>
+      <InvitationsBar />
       <AnimatePresence>
         {showNotifs && <NotificationsPanel onClose={() => setShowNotifs(false)} />}
       </AnimatePresence>
@@ -328,11 +309,33 @@ function GroupsList({ onOpen }: { onOpen: (g: GroupSummary) => void }) {
     queryKey: ["my-groups"],
     queryFn: () => fn(),
   });
+  const tradesFn = useServerFn(listGroupTrades);
+  const groupIds = useMemo(() => groups.map((g) => g.id).join("|"), [groups]);
+  const { data: sharedTradeCounts = {} } = useQuery<Record<string, number>>({
+    queryKey: ["group-shared-trade-counts", groupIds],
+    enabled: groups.length > 0,
+    queryFn: async () => {
+      const entries = await Promise.all(
+        groups.map(async (g) => {
+          const trades = await tradesFn({ data: { groupId: g.id } });
+          return [g.id, trades.length] as const;
+        }),
+      );
+      return Object.fromEntries(entries);
+    },
+  });
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
+  const duplicateName = useMemo(() => {
+    const nextName = normalizeGroupName(name);
+    return nextName ? groups.some((group) => normalizeGroupName(group.name) === nextName) : false;
+  }, [groups, name]);
   const createFn = useServerFn(createGroup);
   const create = useMutation({
-    mutationFn: () => createFn({ data: { name: name.trim() } }),
+    mutationFn: () => {
+      if (duplicateName) throw new Error("You already have a group with this name.");
+      return createFn({ data: { name: name.trim() } });
+    },
     onSuccess: () => {
       toast.success("Group created");
       setName("");
@@ -379,9 +382,10 @@ function GroupsList({ onOpen }: { onOpen: (g: GroupSummary) => void }) {
               className="glow-card flex flex-col items-start gap-3 rounded-2xl p-5 text-left transition hover:ring-white/[0.12]"
             >
               <div className="flex w-full items-center justify-between">
+                <div className="min-w-0 truncate text-lg font-bold tracking-tight">{g.name}</div>
                 <span
                   className={cn(
-                    "rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ring-1",
+                    "shrink-0 rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ring-1",
                     g.role === "owner"
                       ? "bg-primary/15 text-primary ring-primary/25"
                       : "bg-white/[0.04] text-muted-foreground ring-white/[0.08]",
@@ -389,13 +393,16 @@ function GroupsList({ onOpen }: { onOpen: (g: GroupSummary) => void }) {
                 >
                   {roleLabel(g.role)}
                 </span>
-                <span className="text-[11px] text-muted-foreground">
-                  {g.member_count} member{g.member_count === 1 ? "" : "s"}
-                </span>
               </div>
-              <div className="text-lg font-bold tracking-tight">{g.name}</div>
-              <div className="text-[11px] text-muted-foreground">
-                Created {new Date(g.created_at).toLocaleDateString()}
+              <div className="w-full space-y-1 border-t border-white/[0.05] pt-3 text-xs text-muted-foreground">
+                <div>
+                  Shared trades <span className="text-muted-foreground/45">&mdash;</span>{" "}
+                  <span className="font-semibold tabular-nums text-foreground">{sharedTradeCounts[g.id] ?? 0}</span>
+                </div>
+                <div>
+                  Members <span className="text-muted-foreground/45">&mdash;</span>{" "}
+                  <span className="font-semibold tabular-nums text-foreground">{g.member_count}</span>
+                </div>
               </div>
             </button>
           ))}
@@ -408,6 +415,10 @@ function GroupsList({ onOpen }: { onOpen: (g: GroupSummary) => void }) {
             <form
               onSubmit={(e) => {
                 e.preventDefault();
+                if (duplicateName) {
+                  toast.error("You already have a group with this name.");
+                  return;
+                }
                 if (name.trim()) create.mutate();
               }}
               className="space-y-4"
@@ -419,10 +430,17 @@ function GroupsList({ onOpen }: { onOpen: (g: GroupSummary) => void }) {
                 <input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Weekly trade review"
                   maxLength={60}
-                  className="mt-1.5 w-full rounded-xl bg-white/[0.04] px-3 py-2.5 text-sm ring-1 ring-white/[0.06] focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  className={cn(
+                    "mt-1.5 w-full rounded-xl bg-white/[0.04] px-3 py-2.5 text-sm ring-1 focus:outline-none focus:ring-2",
+                    duplicateName ? "ring-destructive/25 focus:ring-destructive/30" : "ring-white/[0.06] focus:ring-primary/40",
+                  )}
                 />
+                {duplicateName && (
+                  <p className="mt-1.5 text-[11px] text-destructive/85">
+                    You already have a group with this name.
+                  </p>
+                )}
               </div>
               <div className="flex justify-end gap-2">
                 <button
@@ -434,7 +452,7 @@ function GroupsList({ onOpen }: { onOpen: (g: GroupSummary) => void }) {
                 </button>
                 <button
                   type="submit"
-                  disabled={!name.trim() || create.isPending}
+                  disabled={!name.trim() || duplicateName || create.isPending}
                   className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] disabled:opacity-50"
                 >
                   {create.isPending ? "Creating…" : "Create"}
@@ -506,9 +524,6 @@ function GroupDetail({ group, onBack }: { group: GroupSummary; onBack: () => voi
       <div className="mt-3 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">{group.name}</h2>
-          <p className="text-xs text-muted-foreground">
-            {members.length} member{members.length === 1 ? "" : "s"}
-          </p>
         </div>
         <div className="flex gap-1 rounded-xl bg-white/[0.03] p-1 ring-1 ring-white/[0.06]">
           {(["trades", "members", "settings"] as const).map((t) => (
@@ -522,7 +537,7 @@ function GroupDetail({ group, onBack }: { group: GroupSummary; onBack: () => voi
                   : "text-muted-foreground hover:text-foreground",
               )}
             >
-              {t}
+              {t === "trades" ? "Shared Trades" : t}
             </button>
           ))}
         </div>
@@ -544,10 +559,13 @@ function TradesTab({ group, trades }: { group: GroupSummary; trades: GroupTrade[
     <div className="mt-6 space-y-3">
       {trades.length === 0 ? (
         <div className="glow-card rounded-2xl p-10 text-center">
-          <MessageCircle className="mx-auto h-8 w-8 text-muted-foreground/60" />
-          <h3 className="mt-3 text-base font-semibold">No shared trades yet</h3>
+          <MessageCircle className="mx-auto h-8 w-8 text-muted-foreground/78" />
+          <h3 className="mt-3 text-base font-semibold">No shared trades yet.</h3>
           <p className="mt-1 text-sm text-muted-foreground">
-            Toggle “Share with Community” when logging a trade to show it here.
+            When you share a trade, group members will only see the screenshot, instrument, result, date, and reasoning.
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Your full journal stays private.
           </p>
         </div>
       ) : (
@@ -589,18 +607,6 @@ function TradeCard({ trade, onOpen }: { trade: GroupTrade; onOpen: () => void })
         <div className="flex items-center justify-between gap-2">
           <div className="font-bold">{trade.instrument}</div>
           <div className="flex gap-1.5">
-            {trade.direction && (
-              <span
-                className={cn(
-                  "rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ring-1",
-                  trade.direction === "long"
-                    ? "bg-success/15 text-success ring-success/25"
-                    : "bg-destructive/15 text-destructive ring-destructive/25",
-                )}
-              >
-                {trade.direction}
-              </span>
-            )}
             {trade.result && (
               <span
                 className={cn(
@@ -608,7 +614,7 @@ function TradeCard({ trade, onOpen }: { trade: GroupTrade; onOpen: () => void })
                   trade.result === "win"
                     ? "bg-success/15 text-success ring-success/25"
                     : trade.result === "loss"
-                      ? "bg-destructive/15 text-destructive ring-destructive/25"
+                      ? "bg-destructive/[0.055] text-destructive/80 ring-destructive/[0.12]"
                       : "bg-info/15 text-info ring-info/25",
                 )}
               >
@@ -620,11 +626,8 @@ function TradeCard({ trade, onOpen }: { trade: GroupTrade; onOpen: () => void })
         <p className="mt-2 line-clamp-2 text-[12px] text-muted-foreground">
           {trade.reasoning || "No reasoning provided."}
         </p>
-        <div className="mt-3 flex items-center justify-between text-[11px] text-muted-foreground">
-          <span className="font-mono">{trade.trader_edge_id}</span>
-          <span className="flex items-center gap-1">
-            <MessageCircle className="h-3 w-3" /> {trade.comment_count}
-          </span>
+        <div className="mt-3 text-[11px] text-muted-foreground">
+          {new Date(trade.trade_date).toLocaleDateString()}
         </div>
       </div>
     </button>
@@ -690,24 +693,10 @@ function TradeDetail({
     <ModalShell onClose={onClose} title={trade.instrument} wide>
       <div className="space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <span className="font-mono text-foreground/80">{trade.trader_edge_id}</span>
-            <span>·</span>
-            <span>{new Date(trade.trade_date).toLocaleDateString()}</span>
+          <div className="text-muted-foreground">
+            {new Date(trade.trade_date).toLocaleDateString()}
           </div>
           <div className="flex gap-1.5">
-            {trade.direction && (
-              <span
-                className={cn(
-                  "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ring-1",
-                  trade.direction === "long"
-                    ? "bg-success/15 text-success ring-success/25"
-                    : "bg-destructive/15 text-destructive ring-destructive/25",
-                )}
-              >
-                {trade.direction}
-              </span>
-            )}
             {trade.result && (
               <span
                 className={cn(
@@ -715,7 +704,7 @@ function TradeDetail({
                   trade.result === "win"
                     ? "bg-success/15 text-success ring-success/25"
                     : trade.result === "loss"
-                      ? "bg-destructive/15 text-destructive ring-destructive/25"
+                      ? "bg-destructive/[0.055] text-destructive/80 ring-destructive/[0.12]"
                       : "bg-info/15 text-info ring-info/25",
                 )}
               >
@@ -1109,10 +1098,35 @@ function SettingsTab({ group, onDeleted }: { group: GroupSummary; onDeleted: () 
   const [name, setName] = useState(group.name);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const isOwner = group.role === "owner";
+  const profileFn = useServerFn(getMyProfile);
+  const { data: profile } = useQuery({
+    queryKey: ["my-profile"],
+    queryFn: () => profileFn(),
+  });
+  const groupsFn = useServerFn(listMyGroups);
+  const { data: groups = [] } = useQuery({
+    queryKey: ["my-groups"],
+    queryFn: () => groupsFn(),
+  });
+  const duplicateName = useMemo(() => {
+    const nextName = normalizeGroupName(name);
+    return nextName
+      ? groups.some((item) => item.id !== group.id && normalizeGroupName(item.name) === nextName)
+      : false;
+  }, [group.id, groups, name]);
+
+  const copyEdgeId = () => {
+    if (!profile?.edge_id) return;
+    navigator.clipboard.writeText(profile.edge_id);
+    toast.success("EdgeScope ID copied");
+  };
 
   const renameFn = useServerFn(renameGroup);
   const rename = useMutation({
-    mutationFn: () => renameFn({ data: { id: group.id, name: name.trim() } }),
+    mutationFn: () => {
+      if (duplicateName) throw new Error("You already have a group with this name.");
+      return renameFn({ data: { id: group.id, name: name.trim() } });
+    },
     onSuccess: () => {
       toast.success("Group renamed");
       qc.invalidateQueries({ queryKey: ["my-groups"] });
@@ -1131,49 +1145,82 @@ function SettingsTab({ group, onDeleted }: { group: GroupSummary; onDeleted: () 
     onError: (e: Error) => toast.error(e.message),
   });
 
-  if (!isOwner) {
-    return (
-      <div className="mt-6 glow-card rounded-2xl p-6 text-sm text-muted-foreground">
-        Only the group admin can manage settings.
-      </div>
-    );
-  }
-
   return (
     <div className="mt-6 space-y-4">
+      {profile?.edge_id && (
+        <div className="glow-card rounded-2xl p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold">Your EdgeScope ID</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Share this ID with a group admin when they need to invite you.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={copyEdgeId}
+              className="group inline-flex items-center gap-2 rounded-xl bg-white/[0.04] px-3 py-2 text-xs ring-1 ring-white/[0.06] transition hover:bg-white/[0.07]"
+            >
+              <span className="font-mono text-sm font-semibold">{profile.edge_id}</span>
+              <Copy className="h-3.5 w-3.5 text-muted-foreground transition group-hover:text-foreground" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!isOwner && (
+        <div className="glow-card rounded-2xl p-6 text-sm text-muted-foreground">
+          Only the group admin can manage settings.
+        </div>
+      )}
+
+      {isOwner && (
+        <>
       <div className="glow-card rounded-2xl p-5">
         <h3 className="flex items-center gap-2 text-sm font-semibold">
-          <SettingsIcon className="h-4 w-4 text-primary" /> Group name
+          <PencilLine className="h-4 w-4 text-primary" /> Group name
         </h3>
         <div className="mt-3 flex gap-2">
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
             maxLength={60}
-            className="flex-1 rounded-xl bg-white/[0.04] px-3 py-2.5 text-sm ring-1 ring-white/[0.06] focus:outline-none focus:ring-2 focus:ring-primary/40"
+            className={cn(
+              "flex-1 rounded-xl bg-white/[0.04] px-3 py-2.5 text-sm ring-1 focus:outline-none focus:ring-2",
+              duplicateName ? "ring-destructive/25 focus:ring-destructive/30" : "ring-white/[0.06] focus:ring-primary/40",
+            )}
           />
           <button
-            onClick={() => rename.mutate()}
-            disabled={!name.trim() || name.trim() === group.name || rename.isPending}
+            onClick={() => {
+              if (duplicateName) {
+                toast.error("You already have a group with this name.");
+                return;
+              }
+              rename.mutate();
+            }}
+            disabled={!name.trim() || duplicateName || name.trim() === group.name || rename.isPending}
             className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] disabled:opacity-50"
           >
             <Check className="h-4 w-4" /> Save
           </button>
         </div>
+        {duplicateName && (
+          <p className="mt-1.5 text-[11px] text-destructive/85">
+            You already have a group with this name.
+          </p>
+        )}
       </div>
 
-      <div className="rounded-2xl bg-white/[0.02] p-5 ring-1 ring-white/[0.06]">
-        <h3 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
-          <Trash2 className="h-4 w-4 text-destructive/70" /> Danger zone
-        </h3>
-        <p className="mt-1 text-xs text-muted-foreground/70">
-          Deleting a group removes all its members, invitations, and comments permanently.
+      <div className="rounded-2xl bg-primary/[0.035] p-5 ring-1 ring-primary/10">
+        <h3 className="text-sm font-semibold text-foreground">Group management</h3>
+        <p className="mt-1 text-xs text-muted-foreground/75">
+          Group deletion stays behind confirmation and cannot be undone.
         </p>
         <button
           onClick={() => setConfirmDelete(true)}
-          className="mt-3 rounded-xl bg-destructive/10 px-4 py-2 text-sm font-semibold text-destructive/80 ring-1 ring-destructive/20 hover:bg-destructive/15 hover:text-destructive"
+          className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-destructive/[0.04] px-3.5 py-2 text-xs font-semibold text-destructive/75 ring-1 ring-destructive/10 transition hover:bg-destructive/[0.065] hover:text-destructive/85 hover:ring-destructive/15"
         >
-          Delete group
+          <Trash2 className="h-3.5 w-3.5" /> Delete group
         </button>
       </div>
 
@@ -1189,6 +1236,8 @@ function SettingsTab({ group, onDeleted }: { group: GroupSummary; onDeleted: () 
           del.mutate();
         }}
       />
+        </>
+      )}
     </div>
   );
 }
