@@ -38,6 +38,12 @@ dist-ssr
 *.sln
 *.sw?
 
-# Build output
 build
 .vercel
+
+# AI-tooling and generated cache
+.agents/
+.codex/
+.lovable/
+__pycache__/
+*.pyc

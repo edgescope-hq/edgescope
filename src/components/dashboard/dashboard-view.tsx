@@ -456,7 +456,7 @@ export function DashboardView() {
     () => realDb.filter((t) => t.trade_date === todayStr),
     [realDb, todayStr],
   );
-  const todayNetR = useMemo(() => sumRecordedR(todayTrades), [todayTrades]);
+  const todayNetR = useMemo(() => sumRecordedR(todayTrades.map(toAnalytics)), [todayTrades]);
 
   // ------ Journal completeness reminder ------
   // Status is derived from quick-capture essentials plus screenshot + reasoning.
