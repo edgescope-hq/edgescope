@@ -83,12 +83,12 @@ function AuthenticatedLayout() {
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-4 backdrop-blur-md">
           <div className="glow-card w-full max-w-lg rounded-2xl p-6">
             <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-primary/85">
-              Account deletion scheduled
+              Account deletion pending review
             </div>
             <h2 className="mt-2 text-xl font-bold">Keep your EdgeScope account?</h2>
             <p className="mt-3 text-sm leading-6 text-muted-foreground">
-              This account is scheduled for deletion. Cancel deletion to continue using EdgeScope,
-              or sign out and keep the deletion request active.
+              This account is pending deletion review. Cancel the request to continue using
+              EdgeScope, or sign out to keep the request active.
             </p>
             <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button

@@ -82,7 +82,8 @@ function PrivacyPage() {
       <LegalSection title="Account Deletion">
         <p>
           Where supported, account deletion is scheduled with a 15-day grace period so you can
-          cancel before permanent removal. After that period, deletion removes related profile,
+          cancel before permanent removal. Permanent deletion is completed manually by the EdgeScope
+          team until automated purging is available. After that, deletion removes related profile,
           journal, review, screenshot, playbook, and community data connected to your user account.
         </p>
       </LegalSection>

@@ -337,7 +337,7 @@ function buildReport(trades: DbTrade[], scope: ReportScope): Report {
   const decided = wins + losses;
   const winRate = decided ? (wins / decided) * 100 : null;
 
-  const rrs = trades.map((t) => recordedR(t.achieved_rr)).filter((n): n is number => n !== null);
+  const rrs = ana.map((t) => recordedR(t.achieved_rr)).filter((n): n is number => n !== null);
   const totalR = rrs.reduce((a, b) => a + b, 0);
   const avgRR = rrs.length ? totalR / rrs.length : 0;
 
@@ -366,7 +366,7 @@ function buildReport(trades: DbTrade[], scope: ReportScope): Report {
   const sessionOrder = SESSIONS.map((s) => ({ key: s.v, label: s.l }));
   const sessions = sessionOrder.map((o) => {
     const s = sStats.find((x) => x.key === o.key);
-    const subset = trades.filter((t) => t.session === o.key);
+    const subset = ana.filter((t) => t.session === o.key);
     const rrList = subset
       .map((t) => rrNum(t.achieved_rr))
       .filter((_value, index) => subset[index].achieved_rr != null);
@@ -408,7 +408,7 @@ function buildReport(trades: DbTrade[], scope: ReportScope): Report {
 
   const cStats = categoryStats(ana);
   const categories: CategoryRow[] = cStats.map((s) => {
-    const subset = trades.filter((t) => (t.categories ?? []).includes(s.key));
+    const subset = ana.filter((t) => (t.categories ?? []).includes(s.key));
     const wList = subset.filter((t) => t.result === "win").map((t) => rrNum(t.achieved_rr));
     const lList = subset.filter((t) => t.result === "loss").map((t) => rrNum(t.achieved_rr));
     const net = subset.reduce((a, b) => a + rrNum(b.achieved_rr), 0);
@@ -428,9 +428,12 @@ function buildReport(trades: DbTrade[], scope: ReportScope): Report {
   });
   const bestCategory = categories[0]?.name ?? "—";
 
+  const closedTrades = trades.filter(
+    (t) => t.result === "win" || t.result === "loss" || t.result === "breakeven",
+  );
   let best: DbTrade | null = null,
     worst: DbTrade | null = null;
-  for (const t of trades) {
+  for (const t of closedTrades) {
     const v = rrNum(t.achieved_rr);
     if (!best || v > rrNum(best.achieved_rr)) best = t;
     if (!worst || v < rrNum(worst.achieved_rr)) worst = t;
@@ -440,8 +443,8 @@ function buildReport(trades: DbTrade[], scope: ReportScope): Report {
 
   const gradeOrder = ["A+", "A", "B+", "B", "C", "D"];
   const grades = gradeOrder.map((g) => {
-    const sub = trades.filter((t) => t.grade === g);
-    const r = sub.map((t) => rrNum(t.achieved_rr));
+    const sub = ana.filter((t) => t.grade === g);
+    const r = sub.map((t) => recordedR(t.achieved_rr)).filter((n): n is number => n !== null);
     return {
       name: g,
       count: sub.length,
@@ -463,6 +466,7 @@ function buildReport(trades: DbTrade[], scope: ReportScope): Report {
       const l = subset.filter((t) => t.result === "loss").length;
       const decided = w + l;
       const rrList = subset
+        .filter((t) => t.result === "win" || t.result === "loss" || t.result === "breakeven")
         .map((t) => recordedR(t.achieved_rr))
         .filter((n): n is number => n !== null);
       const net = rrList.reduce((a, b) => a + b, 0);
@@ -484,6 +488,7 @@ function buildReport(trades: DbTrade[], scope: ReportScope): Report {
     const ll = subset.filter((t) => t.result === "loss").length;
     const decided = w + ll;
     const rrList = subset
+      .filter((t) => t.result === "win" || t.result === "loss" || t.result === "breakeven")
       .map((t) => recordedR(t.achieved_rr))
       .filter((n): n is number => n !== null);
     const net = rrList.reduce((a, b) => a + b, 0);
@@ -498,6 +503,7 @@ function buildReport(trades: DbTrade[], scope: ReportScope): Report {
 
   // Planned vs Achieved — only trades where both are present
   const pairBoth = trades
+    .filter((t) => t.result === "win" || t.result === "loss" || t.result === "breakeven")
     .map((t) => ({
       planned: t.planned_rr != null && t.planned_rr !== "" ? parseFloat(String(t.planned_rr)) : NaN,
       achieved: t.achieved_rr != null && t.achieved_rr !== "" ? Number(t.achieved_rr) : NaN,
@@ -520,7 +526,8 @@ function buildReport(trades: DbTrade[], scope: ReportScope): Report {
   const mistakeMap = new Map<string, { count: number; netR: number }>();
   for (const t of trades) {
     const tags = (t.mistake_tags ?? []) as string[];
-    const r = rrNum(t.achieved_rr);
+    const closed = t.result === "win" || t.result === "loss" || t.result === "breakeven";
+    const r = closed ? rrNum(t.achieved_rr) : 0;
     for (const tag of tags) {
       if (!tag) continue;
       const cur = mistakeMap.get(tag) ?? { count: 0, netR: 0 };
@@ -561,6 +568,7 @@ function buildReport(trades: DbTrade[], scope: ReportScope): Report {
         new Date(t.trade_date + "T00:00:00").toLocaleDateString("en-US", { weekday: "long" }) === d,
     );
     const rrList = subset
+      .filter((t) => t.result === "win" || t.result === "loss" || t.result === "breakeven")
       .map((t) => rrNum(t.achieved_rr))
       .filter((_value, index) => subset[index].achieved_rr != null);
     const netR = rrList.length ? rrList.reduce((sum, value) => sum + value, 0) : null;
@@ -588,11 +596,17 @@ function buildReport(trades: DbTrade[], scope: ReportScope): Report {
     return d ? (w / d) * 100 : null;
   };
   const avgROf = (arr: typeof trades) => {
-    const vals = arr.map((t) => recordedR(t.achieved_rr)).filter((r): r is number => r != null);
+    const vals = arr
+      .filter((t) => t.result === "win" || t.result === "loss" || t.result === "breakeven")
+      .map((t) => recordedR(t.achieved_rr))
+      .filter((r): r is number => r != null);
     return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
   };
   const netROf = (arr: typeof trades) => {
-    const vals = arr.map((t) => recordedR(t.achieved_rr)).filter((r): r is number => r != null);
+    const vals = arr
+      .filter((t) => t.result === "win" || t.result === "loss" || t.result === "breakeven")
+      .map((t) => recordedR(t.achieved_rr))
+      .filter((r): r is number => r != null);
     return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
   };
   const killzoneDiscipline = {

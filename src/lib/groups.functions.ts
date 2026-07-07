@@ -747,7 +747,8 @@ export const getTradeShares = createServerFn({ method: "GET" })
     if (error) throw safeError(error);
     return {
       groupIds: (shares ?? []).map((s) => s.group_id),
-      includeReasoning: (shares ?? []).some((s) => s.include_reasoning),
+      includeReasoning:
+        (shares ?? []).length > 0 && (shares ?? []).every((s) => s.include_reasoning),
     };
   });
 

@@ -34,6 +34,23 @@ function hasText(v: string | null | undefined): boolean {
   return !!v?.trim();
 }
 
+function parsePlannedRR(raw: number | string | null | undefined): number | null {
+  if (raw == null) return null;
+  if (typeof raw === "number") return Number.isFinite(raw) && raw > 0 ? raw : null;
+  const text = raw.trim().toUpperCase().replace(/R$/, "").trim();
+  if (!text) return null;
+  const ratio = text.match(/^(\d+(?:\.\d+)?)\s*[:/]\s*(\d+(?:\.\d+)?)$/);
+  if (ratio) {
+    const risk = Number(ratio[1]);
+    const reward = Number(ratio[2]);
+    if (!Number.isFinite(risk) || !Number.isFinite(reward) || risk <= 0) return null;
+    const rr = reward / risk;
+    return rr > 0 ? rr : null;
+  }
+  const n = Number(text);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 function hasNumber(v: number | string | null | undefined): boolean {
   if (v == null || v === "") return false;
   return Number.isFinite(typeof v === "number" ? v : Number(v));
@@ -52,7 +69,7 @@ export function hasQuickCaptureEssentials(t: ReviewStatusInput): boolean {
     hasText(t.result) &&
     hasNumber(t.risk_amount) &&
     (hasNumber(t.reward_amount) || hasNumber(t.pnl_amount)) &&
-    hasNumber(t.planned_rr) &&
+    parsePlannedRR(t.planned_rr) !== null &&
     hasEmotion
   );
 }

@@ -136,7 +136,7 @@ function SettingsPage() {
       qc.invalidateQueries({ queryKey: ["profile"] });
       setDeleteOpen(false);
       toast.success(
-        `Your EdgeScope account deletion request is scheduled for ${formatDate(result.deletion_scheduled_for)}. You can cancel this before then.`,
+        `Your EdgeScope account deletion request is pending review for ${formatDate(result.deletion_scheduled_for)}. You can cancel this before then.`,
       );
     },
     onError: (e: Error) => toast.error(e.message),
@@ -340,7 +340,7 @@ function SettingsPage() {
                     </div>
                     <div className="mt-1 text-xs leading-5 text-muted-foreground">
                       {deletionScheduledFor
-                        ? `Account deletion request scheduled for ${formatDate(deletionScheduledFor)}. You can cancel before that date.`
+                        ? `Account deletion request pending review for ${formatDate(deletionScheduledFor)}. You can cancel before that date.`
                         : "Request deletion of your profile, login, trades, reviews, screenshots, playbook notes, and private review content."}
                     </div>
                   </div>
@@ -429,8 +429,8 @@ function SettingsPage() {
                 <h2 className="text-lg font-bold">Request EdgeScope account deletion?</h2>
                 <p className="mt-2 text-sm leading-6 text-muted-foreground">
                   This marks your EdgeScope account for deletion review after 15 days unless you
-                  cancel. Permanent deletion is completed by the EdgeScope team until automated
-                  account purging is available.
+                  cancel. Permanent deletion is completed manually by the EdgeScope team until
+                  automated account purging is available.
                 </p>
               </div>
             </div>
