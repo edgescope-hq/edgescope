@@ -18,12 +18,13 @@ function PaperPage() {
       <div className="mb-4 flex items-start gap-3 rounded-2xl bg-info/[0.06] px-4 py-3 ring-1 ring-info/20">
         <Info className="mt-0.5 h-4 w-4 shrink-0 text-info" />
         <div className="text-xs leading-relaxed text-muted-foreground">
-          <span className="font-semibold text-foreground">Paper Trading is coming soon.</span>{" "}
-          For now,{" "}
+          <span className="font-semibold text-foreground">Paper Trading is coming soon.</span> For
+          now,{" "}
           <Link to="/trades" className="font-medium text-primary hover:text-primary-glow">
             log paper trades manually in My Trades
           </Link>{" "}
-          (filter by Paper). Live charts, auto-execution and a native order engine are planned for a later release.
+          (filter by Paper). Live charts, auto-execution and a native order engine are planned for a
+          later release.
         </div>
       </div>
       <div className="mt-8 grid place-items-center py-20">
@@ -33,8 +34,8 @@ function PaperPage() {
           </div>
           <h2 className="mt-5 text-lg font-bold">Paper Trading</h2>
           <p className="mt-2 text-sm text-muted-foreground max-w-md">
-            Live chart integration, order management, and auto-execution are in development. 
-            Track your practice trades in the meantime using My Trades with the Paper filter.
+            Live chart integration, order management, and auto-execution are in development. Track
+            your practice trades in the meantime using My Trades with the Paper filter.
           </p>
           <Link
             to="/trades"

@@ -49,7 +49,10 @@ export type GroupStat = {
   avgRR: number | null;
 };
 
-export function groupBy(trades: TradeRow[], keyOf: (t: TradeRow) => string[] | string | null): GroupStat[] {
+export function groupBy(
+  trades: TradeRow[],
+  keyOf: (t: TradeRow) => string[] | string | null,
+): GroupStat[] {
   const map = new Map<string, TradeRow[]>();
   for (const t of trades) {
     const raw = keyOf(t);
@@ -136,8 +139,14 @@ export function killzoneStats(trades: TradeRow[]): GroupStat[] {
   return groupBy(trades, (t) => t.killzone);
 }
 
-export function emotionStats(trades: TradeRow[], stage: "before" | "during" | "after"): GroupStat[] {
-  const field = `emotion_${stage}` as keyof Pick<TradeRow, "emotion_before" | "emotion_during" | "emotion_after">;
+export function emotionStats(
+  trades: TradeRow[],
+  stage: "before" | "during" | "after",
+): GroupStat[] {
+  const field = `emotion_${stage}` as keyof Pick<
+    TradeRow,
+    "emotion_before" | "emotion_during" | "emotion_after"
+  >;
   return groupBy(trades, (t) => t[field]);
 }
 
@@ -146,7 +155,10 @@ export function mistakeStats(trades: TradeRow[]): GroupStat[] {
 }
 
 // Best/worst by win rate, requiring a minimum sample to be meaningful.
-export function bestWorst(stats: GroupStat[], minCount = 2): { best: GroupStat | null; worst: GroupStat | null } {
+export function bestWorst(
+  stats: GroupStat[],
+  minCount = 2,
+): { best: GroupStat | null; worst: GroupStat | null } {
   const eligible = stats.filter((s) => s.count >= minCount && s.winRate != null);
   if (!eligible.length) return { best: null, worst: null };
   const sorted = [...eligible].sort((a, b) => (b.winRate ?? 0) - (a.winRate ?? 0));
@@ -169,16 +181,15 @@ export function monthStats(trades: TradeRow[]): GroupStat[] {
 }
 
 function tradeOrderKey(trade: TradeRow): string {
-  return [
-    trade.trade_date,
-    trade.trade_time ?? "",
-    trade.created_at ?? "",
-    trade.id ?? "",
-  ].join("|");
+  return [trade.trade_date, trade.trade_time ?? "", trade.created_at ?? "", trade.id ?? ""].join(
+    "|",
+  );
 }
 
 // Cumulative R equity curve ordered by trade sequence, preserving same-date trades.
-export function equityCurve(trades: TradeRow[]): { date: string; cumR: number; tradeIndex: number }[] {
+export function equityCurve(
+  trades: TradeRow[],
+): { date: string; cumR: number; tradeIndex: number }[] {
   const sorted = [...trades]
     .filter((t) => num(t.achieved_rr) !== null)
     .sort((a, b) => tradeOrderKey(a).localeCompare(tradeOrderKey(b)));

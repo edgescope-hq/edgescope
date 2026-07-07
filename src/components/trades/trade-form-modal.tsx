@@ -6,15 +6,12 @@ import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import {
-  createTrade,
-  updateTrade,
-  listTrades,
-} from "@/lib/trades.functions";
+import { createTrade, updateTrade, listTrades } from "@/lib/trades.functions";
 import { SESSIONS } from "@/lib/trade-constants";
-import type { DbTrade } from "@/lib/trade-mappers";
+import { localDateKey, localTimeKey, type DbTrade } from "@/lib/trade-mappers";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
-import { listTradingAccounts } from "@/lib/trading-accounts.functions";
+import { listTradingAccounts, createTradingAccount } from "@/lib/trading-accounts.functions";
+import { parsePlannedRR } from "@/lib/scope-discovery";
 import { getGuardrails } from "@/lib/guardrails.functions";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
@@ -41,6 +38,55 @@ function formatRewardForResult(value: string, result: "WIN" | "LOSS" | "BE"): st
   if (result === "BE") return "0";
   const signed = result === "LOSS" ? -Math.abs(numeric) : Math.abs(numeric);
   return String(signed);
+}
+
+function validatePlannedRRInput(
+  val: string,
+  isFocused = false,
+): { isValid: boolean; parsedValue: number | null } {
+  const trimmed = val.trim();
+  if (trimmed === "") {
+    return { isValid: true, parsedValue: null };
+  }
+  if (/^\d+(?:\.\d*)?$/.test(trimmed)) {
+    const n = Number(trimmed);
+    if (isFocused) {
+      return { isValid: true, parsedValue: Number.isFinite(n) && n > 0 ? n : null };
+    } else {
+      if (Number.isFinite(n) && n > 0 && !trimmed.endsWith(".")) {
+        return { isValid: true, parsedValue: n };
+      }
+    }
+  }
+  return { isValid: false, parsedValue: null };
+}
+
+function validateRiskAmount(val: string): { isValid: boolean; parsedValue: number | null } {
+  const trimmed = val.trim();
+  if (trimmed === "") {
+    return { isValid: true, parsedValue: null };
+  }
+  if (/^\d+(?:\.\d+)?$/.test(trimmed)) {
+    const n = Number(trimmed);
+    if (Number.isFinite(n) && n > 0) {
+      return { isValid: true, parsedValue: n };
+    }
+  }
+  return { isValid: false, parsedValue: null };
+}
+
+function validateProfitLoss(val: string): { isValid: boolean; parsedValue: number | null } {
+  const trimmed = val.trim();
+  if (trimmed === "") {
+    return { isValid: true, parsedValue: null };
+  }
+  if (/^-?\d+(?:\.\d+)?$/.test(trimmed)) {
+    const n = Number(trimmed);
+    if (Number.isFinite(n)) {
+      return { isValid: true, parsedValue: n };
+    }
+  }
+  return { isValid: false, parsedValue: null };
 }
 
 /**
@@ -71,7 +117,13 @@ export function TradeFormModal({
 
   const initSide: "LONG" | "SHORT" = editing?.direction === "short" ? "SHORT" : "LONG";
   const initRes: "WIN" | "LOSS" | "BE" =
-    editing?.result === "win" ? "WIN" : editing?.result === "loss" ? "LOSS" : editing?.result === "breakeven" ? "BE" : "WIN";
+    editing?.result === "win"
+      ? "WIN"
+      : editing?.result === "loss"
+        ? "LOSS"
+        : editing?.result === "breakeven"
+          ? "BE"
+          : "WIN";
 
   const editingExt = editing as DbTrade & {
     risk_amount?: number | string | null;
@@ -90,7 +142,10 @@ export function TradeFormModal({
   const [plannedRR, setPlannedRR] = useState<string>(
     editing?.planned_rr ? String(editing.planned_rr).replace(/R$/i, "") : "",
   );
-  const initSession = (SESSIONS as readonly { v: string; l: string }[]).some((s) => s.v === editing?.session)
+  const [isPlannedRRFocused, setIsPlannedRRFocused] = useState(false);
+  const initSession = (SESSIONS as readonly { v: string; l: string }[]).some(
+    (s) => s.v === editing?.session,
+  )
     ? (editing!.session as string)
     : "";
   const [session, setSession] = useState<string>(initSession);
@@ -105,33 +160,49 @@ export function TradeFormModal({
   const [attemptedSubmit, setAttemptedSubmit] = useState(false);
   const [savedTradeId, setSavedTradeId] = useState<string | null>(null);
   const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
-  useUnsavedChanges(dirty);
-  const markDirty = () => { if (!dirty) setDirty(true); };
+  useUnsavedChanges(dirty && !editing);
+  const markDirty = () => {
+    if (!dirty) setDirty(true);
+  };
   const updateResult = (next: "WIN" | "LOSS" | "BE") => {
     markDirty();
     setRes(next);
     setRewardAmount((current) => formatRewardForResult(current, next));
   };
 
-  const riskNum = parseFloat(riskAmount);
-  const rawReward = parseFloat(rewardAmount);
+  const createAccountFn = useServerFn(createTradingAccount);
+
+  const riskVal = validateRiskAmount(riskAmount);
+  const rewardVal = validateProfitLoss(rewardAmount);
+  const plannedVal = validatePlannedRRInput(plannedRR, isPlannedRRFocused);
+
+  const showRiskError = !riskVal.isValid;
+  const showRewardError = !rewardVal.isValid;
+  const showPlannedError = !plannedVal.isValid;
+
+  const riskNum = riskVal.parsedValue ?? NaN;
+  const rawReward = rewardVal.parsedValue ?? NaN;
   const signedReward = Number.isFinite(rawReward)
-    ? (res === "LOSS" ? -Math.abs(rawReward) : res === "BE" ? 0 : Math.abs(rawReward))
+    ? res === "LOSS"
+      ? -Math.abs(rawReward)
+      : res === "BE"
+        ? 0
+        : Math.abs(rawReward)
     : NaN;
-  const achievedR = Number.isFinite(riskNum) && riskNum > 0 && Number.isFinite(signedReward)
-    ? signedReward / riskNum
-    : NaN;
-  const plannedRRNum = parseFloat(plannedRR);
+  const achievedR =
+    Number.isFinite(riskNum) && riskNum > 0 && Number.isFinite(signedReward)
+      ? signedReward / riskNum
+      : NaN;
+  const plannedRRNum = plannedVal.parsedValue ?? NaN;
 
   // Only instrument is strictly required. Detailed review fields stay in the review screen.
   const errors: string[] = [];
   if (!sym.trim()) errors.push("Instrument is required.");
-  if (Number.isFinite(riskNum) && riskNum < 0) errors.push("Risk amount must be positive.");
 
   const canSubmit = !saving;
 
   const handleClose = () => {
-    if (dirty) {
+    if (dirty && !editing) {
       setDiscardConfirmOpen(true);
       return;
     }
@@ -142,12 +213,32 @@ export function TradeFormModal({
     mutationFn: async () => {
       const resultDb = res === "WIN" ? "win" : res === "LOSS" ? "loss" : "breakeven";
 
+      if (!editing) {
+        // Fallback account creation
+        const currentAccounts = await listAccountsFn();
+        if (currentAccounts.length === 0) {
+          try {
+            await createAccountFn({
+              data: {
+                name: "Personal",
+                account_type: "personal",
+                starting_balance: 0,
+              },
+            });
+            toast.success("Personal trading account created");
+            await qc.invalidateQueries({ queryKey: ["trading-accounts"] });
+          } catch (err) {
+            console.error("Failed to create default trading account:", err);
+          }
+        }
+      }
+
       const payload = {
         // Preserve existing values when editing so we don't blank reviewed fields.
         market: (editing?.market ?? "other") as "other",
         instrument: sym.trim(),
-        trade_date: editing?.trade_date ?? new Date().toISOString().slice(0, 10),
-        trade_time: editing?.trade_time ?? new Date().toTimeString().slice(0, 8),
+        trade_date: editing?.trade_date ?? localDateKey(),
+        trade_time: editing?.trade_time ?? localTimeKey(),
         direction: (side === "LONG" ? "long" : "short") as "long" | "short",
         achieved_rr: Number.isFinite(achievedR) ? achievedR : null,
         planned_rr: Number.isFinite(plannedRRNum) ? plannedRRNum.toFixed(2) : null,
@@ -179,6 +270,7 @@ export function TradeFormModal({
     onSuccess: (trade) => {
       qc.invalidateQueries({ queryKey: ["trades"] });
       qc.invalidateQueries({ queryKey: ["account-stats"] });
+      qc.invalidateQueries({ queryKey: ["trading-accounts"] });
       if (editing?.id) qc.invalidateQueries({ queryKey: ["trade", editing.id] });
       setDirty(false);
       const savedId = (trade as { id?: string } | null | undefined)?.id;
@@ -208,7 +300,10 @@ export function TradeFormModal({
   const activeAccount = accountList.find((a) => a.is_active) ?? null;
   const { data: guardrails = null } = useQuery({
     queryKey: ["guardrails", activeAccount?.id],
-    queryFn: () => activeAccount ? getGuardrailsFn({ data: { account_id: activeAccount.id } }) : Promise.resolve(null),
+    queryFn: () =>
+      activeAccount
+        ? getGuardrailsFn({ data: { account_id: activeAccount.id } })
+        : Promise.resolve(null),
     enabled: !!activeAccount?.id,
   });
   const { data: tradesForGuardrails = [] } = useQuery({
@@ -218,14 +313,24 @@ export function TradeFormModal({
   const maxRiskPct = activeAccount?.max_risk_per_trade_pct ?? null;
   const dailyLossPct = activeAccount?.daily_loss_limit_pct ?? null;
   const startBal = activeAccount?.starting_balance ?? null;
-  const riskPctAttempted = (Number.isFinite(riskNum) && startBal && startBal > 0)
-    ? (riskNum / startBal) * 100
-    : null;
-  const exceedsMaxRisk = maxRiskPct != null && riskPctAttempted != null && riskPctAttempted > maxRiskPct;
-  const todayKey = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  const riskPctAttempted =
+    Number.isFinite(riskNum) && startBal && startBal > 0 ? (riskNum / startBal) * 100 : null;
+  const exceedsMaxRisk =
+    maxRiskPct != null && riskPctAttempted != null && riskPctAttempted > maxRiskPct;
+  const todayKey = localDateKey();
   const todaysAccountNet = tradesForGuardrails.reduce((sum, t) => {
-    if (!activeAccount || t.account_id !== activeAccount.id || t.trade_date !== todayKey || t.id === editing?.id) return sum;
-    const moneyTrade = t as DbTrade & { reward_amount?: number | string | null; risk_amount?: number | string | null };
+    if (
+      !activeAccount ||
+      t.account_id !== activeAccount.id ||
+      t.trade_date !== todayKey ||
+      t.id === editing?.id ||
+      t.is_paper
+    )
+      return sum;
+    const moneyTrade = t as DbTrade & {
+      reward_amount?: number | string | null;
+      risk_amount?: number | string | null;
+    };
     const reward = moneyTrade.reward_amount == null ? NaN : Number(moneyTrade.reward_amount);
     if (Number.isFinite(reward)) return sum + reward;
     const risk = moneyTrade.risk_amount == null ? NaN : Number(moneyTrade.risk_amount);
@@ -233,24 +338,37 @@ export function TradeFormModal({
     return Number.isFinite(risk) && Number.isFinite(rr) ? sum + risk * rr : sum;
   }, 0);
   const attemptedReward = Number.isFinite(signedReward) ? signedReward : 0;
-  const dailyLossAmount = dailyLossPct != null && startBal && startBal > 0 ? (startBal * dailyLossPct) / 100 : null;
+  const dailyLossAmount =
+    dailyLossPct != null && startBal && startBal > 0 ? (startBal * dailyLossPct) / 100 : null;
   const dailyLossReminderOn = guardrails?.daily_loss_reminder ?? true;
-  const exceedsDailyLoss = !editing && dailyLossReminderOn && dailyLossAmount != null && (
-    todaysAccountNet <= -dailyLossAmount || todaysAccountNet + attemptedReward <= -dailyLossAmount
-  );
+  const exceedsDailyLoss =
+    !editing &&
+    dailyLossReminderOn &&
+    dailyLossAmount != null &&
+    (todaysAccountNet <= -dailyLossAmount ||
+      todaysAccountNet + attemptedReward <= -dailyLossAmount);
   const guardrailMessages = [
     ...(exceedsMaxRisk && maxRiskPct != null && riskPctAttempted != null
-      ? [`This trade is above your max risk per trade setting (${riskPctAttempted.toFixed(2)}% vs ${maxRiskPct}%).`]
+      ? [
+          `This trade is above your max risk per trade setting (${riskPctAttempted.toFixed(2)}% vs ${maxRiskPct}%).`,
+        ]
       : []),
     ...(exceedsDailyLoss && dailyLossAmount != null && dailyLossPct != null
-      ? [`Your account is at or beyond today's daily loss reminder (${dailyLossPct}% / ${dailyLossAmount.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 })}).`]
+      ? [
+          `Your account is at or beyond today's daily loss reminder (${dailyLossPct}% / ${dailyLossAmount.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 })}).`,
+        ]
       : []),
   ];
   const shouldShowGuardrailReminder = guardrailMessages.length > 0;
   const [guardrailConfirmOpen, setGuardrailConfirmOpen] = useState(false);
 
   const onSubmit = () => {
-    if (errors.length > 0) {
+    const cleanedPlanned = plannedRR.trim().replace(/\.$/, "");
+    if (cleanedPlanned !== plannedRR) {
+      setPlannedRR(cleanedPlanned);
+    }
+    const finalPlannedVal = validatePlannedRRInput(cleanedPlanned, false);
+    if (errors.length > 0 || showRiskError || showRewardError || !finalPlannedVal.isValid) {
       setAttemptedSubmit(true);
       return;
     }
@@ -262,7 +380,8 @@ export function TradeFormModal({
     saveM.mutate();
   };
 
-  const inputClass = "mt-1.5 w-full rounded-xl bg-white/[0.04] px-3 py-2.5 text-sm ring-1 ring-white/[0.06] transition-all duration-200 placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/40";
+  const inputClass =
+    "mt-1.5 w-full rounded-xl bg-white/[0.04] px-3 py-2.5 text-sm ring-1 ring-white/[0.06] transition-all duration-200 placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/40";
   const labelClass = "text-[10px] font-semibold tracking-[0.16em] text-muted-foreground";
 
   if (!editing && savedTradeId !== null) {
@@ -278,8 +397,21 @@ export function TradeFormModal({
     };
 
     return (
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={closeSuccess} className="fixed inset-0 z-50 grid place-items-center bg-black/25 backdrop-blur-[2px] p-4">
-        <motion.div initial={{ scale: 0.98, y: 8 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.98, y: 8 }} transition={modalTransition} onClick={(e: MouseEvent) => e.stopPropagation()} className="glow-card w-full max-w-md rounded-2xl p-6">
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={closeSuccess}
+        className="fixed inset-0 z-50 grid place-items-center bg-black/25 backdrop-blur-[2px] p-4"
+      >
+        <motion.div
+          initial={{ scale: 0.98, y: 8 }}
+          animate={{ scale: 1, y: 0 }}
+          exit={{ scale: 0.98, y: 8 }}
+          transition={modalTransition}
+          onClick={(e: MouseEvent) => e.stopPropagation()}
+          className="glow-card w-full max-w-md rounded-2xl p-6"
+        >
           <div className="flex items-start gap-3">
             <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/15 text-primary ring-1 ring-primary/25">
               <CheckCircle2 className="h-5 w-5" />
@@ -287,13 +419,23 @@ export function TradeFormModal({
             <div className="min-w-0">
               <h2 className="text-lg font-bold">Trade logged successfully.</h2>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                Complete the review now to record your reasoning, mistakes, grade, and chart screenshot.
+                Complete the review now to record your reasoning, mistakes, grade, and chart
+                screenshot.
               </p>
             </div>
           </div>
           <div className="mt-6 flex justify-end gap-2">
-            <button onClick={closeSuccess} className="rounded-xl bg-white/[0.04] px-4 py-2.5 text-sm font-medium text-muted-foreground ring-1 ring-white/[0.06] transition-all duration-200 hover:text-foreground hover:ring-white/[0.1]">Later</button>
-            <button disabled={!savedTradeId} onClick={reviewNow} className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] transition-all duration-200 hover:brightness-110 disabled:opacity-40">
+            <button
+              onClick={closeSuccess}
+              className="rounded-xl bg-white/[0.04] px-4 py-2.5 text-sm font-medium text-muted-foreground ring-1 ring-white/[0.06] transition-all duration-200 hover:text-foreground hover:ring-white/[0.1]"
+            >
+              Later
+            </button>
+            <button
+              disabled={!savedTradeId}
+              onClick={reviewNow}
+              className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] transition-all duration-200 hover:brightness-110 disabled:opacity-40"
+            >
               Review now
             </button>
           </div>
@@ -303,28 +445,67 @@ export function TradeFormModal({
   }
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={handleClose} className="fixed inset-0 z-50 grid place-items-center bg-black/70 backdrop-blur-md p-4">
-      <motion.div initial={{ scale: 0.98, y: 8 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.98, y: 8 }} transition={modalTransition} onClick={(e: MouseEvent) => e.stopPropagation()} className="glow-card w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl p-6 shadow-[var(--shadow-elevated)]">
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      onClick={handleClose}
+      className="fixed inset-0 z-50 grid place-items-center bg-black/70 backdrop-blur-md p-4"
+    >
+      <motion.div
+        initial={{ scale: 0.98, y: 8 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.98, y: 8 }}
+        transition={modalTransition}
+        onClick={(e: MouseEvent) => e.stopPropagation()}
+        className="glow-card w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl p-6 shadow-[var(--shadow-elevated)]"
+      >
         <div className="flex items-start justify-between">
           <div>
-            <div className="text-[10px] font-semibold tracking-[0.16em] text-primary">QUICK CAPTURE</div>
-            <h2 className="mt-0.5 text-lg font-bold">{editing ? `Edit trade #${nextNum}` : `Log trade #${nextNum}`}</h2>
-            <p className="mt-0.5 text-[11px] text-muted-foreground/80">Capture the essentials now. Review and reflect later.</p>
+            <div className="text-[10px] font-semibold tracking-[0.16em] text-primary">
+              QUICK CAPTURE
+            </div>
+            <h2 className="mt-0.5 text-lg font-bold">
+              {editing ? `Edit trade #${nextNum}` : `Log trade #${nextNum}`}
+            </h2>
+            <p className="mt-0.5 text-[11px] text-muted-foreground/80">
+              Capture the essentials now. Review and reflect later.
+            </p>
           </div>
-          <button onClick={handleClose} aria-label="Close" className="rounded-lg p-1.5 text-muted-foreground transition-colors duration-200 hover:bg-white/[0.06] hover:text-foreground"><X className="h-4 w-4" /></button>
+          <button
+            onClick={handleClose}
+            aria-label="Close"
+            className="rounded-lg p-1.5 text-muted-foreground transition-colors duration-200 hover:bg-white/[0.06] hover:text-foreground"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
 
         <div className="mt-5 space-y-4">
           <div>
             <label className={labelClass}>INSTRUMENT</label>
-            <input value={sym} onChange={(e) => { markDirty(); setSym(e.target.value); }} placeholder="e.g. BTCUSD" className={inputClass} />
+            <input
+              value={sym}
+              onChange={(e) => {
+                markDirty();
+                setSym(e.target.value);
+              }}
+              placeholder="e.g. BTCUSD"
+              className={inputClass}
+            />
           </div>
 
           <div>
             <label className={labelClass}>SESSION</label>
             {/* Themed listbox instead of a native select — native option rows
                 render with the OS default (white) background and can't be styled reliably. */}
-            <Select value={session || "none"} onValueChange={(v) => { markDirty(); setSession(v === "none" ? "" : v); }}>
+            <Select
+              value={session || "none"}
+              onValueChange={(v) => {
+                markDirty();
+                setSession(v === "none" ? "" : v);
+              }}
+            >
               <SelectTrigger
                 className={cn(
                   inputClass,
@@ -349,7 +530,24 @@ export function TradeFormModal({
               <label className={labelClass}>SIDE</label>
               <div className="mt-1.5 flex rounded-xl bg-white/[0.03] p-1 ring-1 ring-white/[0.06]">
                 {(["LONG", "SHORT"] as const).map((s) => (
-                  <button key={s} type="button" onClick={() => { markDirty(); setSide(s); }} className={cn("flex-1 rounded-lg py-1.5 text-xs font-bold tracking-wider transition-all duration-200", side === s ? (s === "LONG" ? "bg-success/15 text-success ring-1 ring-success/30" : "bg-destructive/15 text-destructive ring-1 ring-destructive/30") : "text-muted-foreground hover:text-foreground")}>{s}</button>
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => {
+                      markDirty();
+                      setSide(s);
+                    }}
+                    className={cn(
+                      "flex-1 rounded-lg py-1.5 text-xs font-bold tracking-wider transition-all duration-200",
+                      side === s
+                        ? s === "LONG"
+                          ? "bg-success/15 text-success ring-1 ring-success/30"
+                          : "bg-destructive/15 text-destructive ring-1 ring-destructive/30"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {s}
+                  </button>
                 ))}
               </div>
             </div>
@@ -357,7 +555,23 @@ export function TradeFormModal({
               <label className={labelClass}>RESULT</label>
               <div className="mt-1.5 flex rounded-xl bg-white/[0.03] p-1 ring-1 ring-white/[0.06]">
                 {(["WIN", "LOSS", "BE"] as const).map((r) => (
-                  <button key={r} type="button" onClick={() => updateResult(r)} className={cn("flex-1 rounded-lg py-1.5 text-[11px] font-bold tracking-wider transition-all duration-200", res === r ? (r === "WIN" ? "bg-success/15 text-success ring-1 ring-success/30" : r === "LOSS" ? "bg-destructive/15 text-destructive ring-1 ring-destructive/30" : "bg-info/15 text-info ring-1 ring-info/30") : "text-muted-foreground hover:text-foreground")}>{r}</button>
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => updateResult(r)}
+                    className={cn(
+                      "flex-1 rounded-lg py-1.5 text-[11px] font-bold tracking-wider transition-all duration-200",
+                      res === r
+                        ? r === "WIN"
+                          ? "bg-success/15 text-success ring-1 ring-success/30"
+                          : r === "LOSS"
+                            ? "bg-destructive/15 text-destructive ring-1 ring-destructive/30"
+                            : "bg-info/15 text-info ring-1 ring-info/30"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {r}
+                  </button>
                 ))}
               </div>
             </div>
@@ -366,32 +580,78 @@ export function TradeFormModal({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={labelClass}>RISK AMOUNT</label>
-              <input value={riskAmount} onChange={(e) => { markDirty(); setRiskAmount(e.target.value); }} inputMode="decimal" className={inputClass} />
+              <input
+                value={riskAmount}
+                onChange={(e) => {
+                  markDirty();
+                  setRiskAmount(e.target.value);
+                }}
+                className={inputClass}
+              />
+              {showRiskError && (
+                <p className="mt-1 text-[11px] text-warning">Enter a valid risk amount.</p>
+              )}
             </div>
             <div>
               <label className={labelClass}>PROFIT / LOSS</label>
               <input
                 value={rewardAmount}
-                onChange={(e) => { markDirty(); setRewardAmount(e.target.value); }}
+                onChange={(e) => {
+                  markDirty();
+                  setRewardAmount(e.target.value);
+                }}
                 onBlur={() => setRewardAmount((current) => formatRewardForResult(current, res))}
-                inputMode="decimal"
                 placeholder={res === "LOSS" ? "e.g. -10" : res === "BE" ? "0" : "e.g. 25"}
                 className={inputClass}
               />
+              {showRewardError && (
+                <p className="mt-1 text-[11px] text-warning">Enter a valid profit/loss amount.</p>
+              )}
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className={labelClass}>PLANNED RR</label>
-              <input value={plannedRR} onChange={(e) => { markDirty(); setPlannedRR(e.target.value); }} inputMode="decimal" className={inputClass} />
+              <label className={labelClass}>PLANNED R:R</label>
+              <input
+                value={plannedRR}
+                onChange={(e) => {
+                  markDirty();
+                  setPlannedRR(e.target.value);
+                }}
+                onFocus={() => setIsPlannedRRFocused(true)}
+                onBlur={() => {
+                  setIsPlannedRRFocused(false);
+                  setPlannedRR((current) => current.trim().replace(/\.$/, ""));
+                }}
+                placeholder="e.g. 2.5"
+                className={inputClass}
+              />
+              {showPlannedError && (
+                <p className="mt-1 text-[11px] text-warning">
+                  Use a positive number, like 0.5, 2, or 2.5.
+                </p>
+              )}
             </div>
             <div>
               <label className={labelClass}>ACHIEVED R</label>
-              <div className={cn(inputClass, "flex items-center bg-white/[0.02] text-sm tabular-nums")}>
-                {Number.isFinite(achievedR)
-                  ? <span className={cn("font-semibold", achievedR > 0 && "text-success", achievedR < 0 && "text-destructive")}>{achievedR > 0 ? "+" : ""}{achievedR.toFixed(2)}R</span>
-                  : <span className="text-muted-foreground/60">—</span>}
+              <div
+                className={cn(inputClass, "flex items-center bg-white/[0.02] text-sm tabular-nums")}
+              >
+                {Number.isFinite(achievedR) ? (
+                  <span
+                    className={cn(
+                      "font-semibold",
+                      achievedR > 0 && "text-success",
+                      achievedR < 0 && "text-destructive",
+                    )}
+                  >
+                    {achievedR > 0 ? "+" : ""}
+                    {achievedR.toFixed(2)}R
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground/60">—</span>
+                )}
               </div>
             </div>
           </div>
@@ -400,7 +660,9 @@ export function TradeFormModal({
             <div className="flex items-end justify-between gap-3">
               <div>
                 <label className={labelClass}>EMOTIONS</label>
-                <p className="mt-1 text-[11px] text-muted-foreground">Select how you felt during the trade.</p>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Select how you felt during the trade.
+                </p>
               </div>
               {emotionTags.length > 0 && (
                 <span className="rounded-full bg-primary/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary">
@@ -444,8 +706,17 @@ export function TradeFormModal({
         </div>
 
         <div className="mt-6 flex justify-end gap-2">
-          <button onClick={handleClose} className="rounded-xl bg-white/[0.04] px-4 py-2.5 text-sm font-medium text-muted-foreground ring-1 ring-white/[0.06] transition-all duration-200 hover:text-foreground hover:ring-white/[0.1]">Cancel</button>
-          <button disabled={!canSubmit} onClick={onSubmit} className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] transition-all duration-200 hover:brightness-110 disabled:opacity-40">
+          <button
+            onClick={handleClose}
+            className="rounded-xl bg-white/[0.04] px-4 py-2.5 text-sm font-medium text-muted-foreground ring-1 ring-white/[0.06] transition-all duration-200 hover:text-foreground hover:ring-white/[0.1]"
+          >
+            Cancel
+          </button>
+          <button
+            disabled={!canSubmit}
+            onClick={onSubmit}
+            className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] transition-all duration-200 hover:brightness-110 disabled:opacity-40"
+          >
             {saving ? "Saving..." : editing ? "Save changes" : "Log trade"}
           </button>
         </div>
@@ -457,10 +728,13 @@ export function TradeFormModal({
         description={
           <span className="space-y-2">
             {guardrailMessages.map((message) => (
-              <span key={message} className="block">{message}</span>
+              <span key={message} className="block">
+                {message}
+              </span>
             ))}
             <span className="block">
-              EdgeScope is reminding you so you can make a conscious decision, not blocking the trade.
+              EdgeScope is reminding you so you can make a conscious decision, not blocking the
+              trade.
             </span>
           </span>
         }

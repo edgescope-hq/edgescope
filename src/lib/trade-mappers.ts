@@ -17,6 +17,8 @@ export type DbTrade = {
   risk_amount: number | string | null;
   reward_amount: number | string | null;
   pnl_amount: number | string | null;
+  risk_percentage?: number | string | null;
+  account_size?: number | string | null;
   reasoning: string | null;
   lessons_learned: string | null;
   notes: string | null;
@@ -30,12 +32,12 @@ export type DbTrade = {
   categories: string[] | null;
   subcategories: string[] | null;
   is_shared: boolean | null;
+  is_paper?: boolean | null;
   in_killzone: boolean | null;
   account_id?: string | null;
   created_at?: string;
   trade_screenshots?: { id: string }[] | null;
 };
-
 
 // Project a DB trade onto the analytics input shape.
 export function toAnalytics(t: DbTrade): TradeRow {
@@ -65,6 +67,73 @@ export function rrNum(v: number | string | null | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+function finiteNumber(v: number | string | null | undefined): number | null {
+  if (v == null || v === "") return null;
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+export function recordedR(v: number | string | null | undefined): number | null {
+  return finiteNumber(v);
+}
+
+export function localDateKey(date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+export function localTimeKey(date = new Date()): string {
+  return [
+    String(date.getHours()).padStart(2, "0"),
+    String(date.getMinutes()).padStart(2, "0"),
+    String(date.getSeconds()).padStart(2, "0"),
+  ].join(":");
+}
+
+export function isPaperTrade(t: { is_paper?: boolean | null }): boolean {
+  return t.is_paper === true;
+}
+
+export function tradeDollarPnl(t: {
+  achieved_rr?: number | string | null;
+  risk_percentage?: number | string | null;
+  account_size?: number | string | null;
+  result?: string | null;
+  reward_amount?: number | string | null;
+  pnl_amount?: number | string | null;
+}): number | null {
+  const actual = finiteNumber(t.pnl_amount) ?? finiteNumber(t.reward_amount);
+  if (actual != null) {
+    if (t.result === "loss") return -Math.abs(actual);
+    if (t.result === "win") return Math.abs(actual);
+    if (t.result === "breakeven") return 0;
+    return actual;
+  }
+
+  const r = recordedR(t.achieved_rr);
+  const riskPct = finiteNumber(t.risk_percentage);
+  const accountSize = finiteNumber(t.account_size);
+  if (r == null || riskPct == null || accountSize == null) return null;
+
+  const pnl = r * (riskPct / 100) * accountSize;
+  return Number.isFinite(pnl) ? pnl : null;
+}
+
+export function sumTradeDollarPnl<T extends Parameters<typeof tradeDollarPnl>[0]>(
+  trades: readonly T[],
+): number {
+  return trades.reduce((sum, trade) => sum + (tradeDollarPnl(trade) ?? 0), 0);
+}
+
+export function numberTradesById<T extends { id: string }>(
+  trades: readonly T[],
+): Map<string, number> {
+  const total = trades.length;
+  return new Map(trades.map((trade, index) => [trade.id, total - index]));
+}
+
 // Calculate current/longest winning + losing streaks (chronological order).
 export function streaks(trades: DbTrade[]): {
   currentWin: number;
@@ -75,11 +144,22 @@ export function streaks(trades: DbTrade[]): {
   const sorted = [...trades].sort((a, b) =>
     (a.trade_date + (a.trade_time ?? "")).localeCompare(b.trade_date + (b.trade_time ?? "")),
   );
-  let curW = 0, curL = 0, lonW = 0, lonL = 0;
+  let curW = 0,
+    curL = 0,
+    lonW = 0,
+    lonL = 0;
   for (const t of sorted) {
-    if (t.result === "win") { curW += 1; curL = 0; lonW = Math.max(lonW, curW); }
-    else if (t.result === "loss") { curL += 1; curW = 0; lonL = Math.max(lonL, curL); }
-    else { /* breakeven / null does not reset streaks */ }
+    if (t.result === "win") {
+      curW += 1;
+      curL = 0;
+      lonW = Math.max(lonW, curW);
+    } else if (t.result === "loss") {
+      curL += 1;
+      curW = 0;
+      lonL = Math.max(lonL, curL);
+    } else {
+      /* breakeven / null does not reset streaks */
+    }
   }
   return { currentWin: curW, currentLoss: curL, longestWin: lonW, longestLoss: lonL };
 }
@@ -89,7 +169,11 @@ export function formatTradeWhen(date: string, time: string | null): string {
   try {
     const d = new Date(`${date}T${time ?? "00:00:00"}`);
     if (isNaN(d.getTime())) return date;
-    const datePart = d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    const datePart = d.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
     if (!time) return datePart;
     const timePart = d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
     return `${datePart}, ${timePart}`;

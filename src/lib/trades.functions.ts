@@ -3,6 +3,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { checkRateLimitOrThrow } from "@/lib/rate-limiter";
+import { localDateKey, localTimeKey } from "@/lib/trade-mappers";
 
 const tradeSchema = z.object({
   market: z.enum(["forex", "crypto", "stocks", "indices", "futures", "commodities", "other"]),
@@ -44,10 +45,7 @@ const tradeSchema = z.object({
   emotion_tags: z.array(z.string().max(32)).max(10).optional(),
 });
 
-async function getActiveAccountId(
-  supabase: any,
-  userId: string,
-): Promise<string | null> {
+async function getActiveAccountId(supabase: any, userId: string): Promise<string | null> {
   const { data } = await supabase
     .from("trading_accounts")
     .select("id")
@@ -63,24 +61,92 @@ export const createTrade = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     checkRateLimitOrThrow("create-trade", 60, 60_000);
     const { supabase, userId } = context;
-    const account_id = await getActiveAccountId(supabase, userId);
+    let account_id = await getActiveAccountId(supabase, userId);
+    if (!account_id) {
+      // Idempotently get or create default account
+      const { data: existing } = await supabase
+        .from("trading_accounts")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("name", "Personal")
+        .eq("account_type", "personal")
+        .limit(1)
+        .maybeSingle();
+
+      if (existing) {
+        account_id = existing.id;
+        await supabase.from("trading_accounts").update({ is_active: true }).eq("id", account_id);
+      } else {
+        const { data: inserted, error: insErr } = await supabase
+          .from("trading_accounts")
+          .insert({
+            user_id: userId,
+            name: "Personal",
+            account_type: "personal",
+            starting_balance: 0,
+            is_active: true,
+          })
+          .select("id")
+          .single();
+        if (insErr) {
+          const { data: retry } = await supabase
+            .from("trading_accounts")
+            .select("id")
+            .eq("user_id", userId)
+            .eq("is_active", true)
+            .maybeSingle();
+          account_id = retry?.id ?? null;
+        } else {
+          account_id = inserted.id;
+        }
+      }
+    }
+
+    let calculatedAchievedRR = data.achieved_rr;
+    if (data.risk_amount && data.risk_amount > 0 && data.reward_amount != null) {
+      calculatedAchievedRR = Number((data.reward_amount / data.risk_amount).toFixed(2));
+    }
+
     const { data: row, error } = await supabase
       .from("trades")
-      .insert({ ...data, user_id: userId, account_id })
+      .insert({ ...data, user_id: userId, account_id, achieved_rr: calculatedAchievedRR })
       .select()
       .single();
     if (error) throw safeError(error);
     return row;
   });
 
-
 export const updateTrade = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) => z.object({ id: z.string().uuid(), patch: tradeSchema.partial() }).parse(d))
   .handler(async ({ data, context }) => {
+    const { data: currentTrade } = await context.supabase
+      .from("trades")
+      .select("risk_amount, reward_amount")
+      .eq("id", data.id)
+      .eq("user_id", context.userId)
+      .maybeSingle();
+
+    const mergedRisk =
+      data.patch.risk_amount !== undefined
+        ? data.patch.risk_amount
+        : (currentTrade?.risk_amount ?? null);
+    const mergedReward =
+      data.patch.reward_amount !== undefined
+        ? data.patch.reward_amount
+        : (currentTrade?.reward_amount ?? null);
+
+    let calculatedAchievedRR = data.patch.achieved_rr;
+    if (mergedRisk && mergedRisk > 0 && mergedReward != null) {
+      calculatedAchievedRR = Number((mergedReward / mergedRisk).toFixed(2));
+    }
+
     const { data: row, error } = await context.supabase
       .from("trades")
-      .update(data.patch)
+      .update({
+        ...data.patch,
+        ...(calculatedAchievedRR !== undefined ? { achieved_rr: calculatedAchievedRR } : {}),
+      })
       .eq("id", data.id)
       .eq("user_id", context.userId)
       .select()
@@ -103,7 +169,9 @@ export const deleteTrade = createServerFn({ method: "POST" })
     if (shots?.length) {
       const paths = shots.map((s) => s.storage_path).filter(Boolean) as string[];
       if (paths.length) {
-        const { error: storageError } = await context.supabase.storage.from("trade-screenshots").remove(paths);
+        const { error: storageError } = await context.supabase.storage
+          .from("trade-screenshots")
+          .remove(paths);
         if (storageError) throw safeError(storageError);
       }
     }
@@ -136,8 +204,18 @@ export const getTrade = createServerFn({ method: "GET" })
   .inputValidator((d) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const [{ data: trade, error }, { data: shots, error: e2 }] = await Promise.all([
-      context.supabase.from("trades").select("*").eq("id", data.id).eq("user_id", context.userId).maybeSingle(),
-      context.supabase.from("trade_screenshots").select("*").eq("trade_id", data.id).eq("user_id", context.userId).order("created_at"),
+      context.supabase
+        .from("trades")
+        .select("*")
+        .eq("id", data.id)
+        .eq("user_id", context.userId)
+        .maybeSingle(),
+      context.supabase
+        .from("trade_screenshots")
+        .select("*")
+        .eq("trade_id", data.id)
+        .eq("user_id", context.userId)
+        .order("created_at"),
     ]);
     if (error) throw safeError(error);
     if (e2) throw safeError(e2);
@@ -145,8 +223,8 @@ export const getTrade = createServerFn({ method: "GET" })
 
     const withUrls = await Promise.all(
       (shots ?? []).map(async (s) => {
-        const { data: signed } = await context.supabase
-          .storage.from("trade-screenshots")
+        const { data: signed } = await context.supabase.storage
+          .from("trade-screenshots")
           .createSignedUrl(s.storage_path, 60 * 60);
         return { ...s, url: signed?.signedUrl ?? null };
       }),
@@ -156,12 +234,16 @@ export const getTrade = createServerFn({ method: "GET" })
 
 export const addScreenshot = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d) => z.object({
-    trade_id: z.string().uuid(),
-    storage_path: z.string().min(1).max(512),
-    kind: z.enum(["before", "after"]).default("before"),
-    caption: z.string().max(255).optional(),
-  }).parse(d))
+  .inputValidator((d) =>
+    z
+      .object({
+        trade_id: z.string().uuid(),
+        storage_path: z.string().min(1).max(512),
+        kind: z.enum(["before", "after"]).default("before"),
+        caption: z.string().max(255).optional(),
+      })
+      .parse(d),
+  )
   .handler(async ({ data, context }) => {
     checkRateLimitOrThrow("add-screenshot", 20, 60_000);
     // Enforce that the storage path belongs to the caller. Storage upload
@@ -218,7 +300,9 @@ export const deleteScreenshot = createServerFn({ method: "POST" })
       .maybeSingle();
     if (!shot) throw new Error("Forbidden");
     if (shot.storage_path) {
-      const { error: storageError } = await context.supabase.storage.from("trade-screenshots").remove([shot.storage_path]);
+      const { error: storageError } = await context.supabase.storage
+        .from("trade-screenshots")
+        .remove([shot.storage_path]);
       if (storageError) throw safeError(storageError);
     }
     const { error } = await context.supabase
@@ -245,10 +329,12 @@ const annotationShape = z.object({
 export const updateScreenshotTimeframe = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) =>
-    z.object({
-      id: z.string().uuid(),
-      timeframe: z.enum(["HTF", "MTF", "LTF"]).nullable(),
-    }).parse(d),
+    z
+      .object({
+        id: z.string().uuid(),
+        timeframe: z.enum(["HTF", "MTF", "LTF"]).nullable(),
+      })
+      .parse(d),
   )
   .handler(async ({ data, context }) => {
     const { error } = await context.supabase
@@ -262,10 +348,14 @@ export const updateScreenshotTimeframe = createServerFn({ method: "POST" })
 
 export const updateScreenshotAnnotations = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d) => z.object({
-    id: z.string().uuid(),
-    annotations: z.array(annotationShape).max(200),
-  }).parse(d))
+  .inputValidator((d) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        annotations: z.array(annotationShape).max(200),
+      })
+      .parse(d),
+  )
   .handler(async ({ data, context }) => {
     const { error } = await context.supabase
       .from("trade_screenshots")
@@ -275,7 +365,6 @@ export const updateScreenshotAnnotations = createServerFn({ method: "POST" })
     if (error) throw safeError(error);
     return { ok: true };
   });
-
 
 // =========================================================
 // Paper Trading
@@ -295,7 +384,9 @@ const paperOpenSchema = z.object({
   categories: z.array(z.string().max(64)).max(20).default([]),
   notes: z.string().max(5000).nullable().optional(),
   emotion_before: z.string().max(64).nullable().optional(),
-  market: z.enum(["forex", "crypto", "stocks", "indices", "futures", "commodities", "other"]).default("other"),
+  market: z
+    .enum(["forex", "crypto", "stocks", "indices", "futures", "commodities", "other"])
+    .default("other"),
 });
 
 export const openPaperTrade = createServerFn({ method: "POST" })
@@ -325,8 +416,8 @@ export const openPaperTrade = createServerFn({ method: "POST" })
         categories: data.categories,
         notes: data.notes ?? null,
         emotion_before: data.emotion_before ?? null,
-        trade_date: now.toISOString().slice(0, 10),
-        trade_time: now.toISOString().slice(11, 19),
+        trade_date: localDateKey(now),
+        trade_time: localTimeKey(now),
         is_paper: true,
         status: "open",
         opened_at: now.toISOString(),
@@ -355,7 +446,9 @@ export const listOpenPaperTrades = createServerFn({ method: "GET" })
 
 export const updatePaperLivePrice = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d) => z.object({ id: z.string().uuid(), live_price: z.number(), floating_pnl: z.number() }).parse(d))
+  .inputValidator((d) =>
+    z.object({ id: z.string().uuid(), live_price: z.number(), floating_pnl: z.number() }).parse(d),
+  )
   .handler(async ({ data, context }) => {
     const { error } = await context.supabase
       .from("trades")
@@ -369,11 +462,15 @@ export const updatePaperLivePrice = createServerFn({ method: "POST" })
 
 export const closePaperTrade = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d) => z.object({
-    id: z.string().uuid(),
-    exit_price: z.number(),
-    closed_reason: z.enum(["tp", "sl", "manual"]),
-  }).parse(d))
+  .inputValidator((d) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        exit_price: z.number(),
+        closed_reason: z.enum(["tp", "sl", "manual"]),
+      })
+      .parse(d),
+  )
   .handler(async ({ data, context }) => {
     const { data: trade, error: fetchErr } = await context.supabase
       .from("trades")

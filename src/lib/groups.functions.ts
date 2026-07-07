@@ -80,7 +80,9 @@ export const createGroup = createServerFn({ method: "POST" })
 
 export const renameGroup = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d) => z.object({ id: z.string().uuid(), name: z.string().trim().min(1).max(60) }).parse(d))
+  .inputValidator((d) =>
+    z.object({ id: z.string().uuid(), name: z.string().trim().min(1).max(60) }).parse(d),
+  )
   .handler(async ({ data, context }) => {
     const { error } = await context.supabase
       .from("community_groups")
@@ -115,7 +117,8 @@ export const leaveGroup = createServerFn({ method: "POST" })
       .select("owner_id")
       .eq("id", data.groupId)
       .maybeSingle();
-    if (grp?.owner_id === context.userId) throw new Error("Owners must delete the group instead of leaving");
+    if (grp?.owner_id === context.userId)
+      throw new Error("Owners must delete the group instead of leaving");
     const { error } = await context.supabase
       .from("community_group_members")
       .delete()
@@ -188,11 +191,14 @@ export const listGroupMembers = createServerFn({ method: "POST" })
 
 export const removeMember = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d) => z.object({ groupId: z.string().uuid(), userId: z.string().uuid() }).parse(d))
+  .inputValidator((d) =>
+    z.object({ groupId: z.string().uuid(), userId: z.string().uuid() }).parse(d),
+  )
   .handler(async ({ data, context }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     await assertOwner(supabaseAdmin, data.groupId, context.userId);
-    if (data.userId === context.userId) throw new Error("Owner cannot be removed; delete the group instead");
+    if (data.userId === context.userId)
+      throw new Error("Owner cannot be removed; delete the group instead");
     const { error } = await supabaseAdmin
       .from("community_group_members")
       .delete()
@@ -326,7 +332,10 @@ export const listGroupPendingInvites = createServerFn({ method: "POST" })
     const { data: profs } = await supabaseAdmin
       .from("profiles")
       .select("id, edge_id, username, display_name")
-      .in("id", invs.map((i) => i.invitee_id));
+      .in(
+        "id",
+        invs.map((i) => i.invitee_id),
+      );
     const pMap = new Map((profs ?? []).map((p) => [p.id, p]));
     return invs.map((i) => {
       const p = pMap.get(i.invitee_id);
@@ -341,9 +350,7 @@ export const listGroupPendingInvites = createServerFn({ method: "POST" })
 
 export const respondInvitation = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d) =>
-    z.object({ id: z.string().uuid(), accept: z.boolean() }).parse(d),
-  )
+  .inputValidator((d) => z.object({ id: z.string().uuid(), accept: z.boolean() }).parse(d))
   .handler(async ({ data, context }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: inv, error } = await supabaseAdmin
@@ -430,11 +437,19 @@ export const listGroupTrades = createServerFn({ method: "POST" })
     const memberIds = (memberRows ?? []).map((m) => m.user_id);
     if (!memberIds.length) return [];
 
+    const { data: shares, error: shareErr } = await supabaseAdmin
+      .from("community_trade_shares" as any)
+      .select("trade_id")
+      .eq("group_id", data.groupId);
+    if (shareErr) throw safeError(shareErr);
+    if (!shares?.length) return [];
+    const sharedTradeIds = (shares as any[]).map((s) => s.trade_id);
+
     const { data: trades, error } = await supabaseAdmin
       .from("trades")
       .select("id, trade_date, instrument, direction, result, reasoning, user_id, created_at")
+      .in("id", sharedTradeIds)
       .in("user_id", memberIds)
-      .eq("is_shared", true)
       .order("trade_date", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(200);
@@ -566,6 +581,18 @@ export const addComment = createServerFn({ method: "POST" })
     checkRateLimitOrThrow("add-comment", 30, 60_000);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     await assertMember(supabaseAdmin, data.groupId, context.userId);
+
+    // Verify trade exists and is shared to this exact group via community_trade_shares
+    const { data: shareExists } = await supabaseAdmin
+      .from("community_trade_shares" as any)
+      .select("id")
+      .eq("trade_id", data.tradeId)
+      .eq("group_id", data.groupId)
+      .maybeSingle();
+    if (!shareExists) {
+      throw new Error("Trade is not shared with this group");
+    }
+
     const { data: row, error } = await supabaseAdmin
       .from("community_trade_comments")
       .insert({
@@ -625,12 +652,33 @@ export const deleteComment = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
-    const { error } = await context.supabase
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: comment, error } = await supabaseAdmin
+      .from("community_trade_comments")
+      .select("id, user_id, group_id")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (error) throw safeError(error);
+    if (!comment) throw new Error("Comment not found");
+
+    const { data: group } = await supabaseAdmin
+      .from("community_groups")
+      .select("owner_id")
+      .eq("id", comment.group_id)
+      .maybeSingle();
+
+    const isAuthor = comment.user_id === context.userId;
+    const isGroupOwner = group && group.owner_id === context.userId;
+
+    if (!isAuthor && !isGroupOwner) {
+      throw new Error("You are not authorized to delete this comment");
+    }
+
+    const { error: delErr } = await supabaseAdmin
       .from("community_trade_comments")
       .delete()
-      .eq("id", data.id)
-      .eq("user_id", context.userId);
-    if (error) throw safeError(error);
+      .eq("id", data.id);
+    if (delErr) throw safeError(delErr);
     return { ok: true };
   });
 
@@ -660,9 +708,7 @@ export const listNotifications = createServerFn({ method: "GET" })
 export const markNotificationsRead = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) =>
-    z
-      .object({ ids: z.union([z.literal("all"), z.array(z.string().uuid())]) })
-      .parse(d),
+    z.object({ ids: z.union([z.literal("all"), z.array(z.string().uuid())]) }).parse(d),
   )
   .handler(async ({ data, context }) => {
     let q = context.supabase
@@ -680,9 +726,7 @@ export const markNotificationsRead = createServerFn({ method: "POST" })
 
 export const setTradeShared = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d) =>
-    z.object({ tradeId: z.string().uuid(), shared: z.boolean() }).parse(d),
-  )
+  .inputValidator((d) => z.object({ tradeId: z.string().uuid(), shared: z.boolean() }).parse(d))
   .handler(async ({ data, context }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: trade, error } = await supabaseAdmin
@@ -727,5 +771,123 @@ export const setTradeShared = createServerFn({ method: "POST" })
         if (rows.length) await supabaseAdmin.from("community_notifications").insert(rows);
       }
     }
+    return { ok: true };
+  });
+
+export const getTradeShares = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) => z.object({ tradeId: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: shares, error } = await supabaseAdmin
+      .from("community_trade_shares" as any)
+      .select("group_id")
+      .eq("trade_id", data.tradeId)
+      .eq("user_id", context.userId);
+    if (error) throw safeError(error);
+    return ((shares as any[]) ?? []).map((s) => s.group_id) as string[];
+  });
+
+export const shareTradeToGroups = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z
+      .object({
+        tradeId: z.string().uuid(),
+        groupIds: z.array(z.string().uuid()),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    // Verify trade ownership
+    const { data: trade } = await context.supabase
+      .from("trades")
+      .select("id, instrument, is_shared")
+      .eq("id", data.tradeId)
+      .eq("user_id", context.userId)
+      .maybeSingle();
+    if (!trade) throw new Error("Trade not found");
+
+    // Get current shares
+    const { data: currentShares } = await supabaseAdmin
+      .from("community_trade_shares" as any)
+      .select("group_id")
+      .eq("trade_id", data.tradeId)
+      .eq("user_id", context.userId);
+    const currentGroupIds = new Set(((currentShares as any[]) ?? []).map((s) => s.group_id));
+    const nextGroupIds = new Set(data.groupIds);
+
+    const toDelete = Array.from(currentGroupIds).filter((g) => !nextGroupIds.has(g));
+    const toInsert = Array.from(nextGroupIds).filter((g) => !currentGroupIds.has(g));
+
+    if (toDelete.length) {
+      const { error: delErr } = await supabaseAdmin
+        .from("community_trade_shares" as any)
+        .delete()
+        .eq("trade_id", data.tradeId)
+        .eq("user_id", context.userId)
+        .in("group_id", toDelete);
+      if (delErr) throw safeError(delErr);
+    }
+
+    if (toInsert.length) {
+      // Verify user is member of all groups in toInsert
+      const { data: memberships } = await supabaseAdmin
+        .from("community_group_members")
+        .select("group_id")
+        .eq("user_id", context.userId)
+        .in("group_id", toInsert);
+      const memberGroupIds = new Set((memberships ?? []).map((m) => m.group_id));
+      const validInsert = toInsert.filter((g) => memberGroupIds.has(g));
+
+      if (validInsert.length) {
+        const insertRows = validInsert.map((g) => ({
+          trade_id: data.tradeId,
+          group_id: g,
+          user_id: context.userId,
+        }));
+        const { error: insErr } = await supabaseAdmin
+          .from("community_trade_shares" as any)
+          .insert(insertRows);
+        if (insErr) throw safeError(insErr);
+
+        // Send notifications to group members
+        const { data: prof } = await supabaseAdmin
+          .from("profiles")
+          .select("edge_id, display_name, username")
+          .eq("id", context.userId)
+          .maybeSingle();
+
+        for (const gid of validInsert) {
+          const { data: others } = await supabaseAdmin
+            .from("community_group_members")
+            .select("user_id")
+            .eq("group_id", gid)
+            .neq("user_id", context.userId);
+          const notifyRows = (others ?? []).map((o) => ({
+            user_id: o.user_id,
+            type: "trade_shared" as const,
+            payload: {
+              group_id: gid,
+              trade_id: data.tradeId,
+              instrument: trade.instrument,
+              trader_edge_id: prof?.edge_id ?? "",
+              trader_display: prof?.display_name ?? prof?.username ?? "Trader",
+            },
+          }));
+          if (notifyRows.length) {
+            await supabaseAdmin.from("community_notifications").insert(notifyRows);
+          }
+        }
+      }
+    }
+
+    // Update trades.is_shared flag for backwards compatibility/UI display
+    const hasAnyShares = data.groupIds.length > 0;
+    if (trade.is_shared !== hasAnyShares) {
+      await supabaseAdmin.from("trades").update({ is_shared: hasAnyShares }).eq("id", data.tradeId);
+    }
+
     return { ok: true };
   });

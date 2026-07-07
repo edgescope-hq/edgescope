@@ -300,9 +300,7 @@ function SettingsPage() {
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="text-sm font-semibold text-foreground/80">Light theme</div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        Not available yet.
-                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">Not available yet.</div>
                     </div>
                     <span className="rounded-full bg-primary/12 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-primary ring-1 ring-primary/20">
                       Coming soon

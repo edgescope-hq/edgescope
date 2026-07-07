@@ -25,7 +25,9 @@ function ResetPasswordPage() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event) => {
       if (event === "PASSWORD_RECOVERY" || event === "SIGNED_IN") setReady(true);
     });
     supabase.auth.getSession().then(({ data }) => {
@@ -56,10 +58,27 @@ function ResetPasswordPage() {
         ) : (
           <form onSubmit={submit} className="mt-6 space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="password" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">New password</Label>
-              <Input id="password" type="password" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} className="rounded-xl bg-white/[0.04] border-white/[0.06] focus:border-primary/40 focus:ring-primary/20" />
+              <Label
+                htmlFor="password"
+                className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+              >
+                New password
+              </Label>
+              <Input
+                id="password"
+                type="password"
+                required
+                minLength={8}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="rounded-xl bg-white/[0.04] border-white/[0.06] focus:border-primary/40 focus:ring-primary/20"
+              />
             </div>
-            <Button type="submit" className="w-full rounded-xl bg-primary py-2.5 text-sm font-semibold shadow-[var(--shadow-glow)] transition-all duration-200 hover:brightness-110" disabled={loading}>
+            <Button
+              type="submit"
+              className="w-full rounded-xl bg-primary py-2.5 text-sm font-semibold shadow-[var(--shadow-glow)] transition-all duration-200 hover:brightness-110"
+              disabled={loading}
+            >
               {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Update password
             </Button>
           </form>

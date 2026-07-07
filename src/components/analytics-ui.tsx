@@ -26,7 +26,9 @@ export function StatCard({
             : "text-foreground";
   return (
     <div className="glow-card rounded-2xl p-5">
-      <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">{label}</span>
+      <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+        {label}
+      </span>
       <div className={`mt-3 font-mono text-3xl font-bold tabular-nums ${accentCls}`}>
         {value}
         {unit && <span className="ml-1 text-base font-normal text-muted-foreground">{unit}</span>}
@@ -36,7 +38,15 @@ export function StatCard({
   );
 }
 
-export function GroupBars({ title, stats, empty = "Not enough data yet." }: { title: string; stats: GroupStat[]; empty?: string }) {
+export function GroupBars({
+  title,
+  stats,
+  empty = "Not enough data yet.",
+}: {
+  title: string;
+  stats: GroupStat[];
+  empty?: string;
+}) {
   const max = Math.max(1, ...stats.map((s) => s.count));
   return (
     <div className="glow-card rounded-2xl p-5">
@@ -78,10 +88,17 @@ export function InsightCard({
   tone?: "success" | "destructive";
   sub?: string;
 }) {
-  const toneCls = tone === "success" ? "text-success" : tone === "destructive" ? "text-destructive" : "text-foreground";
+  const toneCls =
+    tone === "success"
+      ? "text-success"
+      : tone === "destructive"
+        ? "text-destructive"
+        : "text-foreground";
   return (
     <div className="glow-card rounded-2xl p-5">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">{label}</p>
+      <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+        {label}
+      </p>
       <p className={`mt-2.5 text-xl font-bold ${toneCls}`}>{value}</p>
       {sub && <p className="mt-1.5 text-xs text-muted-foreground">{sub}</p>}
     </div>

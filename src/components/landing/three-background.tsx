@@ -3,7 +3,13 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 
 // ─── Floating Particles ───
-function Particles({ count = 80, mouse }: { count?: number; mouse: React.RefObject<THREE.Vector2> }) {
+function Particles({
+  count = 80,
+  mouse,
+}: {
+  count?: number;
+  mouse: React.RefObject<THREE.Vector2>;
+}) {
   const mesh = useRef<THREE.InstancedMesh>(null!);
   const dummy = useMemo(() => new THREE.Object3D(), []);
 
@@ -33,11 +39,7 @@ function Particles({ count = 80, mouse }: { count?: number; mouse: React.RefObje
       const z = p.position.z + Math.sin(t * p.speed * 0.3) * 0.3;
 
       dummy.position.set(x, y, z);
-      dummy.rotation.set(
-        t * p.rotSpeed * 0.3,
-        t * p.rotSpeed * 0.5,
-        0,
-      );
+      dummy.rotation.set(t * p.rotSpeed * 0.3, t * p.rotSpeed * 0.5, 0);
       dummy.scale.setScalar(p.scale * (1 + Math.sin(t * 0.5 + p.offset) * 0.15));
       dummy.updateMatrix();
       mesh.current.setMatrixAt(i, dummy.matrix);
@@ -157,11 +159,13 @@ function LightTrails() {
       const segs = 80;
       for (let j = 0; j <= segs; j++) {
         const a = (j / segs) * Math.PI * 2;
-        points.push(new THREE.Vector3(
-          Math.cos(a) * radius,
-          Math.sin(a) * (radius * 0.55) + Math.sin(a * 3) * 0.4,
-          Math.sin(a * 2) * 1.2 - 2,
-        ));
+        points.push(
+          new THREE.Vector3(
+            Math.cos(a) * radius,
+            Math.sin(a) * (radius * 0.55) + Math.sin(a * 3) * 0.4,
+            Math.sin(a * 2) * 1.2 - 2,
+          ),
+        );
       }
       const curve = new THREE.CatmullRomCurve3(points, true, "catmullrom", 0.5);
       return {
@@ -200,7 +204,6 @@ function LightTrails() {
     </group>
   );
 }
-
 
 // ─── Ambient Light Rig ───
 function LightRig() {

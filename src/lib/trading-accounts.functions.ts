@@ -28,7 +28,9 @@ export type TradingAccount = {
 
 const accountInputSchema = z.object({
   name: z.string().min(1).max(80),
-  account_type: z.enum(["personal", "funded", "demo", "live", "challenge", "backtest"]).default("personal"),
+  account_type: z
+    .enum(["personal", "funded", "demo", "live", "challenge", "backtest"])
+    .default("personal"),
   starting_balance: z.number().nonnegative(),
   broker: z.string().max(80).nullable().optional(),
   challenge_provider: z.string().max(80).nullable().optional(),
@@ -66,6 +68,27 @@ export const createTradingAccount = createServerFn({ method: "POST" })
       .eq("user_id", context.userId)
       .eq("is_active", true);
     const shouldActivate = (count ?? 0) === 0;
+
+    // Idempotency check for fallback account name "Personal"
+    if (data.name === "Personal" && data.account_type === "personal") {
+      const { data: existing } = await context.supabase
+        .from("trading_accounts")
+        .select("*")
+        .eq("user_id", context.userId)
+        .eq("name", "Personal")
+        .eq("account_type", "personal")
+        .maybeSingle();
+      if (existing) {
+        if (!existing.is_active && shouldActivate) {
+          await context.supabase
+            .from("trading_accounts")
+            .update({ is_active: true })
+            .eq("id", existing.id);
+          existing.is_active = true;
+        }
+        return existing as TradingAccount;
+      }
+    }
 
     const { data: row, error } = await context.supabase
       .from("trading_accounts")

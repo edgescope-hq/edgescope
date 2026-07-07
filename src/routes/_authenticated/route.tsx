@@ -1,6 +1,13 @@
-import { createFileRoute, Outlet, redirect, useNavigate } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  Outlet,
+  redirect,
+  useNavigate,
+  useLocation,
+} from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
+import { useEffect } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { AppSidebar } from "@/components/app/sidebar";
@@ -18,6 +25,7 @@ export const Route = createFileRoute("/_authenticated")({
 
 function AuthenticatedLayout() {
   const navigate = useNavigate();
+  const location = useLocation();
   const qc = useQueryClient();
   const getProfileFn = useServerFn(getProfile);
   const cancelAccountDeletionFn = useServerFn(cancelAccountDeletion);
@@ -25,6 +33,18 @@ function AuthenticatedLayout() {
     queryKey: ["profile"],
     queryFn: () => getProfileFn(),
   });
+
+  const emailPrefixVal = profile?.email?.split("@")[0]?.trim().toLowerCase() ?? "";
+  const usernameVal = (profile?.username ?? "").trim().toLowerCase();
+  const displayVal = (profile?.display_name ?? "").trim().toLowerCase();
+  const profileIncomplete =
+    profile && (!displayVal || displayVal === emailPrefixVal || usernameVal === emailPrefixVal);
+
+  useEffect(() => {
+    if (profileIncomplete && location.pathname !== "/" && location.pathname !== "/dashboard") {
+      navigate({ to: "/", replace: true });
+    }
+  }, [profileIncomplete, location.pathname, navigate]);
   const cancelDeletionM = useMutation({
     mutationFn: () => cancelAccountDeletionFn(),
     onSuccess: () => {
@@ -45,12 +65,21 @@ function AuthenticatedLayout() {
   };
 
   return (
-    <div className="edgescope-app relative flex min-h-screen w-full flex-col overflow-hidden bg-[oklch(0.065_0.012_270)] text-foreground [--muted-foreground:oklch(0.70_0.018_270)] md:flex-row">
-      <div className="pointer-events-none absolute inset-0 app-orbit-texture opacity-80" aria-hidden />
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-[520px] bg-[radial-gradient(ellipse_at_top,oklch(0.68_0.23_295/0.105),transparent_64%)]" aria-hidden />
-      <div className="pointer-events-none absolute right-[-18rem] top-[-16rem] h-[42rem] w-[42rem] rounded-full bg-primary/[0.035] blur-3xl" aria-hidden />
+    <div className="edgescope-app relative flex h-screen min-h-screen w-full flex-col overflow-hidden bg-[oklch(0.065_0.012_270)] text-foreground [--muted-foreground:oklch(0.70_0.018_270)] md:flex-row">
+      <div
+        className="pointer-events-none absolute inset-0 app-orbit-texture opacity-80"
+        aria-hidden
+      />
+      <div
+        className="pointer-events-none absolute inset-x-0 top-0 h-[520px] bg-[radial-gradient(ellipse_at_top,oklch(0.68_0.23_295/0.105),transparent_64%)]"
+        aria-hidden
+      />
+      <div
+        className="pointer-events-none absolute right-[-18rem] top-[-16rem] h-[42rem] w-[42rem] rounded-full bg-primary/[0.035] blur-3xl"
+        aria-hidden
+      />
       <AppSidebar />
-      <main className="relative flex-1 overflow-x-hidden">
+      <main className="relative min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
         <Outlet />
       </main>
       {deletionScheduledFor && (

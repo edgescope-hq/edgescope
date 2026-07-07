@@ -601,9 +601,15 @@ function Landing() {
             ))}
           </div>
           <div className="flex flex-wrap justify-center gap-3 text-xs">
-            <Link to="/terms" className="transition hover:text-foreground">Terms</Link>
-            <Link to="/privacy" className="transition hover:text-foreground">Privacy</Link>
-            <Link to="/disclaimer" className="transition hover:text-foreground">Disclaimer</Link>
+            <Link to="/terms" className="transition hover:text-foreground">
+              Terms
+            </Link>
+            <Link to="/privacy" className="transition hover:text-foreground">
+              Privacy
+            </Link>
+            <Link to="/disclaimer" className="transition hover:text-foreground">
+              Disclaimer
+            </Link>
           </div>
         </div>
       </footer>

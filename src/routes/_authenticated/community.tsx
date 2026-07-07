@@ -397,11 +397,15 @@ function GroupsList({ onOpen }: { onOpen: (g: GroupSummary) => void }) {
               <div className="w-full space-y-1 border-t border-white/[0.05] pt-3 text-xs text-muted-foreground">
                 <div>
                   Shared trades <span className="text-muted-foreground/45">&mdash;</span>{" "}
-                  <span className="font-semibold tabular-nums text-foreground">{sharedTradeCounts[g.id] ?? 0}</span>
+                  <span className="font-semibold tabular-nums text-foreground">
+                    {sharedTradeCounts[g.id] ?? 0}
+                  </span>
                 </div>
                 <div>
                   Members <span className="text-muted-foreground/45">&mdash;</span>{" "}
-                  <span className="font-semibold tabular-nums text-foreground">{g.member_count}</span>
+                  <span className="font-semibold tabular-nums text-foreground">
+                    {g.member_count}
+                  </span>
                 </div>
               </div>
             </button>
@@ -433,7 +437,9 @@ function GroupsList({ onOpen }: { onOpen: (g: GroupSummary) => void }) {
                   maxLength={60}
                   className={cn(
                     "mt-1.5 w-full rounded-xl bg-white/[0.04] px-3 py-2.5 text-sm ring-1 focus:outline-none focus:ring-2",
-                    duplicateName ? "ring-destructive/25 focus:ring-destructive/30" : "ring-white/[0.06] focus:ring-primary/40",
+                    duplicateName
+                      ? "ring-destructive/25 focus:ring-destructive/30"
+                      : "ring-white/[0.06] focus:ring-primary/40",
                   )}
                 />
                 {duplicateName && (
@@ -554,26 +560,113 @@ function GroupDetail({ group, onBack }: { group: GroupSummary; onBack: () => voi
 
 function TradesTab({ group, trades }: { group: GroupSummary; trades: GroupTrade[] }) {
   const [open, setOpen] = useState<GroupTrade | null>(null);
+  const [limit, setLimit] = useState(6);
+  const [dateFilter, setDateFilter] = useState<"all" | "today" | "week" | "month">("all");
+
+  const filteredTrades = useMemo(() => {
+    if (dateFilter === "all") return trades;
+    const now = new Date();
+    const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+
+    const todayStart = startOfDay(now).getTime();
+
+    // Start of current week (Monday)
+    const currentDay = now.getDay();
+    const distanceToMonday = currentDay === 0 ? 6 : currentDay - 1;
+    const mondayStart = startOfDay(
+      new Date(now.getTime() - distanceToMonday * 24 * 60 * 60 * 1000),
+    ).getTime();
+
+    // Start of current month
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+
+    return trades.filter((t) => {
+      const parts = t.trade_date.split("-").map(Number);
+      if (parts.length !== 3) return false;
+      const tradeDate = new Date(parts[0], parts[1] - 1, parts[2]).getTime();
+      if (dateFilter === "today") {
+        return tradeDate >= todayStart;
+      }
+      if (dateFilter === "week") {
+        return tradeDate >= mondayStart;
+      }
+      if (dateFilter === "month") {
+        return tradeDate >= monthStart;
+      }
+      return true;
+    });
+  }, [trades, dateFilter]);
 
   return (
-    <div className="mt-6 space-y-3">
-      {trades.length === 0 ? (
+    <div className="mt-6 space-y-4">
+      {trades.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.04] pb-3">
+          <div className="text-xs font-semibold text-muted-foreground">
+            {filteredTrades.length} {filteredTrades.length === 1 ? "trade" : "trades"} shared
+          </div>
+          <div className="flex gap-1 rounded-xl bg-white/[0.02] p-1 ring-1 ring-white/[0.05]">
+            {(
+              [
+                { v: "all", l: "All time" },
+                { v: "today", l: "Today" },
+                { v: "week", l: "This week" },
+                { v: "month", l: "This month" },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.v}
+                onClick={() => {
+                  setDateFilter(opt.v);
+                  setLimit(6);
+                }}
+                className={cn(
+                  "rounded-lg px-2.5 py-1 text-[11px] font-semibold transition",
+                  dateFilter === opt.v
+                    ? "bg-white/[0.06] text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {opt.l}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {filteredTrades.length === 0 ? (
         <div className="glow-card rounded-2xl p-10 text-center">
           <MessageCircle className="mx-auto h-8 w-8 text-muted-foreground/78" />
-          <h3 className="mt-3 text-base font-semibold">No shared trades yet.</h3>
+          <h3 className="mt-3 text-base font-semibold">
+            {trades.length === 0 ? "No shared trades yet." : "No trades match the filter."}
+          </h3>
           <p className="mt-1 text-sm text-muted-foreground">
-            When you share a trade, group members will only see the screenshot, instrument, result, date, and reasoning.
+            {trades.length === 0
+              ? "When you share a trade, group members will only see the screenshot, instrument, result, date, and reasoning."
+              : "Try switching back to 'All time' or choosing a different filter option."}
           </p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Your full journal stays private.
-          </p>
+          {trades.length === 0 && (
+            <p className="mt-1 text-sm text-muted-foreground">Your full journal stays private.</p>
+          )}
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          {trades.map((t) => (
-            <TradeCard key={t.id} trade={t} onOpen={() => setOpen(t)} />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            {filteredTrades.slice(0, limit).map((t) => (
+              <TradeCard key={t.id} trade={t} onOpen={() => setOpen(t)} />
+            ))}
+          </div>
+          {filteredTrades.length > limit && (
+            <div className="mt-4 flex justify-center">
+              <button
+                type="button"
+                onClick={() => setLimit((l) => l + 6)}
+                className="rounded-xl bg-white/[0.04] px-4 py-2 text-xs font-semibold text-muted-foreground ring-1 ring-white/[0.06] hover:text-foreground transition duration-200"
+              >
+                Show more
+              </button>
+            </div>
+          )}
+        </>
       )}
 
       <AnimatePresence>
@@ -591,7 +684,7 @@ function TradeCard({ trade, onOpen }: { trade: GroupTrade; onOpen: () => void })
       className="glow-card group overflow-hidden rounded-2xl p-0 text-left transition hover:ring-white/[0.12]"
     >
       {shot ? (
-        <div className="relative h-44 w-full overflow-hidden bg-black/40">
+        <div className="relative h-32 w-full overflow-hidden bg-black/40">
           <img
             src={shot}
             alt={trade.instrument}
@@ -599,13 +692,13 @@ function TradeCard({ trade, onOpen }: { trade: GroupTrade; onOpen: () => void })
           />
         </div>
       ) : (
-        <div className="grid h-44 w-full place-items-center bg-white/[0.02] text-[11px] text-muted-foreground">
+        <div className="grid h-32 w-full place-items-center bg-white/[0.02] text-[11px] text-muted-foreground">
           No screenshot
         </div>
       )}
-      <div className="p-4">
+      <div className="p-3">
         <div className="flex items-center justify-between gap-2">
-          <div className="font-bold">{trade.instrument}</div>
+          <div className="font-bold text-sm">{trade.instrument}</div>
           <div className="flex gap-1.5">
             {trade.result && (
               <span
@@ -623,10 +716,10 @@ function TradeCard({ trade, onOpen }: { trade: GroupTrade; onOpen: () => void })
             )}
           </div>
         </div>
-        <p className="mt-2 line-clamp-2 text-[12px] text-muted-foreground">
-          {trade.reasoning || "No reasoning provided."}
+        <p className="mt-1.5 line-clamp-2 text-[12px] text-muted-foreground">
+          {trade.reasoning || "No reasoning shared."}
         </p>
-        <div className="mt-3 text-[11px] text-muted-foreground">
+        <div className="mt-2 text-[10px] text-muted-foreground/80">
           {new Date(trade.trade_date).toLocaleDateString()}
         </div>
       </div>
@@ -647,6 +740,7 @@ function TradeDetail({
   const profileFn = useServerFn(getMyProfile);
   const { data: profile } = useQuery({ queryKey: ["my-profile"], queryFn: () => profileFn() });
   const myId = profile?.id;
+  const [visibleCommentsCount, setVisibleCommentsCount] = useState(5);
 
   const commentsFn = useServerFn(listTradeComments);
   const { data: comments = [] } = useQuery({
@@ -729,11 +823,13 @@ function TradeDetail({
           </div>
         )}
 
-        {trade.reasoning && (
-          <div className="rounded-xl bg-white/[0.025] p-4 text-sm leading-relaxed ring-1 ring-white/[0.04]">
-            {trade.reasoning}
-          </div>
-        )}
+        <div className="rounded-xl bg-white/[0.025] p-4 text-sm leading-relaxed ring-1 ring-white/[0.04] text-muted-foreground">
+          {trade.reasoning ? (
+            <span className="text-foreground">{trade.reasoning}</span>
+          ) : (
+            <span>No reasoning shared.</span>
+          )}
+        </div>
 
         <div>
           <h4 className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
@@ -743,7 +839,7 @@ function TradeDetail({
             {roots.length === 0 && (
               <p className="text-sm text-muted-foreground">No comments yet. Start the review.</p>
             )}
-            {roots.map((c) => (
+            {roots.slice(0, visibleCommentsCount).map((c) => (
               <CommentNode
                 key={c.id}
                 comment={c}
@@ -754,6 +850,17 @@ function TradeDetail({
                 tradeId={trade.id}
               />
             ))}
+            {roots.length > visibleCommentsCount && (
+              <div className="mt-2.5 flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => setVisibleCommentsCount((count) => count + 5)}
+                  className="rounded-lg bg-white/[0.04] px-3.5 py-1.5 text-xs font-semibold text-muted-foreground ring-1 ring-white/[0.06] hover:text-foreground transition duration-200"
+                >
+                  Show more comments
+                </button>
+              </div>
+            )}
           </div>
 
           <form
@@ -837,10 +944,11 @@ function CommentNode({
     <div className="rounded-xl bg-white/[0.025] p-3.5 ring-1 ring-white/[0.04]">
       <div className="flex items-center justify-between text-[11px] text-muted-foreground">
         <div>
-          <span className="font-mono text-foreground/80">{comment.author_edge_id}</span>
-          <span className="ml-2">{new Date(comment.created_at).toLocaleString()}</span>
+          <span className="font-semibold text-foreground/90">
+            {comment.author_display?.trim() || "Member"}
+          </span>
           {comment.updated_at !== comment.created_at && (
-            <span className="ml-1 italic">· edited</span>
+            <span className="ml-2 text-[10px] text-muted-foreground/60 italic">edited</span>
           )}
         </div>
         <div className="flex gap-1.5">
@@ -905,8 +1013,12 @@ function CommentNode({
             <div key={r.id} className="rounded-lg bg-white/[0.02] p-3 ring-1 ring-white/[0.04]">
               <div className="flex items-center justify-between text-[11px] text-muted-foreground">
                 <div>
-                  <span className="font-mono text-foreground/80">{r.author_edge_id}</span>
-                  <span className="ml-2">{new Date(r.created_at).toLocaleString()}</span>
+                  <span className="font-semibold text-foreground/90">
+                    {r.author_display?.trim() || "Member"}
+                  </span>
+                  {r.updated_at !== r.created_at && (
+                    <span className="ml-2 text-[10px] text-muted-foreground/60 italic">edited</span>
+                  )}
                 </div>
                 {myId === r.user_id && (
                   <button
@@ -1176,66 +1288,70 @@ function SettingsTab({ group, onDeleted }: { group: GroupSummary; onDeleted: () 
 
       {isOwner && (
         <>
-      <div className="glow-card rounded-2xl p-5">
-        <h3 className="flex items-center gap-2 text-sm font-semibold">
-          <PencilLine className="h-4 w-4 text-primary" /> Group name
-        </h3>
-        <div className="mt-3 flex gap-2">
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            maxLength={60}
-            className={cn(
-              "flex-1 rounded-xl bg-white/[0.04] px-3 py-2.5 text-sm ring-1 focus:outline-none focus:ring-2",
-              duplicateName ? "ring-destructive/25 focus:ring-destructive/30" : "ring-white/[0.06] focus:ring-primary/40",
+          <div className="glow-card rounded-2xl p-5">
+            <h3 className="flex items-center gap-2 text-sm font-semibold">
+              <PencilLine className="h-4 w-4 text-primary" /> Group name
+            </h3>
+            <div className="mt-3 flex gap-2">
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                maxLength={60}
+                className={cn(
+                  "flex-1 rounded-xl bg-white/[0.04] px-3 py-2.5 text-sm ring-1 focus:outline-none focus:ring-2",
+                  duplicateName
+                    ? "ring-destructive/25 focus:ring-destructive/30"
+                    : "ring-white/[0.06] focus:ring-primary/40",
+                )}
+              />
+              <button
+                onClick={() => {
+                  if (duplicateName) {
+                    toast.error("You already have a group with this name.");
+                    return;
+                  }
+                  rename.mutate();
+                }}
+                disabled={
+                  !name.trim() || duplicateName || name.trim() === group.name || rename.isPending
+                }
+                className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] disabled:opacity-50"
+              >
+                <Check className="h-4 w-4" /> Save
+              </button>
+            </div>
+            {duplicateName && (
+              <p className="mt-1.5 text-[11px] text-destructive/85">
+                You already have a group with this name.
+              </p>
             )}
-          />
-          <button
-            onClick={() => {
-              if (duplicateName) {
-                toast.error("You already have a group with this name.");
-                return;
-              }
-              rename.mutate();
+          </div>
+
+          <div className="rounded-2xl bg-primary/[0.035] p-5 ring-1 ring-primary/10">
+            <h3 className="text-sm font-semibold text-foreground">Group management</h3>
+            <p className="mt-1 text-xs text-muted-foreground/75">
+              Group deletion stays behind confirmation and cannot be undone.
+            </p>
+            <button
+              onClick={() => setConfirmDelete(true)}
+              className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-destructive/[0.04] px-3.5 py-2 text-xs font-semibold text-destructive/75 ring-1 ring-destructive/10 transition hover:bg-destructive/[0.065] hover:text-destructive/85 hover:ring-destructive/15"
+            >
+              <Trash2 className="h-3.5 w-3.5" /> Delete group
+            </button>
+          </div>
+
+          <ConfirmDialog
+            open={confirmDelete}
+            onOpenChange={setConfirmDelete}
+            title={`Delete "${group.name}"?`}
+            description="This cannot be undone."
+            confirmLabel="Delete group"
+            destructive
+            onConfirm={() => {
+              setConfirmDelete(false);
+              del.mutate();
             }}
-            disabled={!name.trim() || duplicateName || name.trim() === group.name || rename.isPending}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] disabled:opacity-50"
-          >
-            <Check className="h-4 w-4" /> Save
-          </button>
-        </div>
-        {duplicateName && (
-          <p className="mt-1.5 text-[11px] text-destructive/85">
-            You already have a group with this name.
-          </p>
-        )}
-      </div>
-
-      <div className="rounded-2xl bg-primary/[0.035] p-5 ring-1 ring-primary/10">
-        <h3 className="text-sm font-semibold text-foreground">Group management</h3>
-        <p className="mt-1 text-xs text-muted-foreground/75">
-          Group deletion stays behind confirmation and cannot be undone.
-        </p>
-        <button
-          onClick={() => setConfirmDelete(true)}
-          className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-destructive/[0.04] px-3.5 py-2 text-xs font-semibold text-destructive/75 ring-1 ring-destructive/10 transition hover:bg-destructive/[0.065] hover:text-destructive/85 hover:ring-destructive/15"
-        >
-          <Trash2 className="h-3.5 w-3.5" /> Delete group
-        </button>
-      </div>
-
-      <ConfirmDialog
-        open={confirmDelete}
-        onOpenChange={setConfirmDelete}
-        title={`Delete "${group.name}"?`}
-        description="This cannot be undone."
-        confirmLabel="Delete group"
-        destructive
-        onConfirm={() => {
-          setConfirmDelete(false);
-          del.mutate();
-        }}
-      />
+          />
         </>
       )}
     </div>
@@ -1270,20 +1386,20 @@ function ModalShell({
         transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
         onClick={(e: MouseEvent) => e.stopPropagation()}
         className={cn(
-          "glow-card max-h-[90vh] w-full overflow-y-auto rounded-2xl p-6",
-          wide ? "max-w-2xl" : "max-w-md",
+          "glow-card relative flex max-h-[90vh] w-full flex-col rounded-2xl p-6",
+          wide ? "max-w-[90vw] md:max-w-[80vw] lg:max-w-[1100px]" : "max-w-md",
         )}
       >
-        <div className="flex items-start justify-between">
-          <h3 className="text-lg font-bold">{title}</h3>
+        <div className="flex items-start justify-between shrink-0 mb-4 pb-2 border-b border-white/[0.04]">
+          <h3 className="text-lg font-bold truncate pr-4">{title}</h3>
           <button
             onClick={onClose}
-            className="rounded-lg p-1.5 text-muted-foreground transition hover:bg-white/[0.06] hover:text-foreground"
+            className="rounded-lg p-1.5 text-muted-foreground transition hover:bg-white/[0.06] hover:text-foreground shrink-0"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="mt-4">{children}</div>
+        <div className="flex-1 overflow-y-auto pr-1">{children}</div>
       </motion.div>
     </motion.div>
   );

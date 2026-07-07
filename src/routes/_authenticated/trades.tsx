@@ -1,4 +1,4 @@
-﻿import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
@@ -230,23 +230,20 @@ function TradesPage() {
       }),
     [accountFilter, allDbRows],
   );
-  const visible = useMemo(
-    () => {
-      const query = q.trim().toLowerCase();
-      return accountRows.filter(
-        (r) =>
-          (filter === "ALL" || r.res === filter) &&
-          (activeCategory === "ALL" || r.category === activeCategory) &&
-          (query === "" ||
-            r.sym.toLowerCase().includes(query) ||
-            r.date.toLowerCase().includes(query) ||
-            r.rawDate.toLowerCase().includes(query) ||
-            r.subcategory.toLowerCase().includes(query) ||
-            r.category.toLowerCase().includes(query)),
-      );
-    },
-    [q, filter, activeCategory, accountRows],
-  );
+  const visible = useMemo(() => {
+    const query = q.trim().toLowerCase();
+    return accountRows.filter(
+      (r) =>
+        (filter === "ALL" || r.res === filter) &&
+        (activeCategory === "ALL" || r.category === activeCategory) &&
+        (query === "" ||
+          r.sym.toLowerCase().includes(query) ||
+          r.date.toLowerCase().includes(query) ||
+          r.rawDate.toLowerCase().includes(query) ||
+          r.subcategory.toLowerCase().includes(query) ||
+          r.category.toLowerCase().includes(query)),
+    );
+  }, [q, filter, activeCategory, accountRows]);
   const visibleRows = visible.slice(0, visibleCount);
   const hasMoreRows = visible.length > visibleRows.length;
   // Header and body rows share this exact template — one column definition,
@@ -460,12 +457,24 @@ function TradesPage() {
                     "border-b border-white/[0.06] bg-white/[0.012] text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground",
                   )}
                 >
-                  <div role="columnheader" className="px-4 py-3">Date</div>
-                  <div role="columnheader" className="px-3 py-3 text-center">Trade #</div>
-                  <div role="columnheader" className="px-4 py-3">Instrument</div>
-                  <div role="columnheader" className="px-3 py-3 text-right">Planned RR</div>
-                  <div role="columnheader" className="px-3 py-3 text-right">Achieved R</div>
-                  <div role="columnheader" className="px-3 py-3 text-center">Review</div>
+                  <div role="columnheader" className="px-4 py-3">
+                    Date
+                  </div>
+                  <div role="columnheader" className="px-3 py-3 text-center">
+                    Trade #
+                  </div>
+                  <div role="columnheader" className="px-4 py-3">
+                    Instrument
+                  </div>
+                  <div role="columnheader" className="px-3 py-3 text-center">
+                    Planned R:R
+                  </div>
+                  <div role="columnheader" className="px-3 py-3 text-center">
+                    Achieved R
+                  </div>
+                  <div role="columnheader" className="px-3 py-3 text-center">
+                    Review
+                  </div>
                 </div>
                 <div role="rowgroup" className="divide-y divide-white/[0.04]">
                   {visibleRows.map((r, i) => {
@@ -486,22 +495,33 @@ function TradesPage() {
                           "w-full cursor-pointer bg-transparent text-left outline-none ring-1 ring-transparent transition-all duration-200 hover:bg-white/[0.025] hover:ring-white/[0.06] focus-visible:bg-white/[0.035] focus-visible:ring-primary/25",
                         )}
                       >
-                        <div role="cell" className="px-4 py-4 text-xs leading-5 text-muted-foreground tabular-nums">
+                        <div
+                          role="cell"
+                          className="px-4 py-4 text-xs leading-5 text-muted-foreground tabular-nums"
+                        >
                           {r.date || "—"}
                         </div>
-                        <div role="cell" className="px-3 py-4 text-center text-xs font-mono text-muted-foreground tabular-nums">
+                        <div
+                          role="cell"
+                          className="px-3 py-4 text-center text-xs font-mono text-muted-foreground tabular-nums"
+                        >
                           #{r.num}
                         </div>
                         <div role="cell" className="px-4 py-4">
-                          <span className="block truncate text-sm font-bold text-foreground">{r.sym || "—"}</span>
+                          <span className="block truncate text-sm font-bold text-foreground">
+                            {r.sym || "—"}
+                          </span>
                         </div>
-                        <div role="cell" className="px-3 py-4 text-right text-xs font-semibold tabular-nums text-muted-foreground">
+                        <div
+                          role="cell"
+                          className="px-3 py-4 text-center text-sm font-semibold tabular-nums text-foreground"
+                        >
                           {r.plannedRR || "—"}
                         </div>
                         <div
                           role="cell"
                           className={cn(
-                            "px-3 py-4 text-right text-sm font-bold tabular-nums",
+                            "px-3 py-4 text-center text-sm font-bold tabular-nums",
                             positive && "text-success",
                             negative && "text-destructive",
                             (!r.hasRR || breakeven) && "text-muted-foreground",
@@ -702,27 +722,27 @@ function CategoryManager({
           {Object.keys(taxonomy).map((c) => {
             const usedBy = usage[c] ?? 0;
             return (
-            <div key={c} className="rounded-xl bg-white/[0.03] p-3.5 ring-1 ring-white/[0.04]">
-              <div className="flex items-center gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-semibold">{c}</div>
-                  {usedBy > 0 && (
-                    <div className="mt-0.5 text-[11px] text-muted-foreground">
-                      Used by {usedBy} trade{usedBy === 1 ? "" : "s"}
-                    </div>
-                  )}
+              <div key={c} className="rounded-xl bg-white/[0.03] p-3.5 ring-1 ring-white/[0.04]">
+                <div className="flex items-center gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-semibold">{c}</div>
+                    {usedBy > 0 && (
+                      <div className="mt-0.5 text-[11px] text-muted-foreground">
+                        Used by {usedBy} trade{usedBy === 1 ? "" : "s"}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmCategory(c)}
+                    disabled={removing}
+                    title="Remove category"
+                    className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white/[0.04] text-muted-foreground ring-1 ring-white/[0.06] transition hover:bg-destructive/[0.055] hover:text-destructive/80 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-white/[0.04] disabled:hover:text-muted-foreground"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setConfirmCategory(c)}
-                  disabled={removing}
-                  title="Remove category"
-                  className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white/[0.04] text-muted-foreground ring-1 ring-white/[0.06] transition hover:bg-destructive/[0.055] hover:text-destructive/80 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-white/[0.04] disabled:hover:text-muted-foreground"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
               </div>
-            </div>
             );
           })}
         </div>

@@ -7,7 +7,12 @@ const ease = [0.16, 1, 0.3, 1] as const;
 
 export function PageShell({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div className={cn("relative mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 md:px-10 md:py-10", className)}>
+    <div
+      className={cn(
+        "relative mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 md:px-10 md:py-10",
+        className,
+      )}
+    >
       {children}
     </div>
   );
@@ -52,12 +57,12 @@ export function PageHeader({
           {title}
         </h1>
         {description && (
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-            {description}
-          </p>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">{description}</p>
         )}
       </div>
-      {actions && <div className="flex flex-wrap items-center justify-end gap-2 pt-1">{actions}</div>}
+      {actions && (
+        <div className="flex flex-wrap items-center justify-end gap-2 pt-1">{actions}</div>
+      )}
     </motion.div>
   );
 }
@@ -82,7 +87,9 @@ export function SectionHeader({
           {Icon && <Icon className="h-4 w-4 text-primary" />}
           {title}
         </h2>
-        {description && <p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p>}
+        {description && (
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p>
+        )}
       </div>
       {action}
     </div>
@@ -140,7 +147,9 @@ export function PremiumEmptyState({
       </div>
       <div>
         <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-        {description && <p className="mt-1 max-w-md text-sm leading-6 text-muted-foreground">{description}</p>}
+        {description && (
+          <p className="mt-1 max-w-md text-sm leading-6 text-muted-foreground">{description}</p>
+        )}
       </div>
       {action}
     </div>

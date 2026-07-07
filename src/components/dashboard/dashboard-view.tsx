@@ -3,10 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Area,
   AreaChart,
-  Bar,
-  BarChart,
   CartesianGrid,
-  Cell,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -23,8 +20,6 @@ import {
   History,
   Flame,
   Plus,
-  Wallet,
-  Shield,
   AlertTriangle,
   ClipboardCheck,
   ClipboardList,
@@ -40,33 +35,26 @@ import { useSuspenseQuery, useQuery, useMutation, useQueryClient } from "@tansta
 import { useServerFn } from "@tanstack/react-start";
 import { listTrades } from "@/lib/trades.functions";
 import { getProfile, markIntroSeen, updateProfile } from "@/lib/account.functions";
-import {
-  getTradingPreferences,
-  type TradingPreferences,
-} from "@/lib/trading-preferences.functions";
 import { listTradingAccounts, type TradingAccount } from "@/lib/trading-accounts.functions";
 import { AnimatedNumber } from "@/components/dashboard/animated-number";
 import { PageHeader, PageShell, PremiumEmptyState } from "@/components/ui/premium";
 import { cn } from "@/lib/utils";
 import { overview, equityCurve } from "@/lib/analytics";
-import { toAnalytics, rrNum, streaks, type DbTrade } from "@/lib/trade-mappers";
+import {
+  isPaperTrade,
+  localDateKey,
+  numberTradesById,
+  recordedR,
+  rrNum,
+  streaks,
+  toAnalytics,
+  type DbTrade,
+} from "@/lib/trade-mappers";
 import { getReviewStatus } from "@/lib/review-status";
 import { toast } from "sonner";
 
-// Convert R-multiples to currency using starting balance × risk %.
-function rToCurrency(r: number, startingBalance: number | null, riskPct: number | null): number {
-  if (startingBalance == null || riskPct == null) return 0;
-  return startingBalance * (riskPct / 100) * r;
-}
-
-function prefsRiskReady(p: TradingPreferences | null | undefined): boolean {
-  return !!p && p.default_risk_pct != null;
-}
-
-function fmtMoney(v: number): string {
-  const sign = v < 0 ? "-" : "";
-  const abs = Math.abs(v);
-  return `${sign}$${abs.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+function sumRecordedR<T extends { achieved_rr: number | string | null }>(trades: T[]) {
+  return trades.reduce((sum, trade) => sum + (recordedR(trade.achieved_rr) ?? 0), 0);
 }
 
 type Tone = "primary" | "info" | "success" | "warning" | "destructive";
@@ -91,7 +79,6 @@ const toneStyles: Record<Tone, { icon: string; badge: string }> = {
   },
 };
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const INTRO_WORKFLOW = [
   {
     icon: ClipboardList,
@@ -112,7 +99,7 @@ const INTRO_WORKFLOW = [
 
 const SCOPE_UNLOCK_THRESHOLD = 10;
 const INTRO_CARD_HOVER =
-  "transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/25 hover:shadow-[0_22px_70px_-34px_oklch(0.68_0.23_295/0.55)]";
+  "transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/22 hover:shadow-[0_16px_44px_-34px_oklch(0.68_0.23_295/0.38)]";
 const SOFT_ACCENT = "text-primary/80";
 
 type DashboardProfile = {
@@ -194,7 +181,7 @@ function StatCard({
             {typeof value === "number" ? (
               <AnimatedNumber value={value} decimals={decimals} suffix={suffix} />
             ) : (
-              <span className="text-2xl">{value}</span>
+              <span className="text-2xl leading-8 inline-block pt-0.5">{value}</span>
             )}
           </div>
           {sub && <div className="mt-1 text-xs text-muted-foreground">{sub}</div>}
@@ -294,7 +281,7 @@ function ProfileSetupModal({
           if (!canSave) return;
           onSave({ username: username.trim(), display_name: displayName.trim() });
         }}
-        className={`relative w-full max-w-lg overflow-hidden rounded-2xl border border-white/[0.1] bg-[radial-gradient(circle_at_top_left,oklch(0.68_0.23_295/0.14),transparent_34%),linear-gradient(145deg,oklch(0.12_0.02_270/0.97),oklch(0.075_0.012_270/0.98))] p-7 shadow-[0_28px_90px_-28px_oklch(0_0_0/0.9),0_0_58px_-26px_oklch(0.68_0.23_295/0.7)] ${INTRO_CARD_HOVER}`}
+        className={`relative w-full max-w-lg overflow-hidden rounded-2xl border border-white/[0.1] bg-[radial-gradient(circle_at_top_left,oklch(0.68_0.23_295/0.1),transparent_34%),linear-gradient(145deg,oklch(0.12_0.02_270/0.97),oklch(0.075_0.012_270/0.98))] p-7 shadow-[0_22px_70px_-34px_oklch(0_0_0/0.86),0_0_34px_-28px_oklch(0.68_0.23_295/0.46)] ${INTRO_CARD_HOVER}`}
       >
         <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-primary/65 to-transparent" />
         <div className="flex items-start gap-4">
@@ -422,17 +409,16 @@ export function DashboardView() {
   const profileFn = useServerFn(getProfile);
   const updateProfileFn = useServerFn(updateProfile);
   const markIntroSeenFn = useServerFn(markIntroSeen);
-  const prefsFn = useServerFn(getTradingPreferences);
   const accountsFn = useServerFn(listTradingAccounts);
   const qc = useQueryClient();
   const { data: trades } = useSuspenseQuery({ queryKey: ["trades"], queryFn: () => tradesFn() });
   const { data: profile } = useSuspenseQuery({ queryKey: ["profile"], queryFn: () => profileFn() });
-  const { data: prefs } = useQuery({ queryKey: ["trading-preferences"], queryFn: () => prefsFn() });
   const { data: accounts } = useQuery({
     queryKey: ["trading-accounts"],
     queryFn: () => accountsFn(),
   });
   const db = useMemo(() => (trades ?? []) as DbTrade[], [trades]);
+  const realDb = useMemo(() => db.filter((trade) => !isPaperTrade(trade)), [db]);
 
   useEffect(() => {
     const updateGreeting = () => setDisplayGreeting(getBrowserLocalGreeting());
@@ -446,49 +432,43 @@ export function DashboardView() {
     [accounts],
   );
 
-  // Lifetime = all trades across every account.
-  const lifetimeRows = useMemo(() => db.map(toAnalytics), [db]);
+  // Lifetime = real trades across every account.
+  const lifetimeRows = useMemo(() => realDb.map(toAnalytics), [realDb]);
 
   // Active-account-scoped rows (for current balance / charts).
   const activeDb = useMemo(() => {
-    if (!activeAccount) return db;
-    return db.filter((t) => t.account_id === activeAccount.id);
-  }, [db, activeAccount]);
+    if (!activeAccount) return realDb;
+    return realDb.filter((t) => t.account_id === activeAccount.id);
+  }, [realDb, activeAccount]);
   const activeRows = useMemo(() => {
     if (!activeAccount) return lifetimeRows;
     return activeDb.map(toAnalytics);
   }, [activeAccount, activeDb, lifetimeRows]);
 
   const o = useMemo(() => overview(activeRows), [activeRows]);
-  const lifetime = useMemo(() => overview(lifetimeRows), [lifetimeRows]);
   const eq = useMemo(() => equityCurve(activeRows), [activeRows]);
-  const streak = useMemo(() => streaks(db), [db]);
+  const streak = useMemo(() => streaks(realDb), [realDb]);
 
-  const recent = useMemo(() => [...db].slice(0, 5), [db]);
+  const recent = useMemo(() => [...realDb].slice(0, 5), [realDb]);
+  const tradeNumbersById = useMemo(() => numberTradesById(realDb), [realDb]);
 
   // ------ Today snapshot (Phase 3: lighter daily-focused dashboard) ------
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const todayTrades = useMemo(() => db.filter((t) => t.trade_date === todayStr), [db, todayStr]);
-  const todayNetR = useMemo(
-    () =>
-      todayTrades.reduce(
-        (acc, t) => acc + (t.achieved_rr == null ? 0 : Number(t.achieved_rr) || 0),
-        0,
-      ),
-    [todayTrades],
+  const todayStr = localDateKey();
+  const todayTrades = useMemo(
+    () => realDb.filter((t) => t.trade_date === todayStr),
+    [realDb, todayStr],
   );
+  const todayNetR = useMemo(() => sumRecordedR(todayTrades), [todayTrades]);
 
   // ------ Journal completeness reminder ------
   // Status is derived from quick-capture essentials plus screenshot + reasoning.
   const journalGaps = useMemo(() => {
-    const incomplete = db.filter((t) => getReviewStatus(t) === "incomplete").length;
-    const needsReview = db.filter((t) => getReviewStatus(t) === "needs_review").length;
-    const reviewed = db.filter((t) => getReviewStatus(t) === "reviewed").length;
+    const incomplete = realDb.filter((t) => getReviewStatus(t) === "incomplete").length;
+    const needsReview = realDb.filter((t) => getReviewStatus(t) === "needs_review").length;
+    const reviewed = realDb.filter((t) => getReviewStatus(t) === "reviewed").length;
     return { incomplete, needsReview, reviewed };
-  }, [db]);
-  const hasJournalGaps =
-    db.length > 0 &&
-    journalGaps.incomplete + journalGaps.needsReview > 0;
+  }, [realDb]);
+  const hasJournalGaps = realDb.length > 0 && journalGaps.incomplete + journalGaps.needsReview > 0;
 
   const now = new Date();
   const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -506,72 +486,24 @@ export function DashboardView() {
     return eq.map((point) => ({ d: point.tradeIndex === 0 ? "0" : point.date, v: point.cumR }));
   }, [eq]);
 
-  // Account overview math (in currency, using active account starting balance + prefs risk %).
-  const startingBalance = activeAccount?.starting_balance ?? null;
-  const riskPct = prefs?.default_risk_pct ?? null;
-  const sumR = useMemo(
-    () =>
-      activeRows.reduce(
-        (acc, t) => acc + (t.achieved_rr == null ? 0 : Number(t.achieved_rr) || 0),
-        0,
-      ),
-    [activeRows],
-  );
-  const lifetimeSumR = useMemo(
-    () =>
-      lifetimeRows.reduce(
-        (acc, t) => acc + (t.achieved_rr == null ? 0 : Number(t.achieved_rr) || 0),
-        0,
-      ),
-    [lifetimeRows],
-  );
-  const netPnl = rToCurrency(sumR, startingBalance, riskPct);
-  const currentBalance = (startingBalance ?? 0) + netPnl;
+  // Account overview math uses canonical per-trade dollar P&L.
+  const sumR = useMemo(() => sumRecordedR(activeRows), [activeRows]);
 
-  // Account growth (cumulative $) line and monthly P&L bars derived from R per trade.
-  const growthSeries = useMemo(() => {
-    if (startingBalance == null || riskPct == null) return [];
-    let cum = startingBalance;
-    return eq.map((p, i) => {
-      const prev = i === 0 ? 0 : eq[i - 1].cumR;
-      const incrementR = p.cumR - prev;
-      cum += rToCurrency(incrementR, startingBalance, riskPct);
-      return { d: p.tradeIndex === 0 ? "0" : p.date, v: Number(cum.toFixed(2)) };
-    });
-  }, [eq, startingBalance, riskPct]);
-
-  const monthlyPnlSeries = useMemo(() => {
-    if (startingBalance == null || riskPct == null) return [];
-    const byMonth = new Map<string, number>();
-    for (const t of activeRows) {
-      if (t.achieved_rr == null) continue;
-      const k = t.trade_date.slice(0, 7);
-      byMonth.set(k, (byMonth.get(k) ?? 0) + (Number(t.achieved_rr) || 0));
-    }
-    return Array.from(byMonth.entries())
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([k, r]) => {
-        const [, m] = k.split("-");
-        return {
-          d: MONTHS[Number(m) - 1],
-          v: Number(rToCurrency(r, startingBalance, riskPct).toFixed(2)),
-        };
-      });
-  }, [activeRows, startingBalance, riskPct]);
-
-  const hasActiveAccount = !!activeAccount && prefsRiskReady(prefs);
   const accountCount = accounts?.length ?? 0;
   const profileIncomplete = isProfileIncomplete(profile);
   const hasSeenIntro = profile?.has_seen_intro ?? true;
-  const shouldShowIntroGuide = accounts !== undefined && accountCount === 0 && db.length === 0;
+  const shouldShowIntroGuide = accounts !== undefined && accountCount === 0 && realDb.length === 0;
   const displayName = profile?.display_name?.trim() || "Trader";
   const reviewedTradesCount = useMemo(
-    () => db.filter((trade) => getReviewStatus(trade) === "reviewed").length,
-    [db],
+    () => realDb.filter((trade) => getReviewStatus(trade) === "reviewed").length,
+    [realDb],
   );
   const [scopeUnlockDismissed, setScopeUnlockDismissed] = useState(() => {
-    try { return localStorage.getItem("edgescope.scopeUnlockDismissed") === "true"; }
-    catch { return false; }
+    try {
+      return localStorage.getItem("edgescope.scopeUnlockDismissed") === "true";
+    } catch {
+      return false;
+    }
   });
   const hasFirstReview = reviewedTradesCount > 0;
   const scopeReady = reviewedTradesCount >= SCOPE_UNLOCK_THRESHOLD;
@@ -580,7 +512,7 @@ export function DashboardView() {
     [activeDb],
   );
   const executionFocus = useMemo(() => {
-    const latestTrade = [...db].sort((a, b) =>
+    const latestTrade = [...realDb].sort((a, b) =>
       (b.trade_date + (b.trade_time ?? "")).localeCompare(a.trade_date + (a.trade_time ?? "")),
     )[0];
     const latestR = latestTrade ? rrNum(latestTrade.achieved_rr) : 0;
@@ -608,7 +540,8 @@ export function DashboardView() {
         tone: "warning" as Tone,
         icon: AlertTriangle,
         headline: "Large loss logged",
-        message: "Your latest trade was a larger loss. Review what happened before taking the next one.",
+        message:
+          "Your latest trade was a larger loss. Review what happened before taking the next one.",
         secondary: "Check whether it was normal setup risk or something to adjust.",
       };
     }
@@ -619,7 +552,7 @@ export function DashboardView() {
       message: "Wait for your plan, keep risk steady, and review the trade after execution.",
       secondary: "Consistent records make your edge easier to see.",
     };
-  }, [db, streak.currentLoss, streak.currentWin]);
+  }, [realDb, streak.currentLoss, streak.currentWin]);
   const currentStreakStat = useMemo(() => formatCurrentStreak(streak), [streak]);
 
   // Guide stage — only show before first review is complete
@@ -635,7 +568,7 @@ export function DashboardView() {
         to: "/accounts" as const,
       };
     }
-    if (db.length === 0) {
+    if (realDb.length === 0) {
       return {
         stage: "capture" as const,
         eyebrow: "CAPTURE",
@@ -653,7 +586,7 @@ export function DashboardView() {
       cta: "Complete review",
       to: "/trades" as const,
     };
-  }, [accountCount, db.length, hasFirstReview]);
+  }, [accountCount, realDb.length, hasFirstReview]);
 
   const saveProfileSetup = useMutation({
     mutationFn: (data: { username: string; display_name: string }) =>
@@ -677,7 +610,9 @@ export function DashboardView() {
   useEffect(() => {
     if (!profile || profileIncomplete || hasSeenIntro || introMarkedLocal) return;
     setIntroOpen(true);
-  }, [hasSeenIntro, introMarkedLocal, profile, profileIncomplete]);
+    setIntroMarkedLocal(true);
+    markIntroSeenMutation.mutate();
+  }, [hasSeenIntro, introMarkedLocal, profile, profileIncomplete, markIntroSeenMutation]);
 
   const closeIntro = () => {
     setIntroOpen(false);
@@ -713,7 +648,7 @@ export function DashboardView() {
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={motionTransition}
-          className={`mt-6 w-full overflow-hidden rounded-2xl border border-primary/20 bg-[radial-gradient(circle_at_top_left,oklch(0.68_0.23_295/0.12),transparent_32%),linear-gradient(145deg,oklch(0.14_0.022_270/0.9),oklch(0.09_0.014_270/0.86))] p-5 shadow-[0_20px_70px_-44px_oklch(0.68_0.23_295/0.55)] ring-1 ring-white/[0.05] backdrop-blur-xl sm:max-w-xl ${INTRO_CARD_HOVER}`}
+          className={`mt-6 w-full overflow-hidden rounded-2xl border border-primary/18 bg-[radial-gradient(circle_at_top_left,oklch(0.68_0.23_295/0.08),transparent_32%),linear-gradient(145deg,oklch(0.14_0.022_270/0.9),oklch(0.09_0.014_270/0.86))] p-5 shadow-[0_18px_52px_-42px_oklch(0.68_0.23_295/0.36)] ring-1 ring-white/[0.05] backdrop-blur-xl sm:max-w-xl ${INTRO_CARD_HOVER}`}
         >
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-primary/15 text-primary ring-1 ring-primary/25 shadow-[0_0_28px_-12px_oklch(0.68_0.23_295/0.8)]">
@@ -724,9 +659,7 @@ export function DashboardView() {
                 {activationGuide.eyebrow}
               </div>
               <h2 className="mt-1 text-lg font-bold tracking-tight">{activationGuide.title}</h2>
-              <p className="mt-1.5 text-sm leading-6 text-foreground/68">
-                {activationGuide.body}
-              </p>
+              <p className="mt-1.5 text-sm leading-6 text-foreground/68">{activationGuide.body}</p>
               <div className="mt-4 flex flex-wrap gap-2.5">
                 {activationGuide.to ? (
                   <Link
@@ -763,7 +696,7 @@ export function DashboardView() {
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={motionTransition}
-          className={`mt-6 w-full overflow-hidden rounded-2xl border border-primary/20 bg-[radial-gradient(circle_at_top_left,oklch(0.68_0.23_295/0.12),transparent_32%),linear-gradient(145deg,oklch(0.14_0.022_270/0.9),oklch(0.09_0.014_270/0.86))] p-5 shadow-[0_20px_70px_-44px_oklch(0.68_0.23_295/0.55)] ring-1 ring-white/[0.05] backdrop-blur-xl sm:max-w-xl ${INTRO_CARD_HOVER}`}
+          className={`mt-6 w-full overflow-hidden rounded-2xl border border-primary/18 bg-[radial-gradient(circle_at_top_left,oklch(0.68_0.23_295/0.08),transparent_32%),linear-gradient(145deg,oklch(0.14_0.022_270/0.9),oklch(0.09_0.014_270/0.86))] p-5 shadow-[0_18px_52px_-42px_oklch(0.68_0.23_295/0.36)] ring-1 ring-white/[0.05] backdrop-blur-xl sm:max-w-xl ${INTRO_CARD_HOVER}`}
         >
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-primary/15 text-primary ring-1 ring-primary/25 shadow-[0_0_28px_-12px_oklch(0.68_0.23_295/0.8)]">
@@ -788,7 +721,11 @@ export function DashboardView() {
                   type="button"
                   onClick={() => {
                     setScopeUnlockDismissed(true);
-                    try { localStorage.setItem("edgescope.scopeUnlockDismissed", "true"); } catch {}
+                    try {
+                      localStorage.setItem("edgescope.scopeUnlockDismissed", "true");
+                    } catch {
+                      // ignore
+                    }
                   }}
                   className="rounded-xl bg-white/[0.045] px-4 py-2.5 text-sm font-medium text-foreground/70 ring-1 ring-white/[0.08] transition-all duration-200 hover:-translate-y-px hover:bg-white/[0.07] hover:text-foreground"
                 >
@@ -823,7 +760,7 @@ export function DashboardView() {
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.96, y: 10 }}
               transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-              className={`relative w-full max-w-xl overflow-hidden rounded-2xl border border-white/[0.1] bg-[radial-gradient(circle_at_top_left,oklch(0.68_0.23_295/0.16),transparent_34%),linear-gradient(145deg,oklch(0.12_0.02_270/0.96),oklch(0.075_0.012_270/0.98))] p-7 shadow-[0_28px_90px_-28px_oklch(0_0_0/0.9),0_0_64px_-24px_oklch(0.68_0.23_295/0.75)] ${INTRO_CARD_HOVER}`}
+              className={`relative w-full max-w-xl overflow-hidden rounded-2xl border border-white/[0.1] bg-[radial-gradient(circle_at_top_left,oklch(0.68_0.23_295/0.1),transparent_34%),linear-gradient(145deg,oklch(0.12_0.02_270/0.96),oklch(0.075_0.012_270/0.98))] p-7 shadow-[0_22px_70px_-34px_oklch(0_0_0/0.86),0_0_38px_-28px_oklch(0.68_0.23_295/0.46)] ${INTRO_CARD_HOVER}`}
             >
               <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-primary/70 to-transparent" />
               <div className="flex items-start gap-4">
@@ -840,8 +777,12 @@ export function DashboardView() {
                   {activationGuide && (
                     <div className="mt-4 rounded-xl bg-primary/[0.08] px-4 py-3 ring-1 ring-primary/25">
                       <div className="text-xs font-semibold text-primary">Next step</div>
-                      <div className="mt-1 text-sm font-bold text-foreground">{activationGuide.title}</div>
-                      <p className="mt-0.5 text-sm leading-5 text-foreground/80">{activationGuide.body}</p>
+                      <div className="mt-1 text-sm font-bold text-foreground">
+                        {activationGuide.title}
+                      </div>
+                      <p className="mt-0.5 text-sm leading-5 text-foreground/80">
+                        {activationGuide.body}
+                      </p>
                     </div>
                   )}
                 </div>
@@ -851,7 +792,7 @@ export function DashboardView() {
                 {INTRO_WORKFLOW.map(({ icon: Icon, title, body }, index) => {
                   const completed = (() => {
                     if (index === 0) return accountCount > 0;
-                    if (index === 1) return db.length > 0;
+                    if (index === 1) return realDb.length > 0;
                     if (index === 2) return hasFirstReview;
                     return false;
                   })();
@@ -868,26 +809,42 @@ export function DashboardView() {
                             : "border-white/[0.08] bg-white/[0.045] ring-white/[0.04]",
                       )}
                     >
-                      <div className={cn(
-                        "grid h-9 w-9 shrink-0 place-items-center rounded-xl ring-1",
-                        completed
-                          ? "bg-success/15 text-success ring-success/25"
-                          : current
-                            ? "bg-primary/18 text-primary ring-primary/30"
-                            : "bg-primary/12 text-primary ring-primary/20",
-                      )}>
+                      <div
+                        className={cn(
+                          "grid h-9 w-9 shrink-0 place-items-center rounded-xl ring-1",
+                          completed
+                            ? "bg-success/15 text-success ring-success/25"
+                            : current
+                              ? "bg-primary/18 text-primary ring-primary/30"
+                              : "bg-primary/12 text-primary ring-primary/20",
+                        )}
+                      >
                         {completed ? <Check className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
                       </div>
                       <div>
                         <div className="flex items-center gap-2">
-                          <h3 className={cn("text-sm font-semibold", current ? "text-white" : "text-foreground")}>{title}</h3>
+                          <h3
+                            className={cn(
+                              "text-sm font-semibold",
+                              current ? "text-white" : "text-foreground",
+                            )}
+                          >
+                            {title}
+                          </h3>
                           {completed && (
                             <span className="rounded-full bg-success/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-success">
                               Done
                             </span>
                           )}
                         </div>
-                        <p className={cn("mt-1 text-sm leading-6", current ? "text-foreground/86" : "text-foreground/68")}>{body}</p>
+                        <p
+                          className={cn(
+                            "mt-1 text-sm leading-6",
+                            current ? "text-foreground/86" : "text-foreground/68",
+                          )}
+                        >
+                          {body}
+                        </p>
                       </div>
                     </div>
                   );
@@ -911,7 +868,10 @@ export function DashboardView() {
                   </Link>
                 ) : (
                   <button
-                    onClick={() => { closeIntro(); setNewOpen(true); }}
+                    onClick={() => {
+                      closeIntro();
+                      setNewOpen(true);
+                    }}
                     className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] transition-all duration-200 hover:-translate-y-px hover:brightness-110 hover:shadow-[var(--shadow-glow-lg)]"
                   >
                     New trade
@@ -923,7 +883,7 @@ export function DashboardView() {
         )}
         {newOpen && (
           <TradeFormModal
-            nextNum={db.length + 1}
+            nextNum={realDb.length + 1}
             onClose={() => setNewOpen(false)}
             onSaved={() => {}}
           />
@@ -999,114 +959,44 @@ export function DashboardView() {
       {hasJournalGaps && (
         <Link
           to="/trades"
-          className="mt-4 flex items-center justify-between gap-4 rounded-2xl bg-warning/[0.06] px-5 py-4 ring-1 ring-warning/20 transition-all hover:bg-warning/[0.08]"
+          className="mt-3 flex items-center justify-between gap-4 rounded-2xl bg-warning/[0.045] px-5 py-3.5 ring-1 ring-warning/16 transition-all hover:bg-warning/[0.065]"
         >
           <div className="flex items-start gap-3">
             <ClipboardList className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
             <div>
               <div className="text-sm font-semibold">Journal reminder</div>
+              <div className="mt-0.5 text-xs text-muted-foreground">
+                {(() => {
+                  const inc = journalGaps.incomplete;
+                  const rev = journalGaps.needsReview;
+                  if (inc > 0 && rev > 0) {
+                    const reviewWord = rev === 1 ? "1 needs review" : `${rev} need review`;
+                    const capWord =
+                      inc === 1 ? "1 incomplete capture" : `${inc} incomplete captures`;
+                    return `${capWord} · ${reviewWord}`;
+                  }
+                  if (inc > 0) {
+                    return inc === 1 ? "1 incomplete capture" : `${inc} incomplete captures`;
+                  }
+                  if (rev > 0) {
+                    return rev === 1 ? "1 needs review" : `${rev} need review`;
+                  }
+                  return "";
+                })()}
+              </div>
             </div>
           </div>
           <span className="text-xs font-medium text-warning">Complete journal &rarr;</span>
         </Link>
       )}
 
-      {hasActiveAccount && activeAccount && (
-        <div className="mt-8">
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <h2 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
-              <Wallet className="h-4 w-4 text-primary" /> Active account
-            </h2>
-            <div className="text-xs text-muted-foreground">
-              <span className="font-semibold text-foreground">{activeAccount.name}</span>
-              <span className="mx-1.5 opacity-50">·</span>
-              <span className="capitalize">{activeAccount.account_type}</span>
-              {(accounts?.length ?? 0) > 1 && (
-                <Link to="/accounts" className="ml-3 text-primary hover:text-primary-glow">
-                  Switch →
-                </Link>
-              )}
-            </div>
-          </div>
-          <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <div className="glow-card rounded-2xl p-5 ring-1 ring-primary/14 bg-primary/[0.025]">
-              <div className="text-[10px] font-semibold tracking-[0.16em] text-primary">
-                CURRENT BALANCE
-              </div>
-              <div className="mt-1.5 text-3xl font-bold tabular-nums">
-                {fmtMoney(currentBalance)}
-              </div>
-              <div className="mt-1 text-xs text-muted-foreground">{activeAccount.name}</div>
-            </div>
-            <div className="glow-card rounded-2xl p-5">
-              <div className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground">
-                STARTING BALANCE
-              </div>
-              <div className="mt-1.5 text-3xl font-bold tabular-nums">
-                {fmtMoney(startingBalance ?? 0)}
-              </div>
-              <div className="mt-1 text-xs text-muted-foreground">Baseline</div>
-            </div>
-            <div className="glow-card rounded-2xl p-5">
-              <div className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground">
-                ACCOUNT NET P&amp;L
-              </div>
-              <div
-                className={cn(
-                  "mt-1.5 text-3xl font-bold tabular-nums",
-                  netPnl > 0 && "text-success",
-                  netPnl < 0 && "text-destructive",
-                )}
-              >
-                {netPnl > 0 ? "+" : ""}
-                {fmtMoney(netPnl)}
-              </div>
-              <div className="mt-1 text-xs text-muted-foreground">
-                {sumR >= 0 ? "+" : ""}
-                {sumR.toFixed(2)}R on this account
-              </div>
-            </div>
-          </div>
-
-          {/* Lifetime Performance */}
-          <div className="mt-6 section-card rounded-2xl p-5">
-            <div className="flex items-center justify-between">
-              <h3 className="flex items-center gap-2 text-sm font-semibold">
-                <Trophy className="h-4 w-4 text-warning" /> Lifetime performance
-              </h3>
-              <span className="rounded-md bg-white/[0.05] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                All accounts
-              </span>
-            </div>
-            <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
-              <LifetimeStat
-                label="LIFETIME NET R"
-                value={`${lifetimeSumR >= 0 ? "+" : ""}${lifetimeSumR.toFixed(2)}R`}
-                tone={lifetimeSumR >= 0 ? "success" : "destructive"}
-              />
-              <LifetimeStat label="LIFETIME TRADES" value={String(lifetime.total)} tone="info" />
-              <LifetimeStat
-                label="WIN RATE"
-                value={lifetime.winRate != null ? `${lifetime.winRate.toFixed(1)}%` : "—"}
-                tone="primary"
-              />
-              <LifetimeStat
-                label="AVG RR"
-                value={lifetime.avgRR != null ? `${lifetime.avgRR.toFixed(2)}R` : "—"}
-                tone="success"
-              />
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* KPI Cards */}
-      <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 xl:auto-rows-fr">
+      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 xl:auto-rows-fr">
         <StatCard icon={Briefcase} label="TOTAL TRADES" value={o.total} tone="info" />
         <StatCard
           icon={Target}
           label="WIN RATE"
-          value={o.winRate ?? 0}
+          value={o.winRate == null ? "—" : o.winRate}
           decimals={1}
           suffix="%"
           tone="primary"
@@ -1139,37 +1029,11 @@ export function DashboardView() {
         <StatCard
           icon={currentStreakStat.icon}
           label="CURRENT STREAK"
-          value={currentStreakStat.value}
+          value={currentStreakStat.value === "No streak yet" ? "—" : currentStreakStat.value}
           tone={currentStreakStat.tone}
+          sub={currentStreakStat.value === "No streak yet" ? "No closed trades yet" : undefined}
         />
       </div>
-
-      {hasActiveAccount && (
-        <div className="mt-6 section-card rounded-2xl p-5">
-          <h3 className="flex items-center gap-2 text-sm font-semibold">
-            <Shield className="h-4 w-4 text-primary" /> Risk overview
-          </h3>
-          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <RiskRow
-              icon={Target}
-              label="RISK PER TRADE"
-              value={prefs?.default_risk_pct != null ? `${prefs.default_risk_pct}%` : "—"}
-            />
-            <RiskRow
-              icon={AlertTriangle}
-              label="MAX DAILY LOSS"
-              value={prefs?.max_daily_loss != null ? fmtMoney(prefs.max_daily_loss) : "Not set"}
-            />
-            <RiskRow
-              icon={Briefcase}
-              label="MAX TRADES / DAY"
-              value={
-                prefs?.max_trades_per_day != null ? String(prefs.max_trades_per_day) : "Not set"
-              }
-            />
-          </div>
-        </div>
-      )}
 
       {/* Recent trades + Monthly performance */}
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-12">
@@ -1200,7 +1064,7 @@ export function DashboardView() {
             )}
             {recent.map((t, index) => {
               const rr = rrNum(t.achieved_rr);
-              const tradeNumber = db.length - index;
+              const tradeNumber = tradeNumbersById.get(t.id) ?? realDb.length - index;
               const tone: Tone =
                 t.result === "win" ? "success" : t.result === "loss" ? "destructive" : "info";
               const label =
@@ -1216,7 +1080,7 @@ export function DashboardView() {
                   key={t.id}
                   type="button"
                   onClick={() => setReviewTrade({ id: t.id, number: tradeNumber })}
-                  className="grid w-full grid-cols-[minmax(0,1fr)_minmax(64px,76px)_minmax(68px,78px)] items-center gap-4 rounded-xl px-2 py-2.5 text-left transition-all duration-200 hover:bg-white/[0.04] focus:outline-none focus-visible:bg-white/[0.05] focus-visible:ring-1 focus-visible:ring-primary/30"
+                  className="grid w-full grid-cols-[minmax(0,1fr)_minmax(78px,92px)_minmax(68px,78px)] items-center gap-3 rounded-xl px-2 py-2.5 text-left transition-all duration-200 hover:bg-white/[0.04] focus:outline-none focus-visible:bg-white/[0.05] focus-visible:ring-1 focus-visible:ring-primary/30"
                 >
                   <div className="min-w-0 leading-tight">
                     <div className="truncate text-sm font-medium">{t.instrument}</div>
@@ -1226,7 +1090,7 @@ export function DashboardView() {
                   </div>
                   <span
                     className={cn(
-                      "shrink-0 justify-self-start rounded-md px-2 py-0.5 text-[10px] font-bold tracking-wider",
+                      "shrink-0 justify-self-end rounded-md px-2 py-0.5 text-[10px] font-bold tracking-wider",
                       toneStyles[tone].badge,
                     )}
                   >
@@ -1253,10 +1117,6 @@ export function DashboardView() {
           <MonthlyPerformanceTabbed
             monthChart={monthChart}
             monthLabel={monthLabel}
-            growth={growthSeries}
-            monthlyPnl={monthlyPnlSeries}
-            hasActiveAccount={hasActiveAccount}
-            tradeCount={activeRows.length}
             currentMonthTradeCount={currentMonthRows.length}
           />
         </div>
@@ -1278,69 +1138,15 @@ export function DashboardView() {
   );
 }
 
-function LifetimeStat({ label, value, tone }: { label: string; value: string; tone: Tone }) {
-  const s = toneStyles[tone];
-  return (
-    <div className="rounded-xl bg-white/[0.025] p-4 ring-1 ring-white/[0.04]">
-      <div className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground">
-        {label}
-      </div>
-      <div
-        className={cn(
-          "mt-1 text-2xl font-bold tabular-nums",
-          s.badge.includes("text-success") && "text-success",
-          s.badge.includes("text-destructive") && "text-destructive",
-        )}
-      >
-        {value}
-      </div>
-    </div>
-  );
-}
-
-function RiskRow({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
-  return (
-    <div className="flex items-center gap-3 rounded-xl bg-white/[0.025] p-4 ring-1 ring-white/[0.04]">
-      <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-primary/20 to-primary/5 text-primary ring-1 ring-white/[0.06]">
-        <Icon className="h-5 w-5" />
-      </div>
-      <div className="min-w-0">
-        <div className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground">
-          {label}
-        </div>
-        <div className="mt-0.5 text-lg font-bold tabular-nums">{value}</div>
-      </div>
-    </div>
-  );
-}
-
 function MonthlyPerformanceTabbed({
   monthChart,
   monthLabel,
-  growth,
-  monthlyPnl,
-  hasActiveAccount,
-  tradeCount,
   currentMonthTradeCount,
 }: {
   monthChart: { d: string; v: number }[];
   monthLabel: string;
-  growth: { d: string; v: number }[];
-  monthlyPnl: { d: string; v: number }[];
-  hasActiveAccount: boolean;
-  tradeCount: number;
   currentMonthTradeCount: number;
 }) {
-  const [tab, setTab] = useState<"growth" | "monthly" | "current">(
-    hasActiveAccount ? "growth" : "current",
-  );
-
-  const tabs: { id: "growth" | "monthly" | "current"; label: string; show: boolean }[] = [
-    { id: "growth", label: "Account growth", show: hasActiveAccount },
-    { id: "monthly", label: "Monthly P&L", show: hasActiveAccount },
-    { id: "current", label: "This month", show: true },
-  ];
-
   return (
     <motion.div
       {...card}
@@ -1356,175 +1162,62 @@ function MonthlyPerformanceTabbed({
         </span>
       </div>
 
-      <div className="mt-4 inline-flex items-center gap-1 rounded-xl bg-white/[0.04] p-1 ring-1 ring-white/[0.05]">
-        {tabs
-          .filter((t) => t.show)
-          .map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={cn(
-                "rounded-lg px-3 py-1.5 text-xs font-medium transition-all duration-200",
-                tab === t.id
-                  ? "bg-primary/15 text-foreground"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {t.label}
-            </button>
-          ))}
-      </div>
-
       <div className="mt-4 h-[260px]">
-        {tab === "growth" &&
-          (tradeCount < 3 ? (
-            <DashboardLowDataState description="Log at least 3 trades to make monthly performance useful." />
-          ) : (
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={growth} margin={{ top: 10, right: 8, left: -8, bottom: 8 }}>
-                <defs>
-                  <linearGradient id="dash-growth" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="oklch(0.68 0.23 295)" stopOpacity={0.45} />
-                    <stop offset="100%" stopColor="oklch(0.68 0.23 295)" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke="oklch(1 0 0 / 0.04)"
-                  vertical={false}
-                />
-                <XAxis
-                  dataKey="d"
-                  tick={{ fontSize: 10, fill: "oklch(0.55 0 0)" }}
-                  axisLine={false}
-                  tickLine={false}
-                  tickMargin={8}
-                />
-                <YAxis
-                  tick={{ fontSize: 10, fill: "oklch(0.5 0 0)" }}
-                  axisLine={false}
-                  tickLine={false}
-                  tickFormatter={(v) => `$${(Number(v) / 1000).toFixed(0)}k`}
-                />
-                <Tooltip
-                  contentStyle={{
-                    background: "oklch(0.13 0.018 270)",
-                    border: "1px solid oklch(1 0 0 / 0.08)",
-                    borderRadius: 12,
-                    fontSize: 12,
-                  }}
-                  formatter={(v: number) => [fmtMoney(v), "Balance"]}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="v"
-                  stroke="oklch(0.78 0.19 295)"
-                  strokeWidth={2}
-                  fill="url(#dash-growth)"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          ))}
-
-        {tab === "monthly" &&
-          (tradeCount < 3 ? (
-            <DashboardLowDataState description="Log at least 3 trades to make monthly performance useful." />
-          ) : (
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={monthlyPnl} margin={{ top: 10, right: 8, left: -8, bottom: 8 }}>
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke="oklch(1 0 0 / 0.04)"
-                  vertical={false}
-                />
-                <XAxis
-                  dataKey="d"
-                  tick={{ fontSize: 10, fill: "oklch(0.55 0 0)" }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <YAxis
-                  tick={{ fontSize: 10, fill: "oklch(0.5 0 0)" }}
-                  axisLine={false}
-                  tickLine={false}
-                  tickFormatter={(v) => `$${(Number(v) / 1000).toFixed(0)}k`}
-                />
-                <Tooltip
-                  cursor={{ fill: "oklch(1 0 0 / 0.03)" }}
-                  contentStyle={{
-                    background: "oklch(0.13 0.018 270)",
-                    border: "1px solid oklch(1 0 0 / 0.08)",
-                    borderRadius: 12,
-                    fontSize: 12,
-                  }}
-                  formatter={(v: number) => [fmtMoney(v), "P&L"]}
-                />
-                <Bar dataKey="v" radius={[4, 4, 0, 0]}>
-                  {monthlyPnl.map((d, i) => (
-                    <Cell
-                      key={i}
-                      fill={d.v >= 0 ? "oklch(0.74 0.19 152)" : "oklch(0.64 0.22 22)"}
-                    />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          ))}
-
-        {tab === "current" &&
-          (currentMonthTradeCount < 3 ? (
-            <DashboardLowDataState description="Log at least 3 trades to make monthly performance useful." />
-          ) : (
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={monthChart} margin={{ top: 10, right: 8, left: -16, bottom: 8 }}>
-                <defs>
-                  <linearGradient id="dash-month" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="oklch(0.74 0.19 152)" stopOpacity={0.4} />
-                    <stop offset="100%" stopColor="oklch(0.74 0.19 152)" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke="oklch(1 0 0 / 0.04)"
-                  vertical={false}
-                />
-                <XAxis
-                  dataKey="d"
-                  tick={{ fontSize: 10, fill: "oklch(0.55 0 0)" }}
-                  axisLine={false}
-                  tickLine={false}
-                  tickMargin={8}
-                />
-                <YAxis
-                  tick={{ fontSize: 10, fill: "oklch(0.5 0 0)" }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <Tooltip
-                  contentStyle={{
-                    background: "oklch(0.13 0.018 270)",
-                    border: "1px solid oklch(1 0 0 / 0.08)",
-                    borderRadius: 12,
-                    fontSize: 12,
-                  }}
-                  formatter={(v: number) => [`${v.toFixed(2)}R`, "Cum R"]}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="v"
-                  stroke="oklch(0.74 0.19 152)"
-                  strokeWidth={2}
-                  fill="url(#dash-month)"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          ))}
+        {currentMonthTradeCount < 3 ? (
+          <DashboardLowDataState description="Log at least 3 trades to make monthly performance useful." />
+        ) : (
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={monthChart} margin={{ top: 10, right: 8, left: -16, bottom: 8 }}>
+              <defs>
+                <linearGradient id="dash-month" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="oklch(0.74 0.19 152)" stopOpacity={0.4} />
+                  <stop offset="100%" stopColor="oklch(0.74 0.19 152)" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="oklch(1 0 0 / 0.04)" vertical={false} />
+              <XAxis
+                dataKey="d"
+                tick={{ fontSize: 10, fill: "oklch(0.55 0 0)" }}
+                axisLine={false}
+                tickLine={false}
+                tickMargin={8}
+              />
+              <YAxis
+                tick={{ fontSize: 10, fill: "oklch(0.5 0 0)" }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <Tooltip
+                contentStyle={{
+                  background: "oklch(0.13 0.018 270)",
+                  border: "1px solid oklch(1 0 0 / 0.08)",
+                  borderRadius: 12,
+                  fontSize: 12,
+                }}
+                formatter={(v: number) => [`${v.toFixed(2)}R`, "Cum R"]}
+              />
+              <Area
+                type="monotone"
+                dataKey="v"
+                stroke="oklch(0.74 0.19 152)"
+                strokeWidth={2}
+                fill="url(#dash-month)"
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        )}
       </div>
     </motion.div>
   );
 }
 
-function OverallEquitySection({ data, tradeCount }: { data: { d: string; v: number }[]; tradeCount: number }) {
+function OverallEquitySection({
+  data,
+  tradeCount,
+}: {
+  data: { d: string; v: number }[];
+  tradeCount: number;
+}) {
   return (
     <motion.div
       {...card}

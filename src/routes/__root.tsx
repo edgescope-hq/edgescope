@@ -1,4 +1,11 @@
-import { Outlet, Link, createRootRouteWithContext, useRouter, HeadContent, Scripts } from "@tanstack/react-router";
+import {
+  Outlet,
+  Link,
+  createRootRouteWithContext,
+  useRouter,
+  HeadContent,
+  Scripts,
+} from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -41,12 +48,18 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
         <p className="mt-3 text-sm text-muted-foreground leading-relaxed">{error.message}</p>
         <div className="mt-8 flex flex-wrap justify-center gap-3">
           <button
-            onClick={() => { router.invalidate(); reset(); }}
+            onClick={() => {
+              router.invalidate();
+              reset();
+            }}
             className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] transition-all duration-200 hover:brightness-110"
           >
             Try again
           </button>
-          <a href="/" className="rounded-xl border border-white/[0.08] bg-white/[0.03] px-5 py-2.5 text-sm font-medium transition-all duration-200 hover:bg-white/[0.06]">
+          <a
+            href="/"
+            className="rounded-xl border border-white/[0.08] bg-white/[0.03] px-5 py-2.5 text-sm font-medium transition-all duration-200 hover:bg-white/[0.06]"
+          >
             Go home
           </a>
         </div>
@@ -61,12 +74,24 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "Edge Scope — Trading Journal & Analytics" },
-      { name: "description", content: "EdgeScope is a trading journal and analytics platform built for traders who want to review execution, analyze performance, and improve long-term consistency." },
+      {
+        name: "description",
+        content:
+          "EdgeScope is a trading journal and analytics platform built for traders who want to review execution, analyze performance, and improve long-term consistency.",
+      },
       { name: "author", content: "Edge Journal" },
       { property: "og:title", content: "Edge Scope — Trading Journal & Analytics" },
       { name: "twitter:title", content: "Edge Scope — Trading Journal & Analytics" },
-      { property: "og:description", content: "EdgeScope is a trading journal and analytics platform built for traders who want to review execution, analyze performance, and improve long-term consistency." },
-      { name: "twitter:description", content: "EdgeScope is a trading journal and analytics platform built for traders who want to review execution, analyze performance, and improve long-term consistency." },
+      {
+        property: "og:description",
+        content:
+          "EdgeScope is a trading journal and analytics platform built for traders who want to review execution, analyze performance, and improve long-term consistency.",
+      },
+      {
+        name: "twitter:description",
+        content:
+          "EdgeScope is a trading journal and analytics platform built for traders who want to review execution, analyze performance, and improve long-term consistency.",
+      },
       { name: "twitter:card", content: "summary" },
       { property: "og:type", content: "website" },
       { name: "theme-color", content: "#0F0A1F" },
@@ -113,7 +138,9 @@ function RootComponent() {
   const router = useRouter();
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event) => {
       if (event !== "SIGNED_IN" && event !== "SIGNED_OUT" && event !== "USER_UPDATED") return;
       router.invalidate();
       if (event !== "SIGNED_OUT") queryClient.invalidateQueries();

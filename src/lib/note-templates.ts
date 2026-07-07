@@ -81,7 +81,10 @@ export const NOTE_TEMPLATES: NoteTemplate[] = [
 
       { type: "heading", text: "Timing" },
       { type: "paragraph", text: "session or time-of-day performance differences" },
-      { type: "paragraph", text: "example: “Most of my trades fail in London but work in New York.”" },
+      {
+        type: "paragraph",
+        text: "example: “Most of my trades fail in London but work in New York.”",
+      },
 
       { type: "heading", text: "Emotional" },
       { type: "paragraph", text: "repeated behavior triggers" },

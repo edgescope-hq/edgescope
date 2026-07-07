@@ -116,27 +116,36 @@
 
   /* ─── Custom tokens ─── */
   --gradient-primary: linear-gradient(135deg, oklch(0.68 0.23 295), oklch(0.78 0.19 295));
-  --gradient-aurora: radial-gradient(ellipse at top right, oklch(0.68 0.23 295 / 0.18), transparent 62%);
-  --gradient-surface: linear-gradient(180deg, oklch(0.168 0.021 275 / 0.91), oklch(0.113 0.016 270 / 0.84));
-  --gradient-inner: linear-gradient(180deg, oklch(0.155 0.018 275 / 0.72), oklch(0.115 0.014 270 / 0.78));
-  --gradient-section: linear-gradient(180deg, oklch(0.122 0.017 275 / 0.84), oklch(0.085 0.014 270 / 0.9));
+  --gradient-aurora: radial-gradient(
+    ellipse at top right,
+    oklch(0.68 0.23 295 / 0.18),
+    transparent 62%
+  );
+  --gradient-surface: linear-gradient(
+    180deg,
+    oklch(0.176 0.021 275 / 0.94),
+    oklch(0.124 0.016 270 / 0.88)
+  );
+  --gradient-inner: linear-gradient(
+    180deg,
+    oklch(0.166 0.018 275 / 0.78),
+    oklch(0.124 0.014 270 / 0.84)
+  );
+  --gradient-section: linear-gradient(
+    180deg,
+    oklch(0.122 0.017 275 / 0.84),
+    oklch(0.085 0.014 270 / 0.9)
+  );
   --shadow-glow: 0 0 30px -16px oklch(0.68 0.23 295 / 0.44);
   --shadow-glow-lg: 0 0 56px -22px oklch(0.68 0.23 295 / 0.34);
   --shadow-card:
-    0 1px 0 0 oklch(1 0 0 / 0.058) inset,
-    0 -1px 0 0 oklch(0 0 0 / 0.18) inset,
+    0 1px 0 0 oklch(1 0 0 / 0.058) inset, 0 -1px 0 0 oklch(0 0 0 / 0.18) inset,
     0 14px 36px -30px oklch(0 0 0 / 0.78);
-  --shadow-inner-card:
-    0 1px 0 oklch(1 0 0 / 0.045) inset,
-    0 10px 28px -26px oklch(0 0 0 / 0.74);
-  --shadow-section:
-    0 1px 0 0 oklch(1 0 0 / 0.032) inset,
-    0 14px 40px -34px oklch(0 0 0 / 0.78);
+  --shadow-inner-card: 0 1px 0 oklch(1 0 0 / 0.045) inset, 0 10px 28px -26px oklch(0 0 0 / 0.74);
+  --shadow-section: 0 1px 0 0 oklch(1 0 0 / 0.032) inset, 0 14px 40px -34px oklch(0 0 0 / 0.78);
   --shadow-card-hover:
-    0 1px 0 0 oklch(1 0 0 / 0.082) inset,
-    0 -1px 0 0 oklch(0 0 0 / 0.16) inset,
-    0 18px 48px -34px oklch(0 0 0 / 0.82),
-    0 0 28px -20px oklch(0.68 0.23 295 / 0.42);
+    0 1px 0 0 oklch(1 0 0 / 0.082) inset, 0 -1px 0 0 oklch(0 0 0 / 0.16) inset,
+    0 18px 48px -34px oklch(0 0 0 / 0.82), 0 0 28px -20px oklch(0.68 0.23 295 / 0.42);
   --shadow-elevated: 0 1px 0 0 oklch(1 0 0 / 0.045) inset, 0 24px 64px -32px oklch(0 0 0 / 0.82);
 
   /* ─── Motion tokens ─── */
@@ -147,7 +156,8 @@
   --duration-slow: 400ms;
 }
 
-html, body {
+html,
+body {
   background: var(--color-background);
   color: var(--color-foreground);
   font-family: var(--font-display);
@@ -157,7 +167,9 @@ html, body {
 }
 
 @layer base {
-  * { border-color: var(--color-border); }
+  * {
+    border-color: var(--color-border);
+  }
 
   button,
   [role="button"],
@@ -222,9 +234,10 @@ html, body {
   border: 1px solid oklch(0.78 0.045 285 / 0.108);
   box-shadow: var(--shadow-card);
   backdrop-filter: blur(14px) saturate(1.08);
-  transition: box-shadow var(--duration-normal) var(--ease-out-expo),
-              border-color var(--duration-normal) var(--ease-out-expo),
-              transform var(--duration-normal) var(--ease-out-expo);
+  transition:
+    box-shadow var(--duration-normal) var(--ease-out-expo),
+    border-color var(--duration-normal) var(--ease-out-expo),
+    transform var(--duration-normal) var(--ease-out-expo);
 }
 
 @utility glow-card-hover {
@@ -252,7 +265,7 @@ html, body {
 
 @utility surface-card {
   background: var(--gradient-surface);
-  border: 1px solid oklch(0.78 0.045 285 / 0.108);
+  border: 1px solid oklch(0.78 0.045 285 / 0.13);
   border-radius: var(--radius);
   box-shadow: var(--shadow-card);
   backdrop-filter: blur(14px) saturate(1.08);
@@ -282,9 +295,10 @@ html, body {
 
 /* ─── Interactive card hover effect ─── */
 @utility interactive-card {
-  transition: transform var(--duration-normal) var(--ease-out-expo),
-              box-shadow var(--duration-normal) var(--ease-out-expo),
-              border-color var(--duration-normal) var(--ease-out-expo);
+  transition:
+    transform var(--duration-normal) var(--ease-out-expo),
+    box-shadow var(--duration-normal) var(--ease-out-expo),
+    border-color var(--duration-normal) var(--ease-out-expo);
   &:hover {
     transform: translateY(-1px);
     background:
@@ -321,7 +335,10 @@ html, body {
     radial-gradient(circle at 50% -10%, oklch(0.68 0.23 295 / 0.12), transparent 34rem),
     radial-gradient(circle at 12% 16%, oklch(0.72 0.17 235 / 0.055), transparent 25rem),
     linear-gradient(120deg, oklch(1 0 0 / 0.025) 1px, transparent 1px);
-  background-size: auto, auto, 64px 64px;
+  background-size:
+    auto,
+    auto,
+    64px 64px;
 }
 
 @utility es-tab-list {
@@ -367,11 +384,10 @@ html, body {
 
   .edgescope-app main :where(.rounded-xl, .rounded-2xl)[class*="bg-white/["][class*="ring-white/"] {
     background: var(--gradient-inner);
-    outline: 1px solid oklch(0.78 0.045 285 / 0.078);
+    outline: 1px solid oklch(0.78 0.045 285 / 0.105);
     outline-offset: -1px;
     box-shadow:
-      var(--shadow-inner-card),
-      var(--tw-ring-offset-shadow, 0 0 #0000),
+      var(--shadow-inner-card), var(--tw-ring-offset-shadow, 0 0 #0000),
       var(--tw-ring-shadow, 0 0 #0000);
   }
 
@@ -379,7 +395,10 @@ html, body {
     color: oklch(0.7 0.018 270 / 0.68);
   }
 
-  .edgescope-app :where(button, a)[class*="bg-white/["][class*="ring-white/"],
+  .edgescope-app
+    :where(button, a)[class*="bg-white/["][class*="ring-white/"]:not(:disabled):not(
+      [aria-disabled]
+    ),
   .edgescope-app :where(button, a).glow-card {
     transition:
       transform var(--duration-normal) var(--ease-out-expo),
@@ -389,8 +408,11 @@ html, body {
       color var(--duration-normal) var(--ease-out-expo);
   }
 
-  .edgescope-app :where(button, a)[class*="bg-white/["][class*="ring-white/"]:hover,
-  .edgescope-app :where(button, a).glow-card:hover {
+  .edgescope-app
+    :where(button, a)[class*="bg-white/["][class*="ring-white/"]:not(:disabled):not(
+      [aria-disabled]
+    ):hover,
+  .edgescope-app :where(button, a).glow-card:not(:disabled):not([aria-disabled]):hover {
     transform: translateY(-1px);
     background:
       linear-gradient(180deg, oklch(0.18 0.022 275 / 0.76), oklch(0.128 0.016 270 / 0.82)),
@@ -421,12 +443,17 @@ html, body {
 
 /* ─── Shimmer loading effect ─── */
 @keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
 }
 
 @utility shimmer {
-  background: linear-gradient(90deg,
+  background: linear-gradient(
+    90deg,
     oklch(1 0 0 / 0.03) 25%,
     oklch(1 0 0 / 0.07) 50%,
     oklch(1 0 0 / 0.03) 75%

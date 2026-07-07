@@ -21,7 +21,13 @@ import appLogoHorizontal from "@/assets/edgescope-horizontal.png.asset.json";
 import { amIAdmin } from "@/lib/invites.functions";
 import { cn } from "@/lib/utils";
 
-type NavItem = { to: string; label: string; icon: typeof LayoutDashboard; disabled?: boolean; badge?: string };
+type NavItem = {
+  to: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+  disabled?: boolean;
+  badge?: string;
+};
 
 const primaryNav: NavItem[] = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -47,7 +53,11 @@ export function AppSidebar() {
   const { data: adminInfo } = useQuery({
     queryKey: ["am-i-admin"],
     queryFn: async () => {
-      try { return await adminFn(); } catch { return { admin: false }; }
+      try {
+        return await adminFn();
+      } catch {
+        return { admin: false };
+      }
     },
     staleTime: 60_000,
     retry: false,
@@ -59,7 +69,9 @@ export function AppSidebar() {
     settingsItem,
   ];
 
-  useEffect(() => { setMobileOpen(false); }, [pathname]);
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
 
   const renderItem = (item: NavItem) => {
     const active = !item.disabled && (pathname === item.to || pathname.startsWith(item.to + "/"));
@@ -75,7 +87,9 @@ export function AppSidebar() {
           <Icon className="h-4 w-4 text-muted-foreground/30" />
           <span>{item.label}</span>
           {item.badge && (
-            <span className="ml-auto rounded-full bg-primary/[0.08] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.16em] text-primary/75 ring-1 ring-primary/15">{item.badge}</span>
+            <span className="ml-auto rounded-full bg-primary/[0.08] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.16em] text-primary/75 ring-1 ring-primary/15">
+              {item.badge}
+            </span>
           )}
         </div>
       );
@@ -94,7 +108,14 @@ export function AppSidebar() {
         {active && (
           <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-primary shadow-[0_0_16px_oklch(0.68_0.23_295/0.7)]" />
         )}
-        <Icon className={cn("h-4 w-4 transition-colors duration-200", active ? "text-primary" : "text-muted-foreground/45 group-hover:text-muted-foreground/72")} />
+        <Icon
+          className={cn(
+            "h-4 w-4 transition-colors duration-200",
+            active
+              ? "text-primary"
+              : "text-muted-foreground/45 group-hover:text-muted-foreground/72",
+          )}
+        />
         <span>{item.label}</span>
       </Link>
     );
@@ -102,9 +123,7 @@ export function AppSidebar() {
 
   const NavBody = (
     <div className="flex flex-1 flex-col min-h-0">
-      <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2">
-        {primaryNav.map(renderItem)}
-      </nav>
+      <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2">{primaryNav.map(renderItem)}</nav>
       <div className="space-y-1 border-t border-white/[0.055] px-3 py-2">
         {secondaryNav.map(renderItem)}
       </div>
@@ -136,11 +155,19 @@ export function AppSidebar() {
 
       {mobileOpen && (
         <div className="md:hidden fixed inset-0 z-50">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setMobileOpen(false)} aria-hidden />
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setMobileOpen(false)}
+            aria-hidden
+          />
           <aside className="absolute inset-y-0 left-0 flex w-[78%] max-w-[300px] flex-col border-r border-white/[0.06] bg-[oklch(0.07_0.012_270)] shadow-2xl">
             <div className="flex items-center justify-between">
               {Brand}
-              <button onClick={() => setMobileOpen(false)} aria-label="Close navigation menu" className="mr-3 grid h-9 w-9 place-items-center rounded-lg bg-white/[0.04] ring-1 ring-white/[0.06]">
+              <button
+                onClick={() => setMobileOpen(false)}
+                aria-label="Close navigation menu"
+                className="mr-3 grid h-9 w-9 place-items-center rounded-lg bg-white/[0.04] ring-1 ring-white/[0.06]"
+              >
                 <X className="h-4 w-4" />
               </button>
             </div>

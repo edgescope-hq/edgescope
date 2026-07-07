@@ -80,8 +80,12 @@ export function PaperWorkspace() {
         const hitSl = t.direction === "long" ? px <= sl : px >= sl;
         if (hitTp || hitSl) {
           closures.push(
-            closeFn({ data: { id: t.id, exit_price: hitTp ? tp : sl, closed_reason: hitTp ? "tp" : "sl" } })
-              .then(() => { toast.success(`${t.instrument} auto-closed at ${hitTp ? "TP" : "SL"}`); })
+            closeFn({
+              data: { id: t.id, exit_price: hitTp ? tp : sl, closed_reason: hitTp ? "tp" : "sl" },
+            })
+              .then(() => {
+                toast.success(`${t.instrument} auto-closed at ${hitTp ? "TP" : "SL"}`);
+              })
               .catch((e: Error) => toast.error(e.message)),
           );
         }
@@ -118,10 +122,18 @@ export function PaperWorkspace() {
     <div className="px-4 py-6 md:px-8 md:py-8">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <motion.h1 initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="text-3xl font-bold tracking-tight md:text-4xl">
+          <motion.h1
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4 }}
+            className="text-3xl font-bold tracking-tight md:text-4xl"
+          >
             Paper Trading
           </motion.h1>
-          <p className="mt-1.5 text-sm text-muted-foreground">Risk-free simulation. Closed paper trades flow into your journal, analytics, and AI insights.</p>
+          <p className="mt-1.5 text-sm text-muted-foreground">
+            Risk-free simulation. Closed paper trades flow into your journal, analytics, and AI
+            insights.
+          </p>
         </div>
       </div>
 
@@ -130,11 +142,15 @@ export function PaperWorkspace() {
         <div className="glow-card overflow-hidden rounded-2xl">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] px-4 py-2.5">
             <div className="flex items-center gap-3">
-              <span className="text-xs font-semibold tracking-wider text-muted-foreground">SYMBOL</span>
+              <span className="text-xs font-semibold tracking-wider text-muted-foreground">
+                SYMBOL
+              </span>
               <span className="text-sm font-bold text-foreground">{symbol}</span>
             </div>
             <div className="flex items-center gap-3">
-              <CandleCountdown intervalSec={TIMEFRAMES.find((t) => t.v === interval)?.sec ?? 3600} />
+              <CandleCountdown
+                intervalSec={TIMEFRAMES.find((t) => t.v === interval)?.sec ?? 3600}
+              />
               <div className="flex items-center gap-1 rounded-lg bg-white/[0.03] p-1 ring-1 ring-white/[0.06]">
                 {TIMEFRAMES.map((tf) => (
                   <button
@@ -142,7 +158,9 @@ export function PaperWorkspace() {
                     onClick={() => setInterval_(tf.v)}
                     className={cn(
                       "rounded-md px-2 py-1 text-[10px] font-bold tracking-wider transition",
-                      interval === tf.v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground",
+                      interval === tf.v
+                        ? "bg-primary text-primary-foreground"
+                        : "text-muted-foreground hover:text-foreground",
                     )}
                   >
                     {tf.l}
@@ -156,7 +174,12 @@ export function PaperWorkspace() {
           </div>
         </div>
 
-        <OrderTicket symbol={symbol} onSymbolChange={setSymbol} onSubmitted={() => qc.invalidateQueries({ queryKey: ["paper-open"] })} openFn={openFn} />
+        <OrderTicket
+          symbol={symbol}
+          onSymbolChange={setSymbol}
+          onSubmitted={() => qc.invalidateQueries({ queryKey: ["paper-open"] })}
+          openFn={openFn}
+        />
       </div>
 
       <OpenPositions
@@ -230,7 +253,9 @@ function OrderTicket({
   const [accountBalance, setAccountBalance] = useState("10000");
   const [riskPct, setRiskPct] = useState("1");
 
-  useEffect(() => { setInstrument(symbol); }, [symbol]);
+  useEffect(() => {
+    setInstrument(symbol);
+  }, [symbol]);
 
   const entryN = parseFloat(entry);
   const slN = parseFloat(sl);
@@ -255,23 +280,26 @@ function OrderTicket({
   }, [balN, riskN, entryN, slN]);
 
   const m = useMutation({
-    mutationFn: () => openFn({
-      data: {
-        instrument: instrument.trim(),
-        direction,
-        entry_price: entryN,
-        stop_loss: slN,
-        take_profit: tpN,
-        account_size: isFinite(balN) ? balN : null,
-        risk_percentage: isFinite(riskN) ? riskN : null,
-        position_size: positionSize,
-        planned_rr: plannedRR != null ? plannedRR.toFixed(2) : null,
-        market: "other",
-      },
-    }),
+    mutationFn: () =>
+      openFn({
+        data: {
+          instrument: instrument.trim(),
+          direction,
+          entry_price: entryN,
+          stop_loss: slN,
+          take_profit: tpN,
+          account_size: isFinite(balN) ? balN : null,
+          risk_percentage: isFinite(riskN) ? riskN : null,
+          position_size: positionSize,
+          planned_rr: plannedRR != null ? plannedRR.toFixed(2) : null,
+          market: "other",
+        },
+      }),
     onSuccess: () => {
       toast.success("Paper trade opened");
-      setEntry(""); setSl(""); setTp("");
+      setEntry("");
+      setSl("");
+      setTp("");
       onSubmitted();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -283,40 +311,112 @@ function OrderTicket({
     <div className="glow-card rounded-2xl p-4">
       <div className="text-sm font-bold">New Paper Trade</div>
       <p className="mt-0.5 text-[10px] text-muted-foreground">
-        Execution only. Add session, category, emotions and notes after the trade closes from My Trades.
+        Execution only. Add session, category, emotions and notes after the trade closes from My
+        Trades.
       </p>
 
       <div className="mt-3 space-y-3">
         <Field label="Instrument">
-          <input value={instrument} onChange={(e) => setInstrument(e.target.value)} onBlur={() => onSymbolChange(instrument)} className={inputCls} placeholder="e.g. FX:EURUSD" />
+          <input
+            value={instrument}
+            onChange={(e) => setInstrument(e.target.value)}
+            onBlur={() => onSymbolChange(instrument)}
+            className={inputCls}
+            placeholder="e.g. FX:EURUSD"
+          />
         </Field>
 
         <div>
-          <div className="mb-1 text-[10px] font-semibold tracking-wider text-muted-foreground">DIRECTION</div>
+          <div className="mb-1 text-[10px] font-semibold tracking-wider text-muted-foreground">
+            DIRECTION
+          </div>
           <div className="grid grid-cols-2 gap-2">
-            <button type="button" onClick={() => setDirection("long")} className={cn("flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-bold ring-1 ring-white/[0.06]", direction === "long" ? "bg-emerald-500/15 text-emerald-300 ring-emerald-500/40" : "bg-white/[0.03] text-muted-foreground")}>
+            <button
+              type="button"
+              onClick={() => setDirection("long")}
+              className={cn(
+                "flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-bold ring-1 ring-white/[0.06]",
+                direction === "long"
+                  ? "bg-emerald-500/15 text-emerald-300 ring-emerald-500/40"
+                  : "bg-white/[0.03] text-muted-foreground",
+              )}
+            >
               <ArrowUpRight className="h-3.5 w-3.5" /> BUY
             </button>
-            <button type="button" onClick={() => setDirection("short")} className={cn("flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-bold ring-1 ring-white/[0.06]", direction === "short" ? "bg-rose-500/15 text-rose-300 ring-rose-500/40" : "bg-white/[0.03] text-muted-foreground")}>
+            <button
+              type="button"
+              onClick={() => setDirection("short")}
+              className={cn(
+                "flex items-center justify-center gap-1 rounded-lg py-2 text-xs font-bold ring-1 ring-white/[0.06]",
+                direction === "short"
+                  ? "bg-rose-500/15 text-rose-300 ring-rose-500/40"
+                  : "bg-white/[0.03] text-muted-foreground",
+              )}
+            >
               <ArrowDownRight className="h-3.5 w-3.5" /> SELL
             </button>
           </div>
         </div>
 
         <div className="grid grid-cols-3 gap-2">
-          <Field label="Entry"><input value={entry} onChange={(e) => setEntry(e.target.value)} className={inputCls} inputMode="decimal" /></Field>
-          <Field label="Stop Loss"><input value={sl} onChange={(e) => setSl(e.target.value)} className={inputCls} inputMode="decimal" /></Field>
-          <Field label="Take Profit"><input value={tp} onChange={(e) => setTp(e.target.value)} className={inputCls} inputMode="decimal" /></Field>
+          <Field label="Entry">
+            <input
+              value={entry}
+              onChange={(e) => setEntry(e.target.value)}
+              className={inputCls}
+              inputMode="decimal"
+            />
+          </Field>
+          <Field label="Stop Loss">
+            <input
+              value={sl}
+              onChange={(e) => setSl(e.target.value)}
+              className={inputCls}
+              inputMode="decimal"
+            />
+          </Field>
+          <Field label="Take Profit">
+            <input
+              value={tp}
+              onChange={(e) => setTp(e.target.value)}
+              className={inputCls}
+              inputMode="decimal"
+            />
+          </Field>
         </div>
 
         <div className="grid grid-cols-2 gap-2">
-          <Field label="Account Balance"><input value={accountBalance} onChange={(e) => setAccountBalance(e.target.value)} className={inputCls} inputMode="decimal" /></Field>
-          <Field label="Risk %"><input value={riskPct} onChange={(e) => setRiskPct(e.target.value)} className={inputCls} inputMode="decimal" /></Field>
+          <Field label="Account Balance">
+            <input
+              value={accountBalance}
+              onChange={(e) => setAccountBalance(e.target.value)}
+              className={inputCls}
+              inputMode="decimal"
+            />
+          </Field>
+          <Field label="Risk %">
+            <input
+              value={riskPct}
+              onChange={(e) => setRiskPct(e.target.value)}
+              className={inputCls}
+              inputMode="decimal"
+            />
+          </Field>
         </div>
 
         <div className="rounded-lg bg-white/[0.03] p-2.5 text-xs ring-1 ring-white/[0.04]">
-          <div className="flex justify-between"><span className="text-muted-foreground">Planned RR</span><span className="font-bold text-foreground">{plannedRR != null ? `${plannedRR.toFixed(2)}R` : "—"}</span></div>
-          <div className="mt-1 flex justify-between"><span className="text-muted-foreground">Position Size</span><span className="font-bold text-foreground">{positionSize != null ? positionSize.toFixed(4) : "—"}</span></div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Planned RR</span>
+            <span className="font-bold text-foreground">
+              {plannedRR != null ? `${plannedRR.toFixed(2)}R` : "—"}
+            </span>
+          </div>
+          <div className="mt-1 flex justify-between">
+            <span className="text-muted-foreground">Position Size</span>
+            <span className="font-bold text-foreground">
+              {positionSize != null ? positionSize.toFixed(4) : "—"}
+            </span>
+          </div>
         </div>
 
         <button
@@ -333,12 +433,15 @@ function OrderTicket({
   );
 }
 
-const inputCls = "w-full rounded-lg bg-white/[0.04] px-2.5 py-2 text-xs ring-1 ring-white/[0.06] focus:outline-none focus:ring-2 focus:ring-primary/40";
+const inputCls =
+  "w-full rounded-lg bg-white/[0.04] px-2.5 py-2 text-xs ring-1 ring-white/[0.06] focus:outline-none focus:ring-2 focus:ring-primary/40";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <div className="mb-1 text-[10px] font-semibold tracking-wider text-muted-foreground">{label.toUpperCase()}</div>
+      <div className="mb-1 text-[10px] font-semibold tracking-wider text-muted-foreground">
+        {label.toUpperCase()}
+      </div>
       {children}
     </label>
   );
@@ -364,7 +467,9 @@ function OpenPositions({
   }
   return (
     <div className="glow-card mt-6 overflow-hidden rounded-2xl">
-      <div className="border-b border-white/[0.06] px-4 py-2.5 text-sm font-bold">Open Positions ({trades.length})</div>
+      <div className="border-b border-white/[0.06] px-4 py-2.5 text-sm font-bold">
+        Open Positions ({trades.length})
+      </div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[860px] text-xs">
           <thead className="text-[10px] font-semibold tracking-wider text-muted-foreground">
@@ -392,20 +497,42 @@ function OpenPositions({
                 <tr key={t.id} className="border-b border-white/[0.04] last:border-0">
                   <td className="px-4 py-2.5 font-semibold">{t.instrument}</td>
                   <td className="px-3 py-2.5">
-                    <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-bold", t.direction === "long" ? "bg-emerald-500/15 text-emerald-300" : "bg-rose-500/15 text-rose-300")}>
+                    <span
+                      className={cn(
+                        "rounded px-1.5 py-0.5 text-[10px] font-bold",
+                        t.direction === "long"
+                          ? "bg-emerald-500/15 text-emerald-300"
+                          : "bg-rose-500/15 text-rose-300",
+                      )}
+                    >
                       {t.direction === "long" ? "BUY" : "SELL"}
                     </span>
                   </td>
                   <td className="px-3 py-2.5 text-right tabular-nums">{entry.toFixed(5)}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums text-rose-300/80">{num(t.stop_loss).toFixed(5)}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums text-emerald-300/80">{num(t.take_profit).toFixed(5)}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums font-bold">{px.toFixed(5)}</td>
-                  <td className={cn("px-3 py-2.5 text-right tabular-nums font-bold", positive ? "text-emerald-300" : "text-rose-300")}>
-                    {positive ? "+" : ""}{fpnl.toFixed(2)}
+                  <td className="px-3 py-2.5 text-right tabular-nums text-rose-300/80">
+                    {num(t.stop_loss).toFixed(5)}
                   </td>
-                  <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">{t.planned_rr ?? "—"}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums text-emerald-300/80">
+                    {num(t.take_profit).toFixed(5)}
+                  </td>
+                  <td className="px-3 py-2.5 text-right tabular-nums font-bold">{px.toFixed(5)}</td>
+                  <td
+                    className={cn(
+                      "px-3 py-2.5 text-right tabular-nums font-bold",
+                      positive ? "text-emerald-300" : "text-rose-300",
+                    )}
+                  >
+                    {positive ? "+" : ""}
+                    {fpnl.toFixed(2)}
+                  </td>
+                  <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">
+                    {t.planned_rr ?? "—"}
+                  </td>
                   <td className="px-3 py-2.5 text-right">
-                    <button onClick={() => onClose(t, "manual")} className="inline-flex items-center gap-1 rounded-md bg-white/[0.06] px-2 py-1 text-[10px] font-semibold hover:bg-white/[0.1]">
+                    <button
+                      onClick={() => onClose(t, "manual")}
+                      className="inline-flex items-center gap-1 rounded-md bg-white/[0.06] px-2 py-1 text-[10px] font-semibold hover:bg-white/[0.1]"
+                    >
                       <X className="h-3 w-3" /> Close
                     </button>
                   </td>

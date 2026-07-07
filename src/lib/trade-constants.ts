@@ -1,6 +1,14 @@
 // Shared trade vocabulary used across forms, filters, and analytics.
 
-export const MARKETS = ["forex", "crypto", "stocks", "indices", "futures", "commodities", "other"] as const;
+export const MARKETS = [
+  "forex",
+  "crypto",
+  "stocks",
+  "indices",
+  "futures",
+  "commodities",
+  "other",
+] as const;
 
 export const SESSIONS = [
   { v: "sydney", l: "Sydney" },

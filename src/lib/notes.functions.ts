@@ -82,7 +82,8 @@ export const ensureMeditationNote = createServerFn({ method: "POST" })
       .insert({
         user_id: context.userId,
         title: "Meditation",
-        content: "Take a moment to breathe. Pick a duration and start a calm reset before your next trade.",
+        content:
+          "Take a moment to breathe. Pick a duration and start a calm reset before your next trade.",
         color: "blue",
         pinned: true,
         archived: false,

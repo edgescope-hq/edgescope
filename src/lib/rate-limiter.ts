@@ -41,11 +41,7 @@ export function checkRateLimit(
   };
 }
 
-export function checkRateLimitOrThrow(
-  action: string,
-  maxHits: number,
-  windowMs: number,
-): void {
+export function checkRateLimitOrThrow(action: string, maxHits: number, windowMs: number): void {
   const ip = callerKey();
   const key = `${action}:${ip}`;
   const result = checkRateLimit(key, maxHits, windowMs);

@@ -36,10 +36,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 import { NOTE_TEMPLATES } from "@/lib/note-templates";
 import { PageHeader, PageShell, PremiumEmptyState } from "@/components/ui/premium";
-import {
-  Dialog,
-  DialogContent,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 
 export const Route = createFileRoute("/_authenticated/playbook")({
   head: () => ({
@@ -189,8 +186,7 @@ function NotesTab() {
       const q = searchQuery.trim().toLowerCase();
       result = result.filter(
         (e) =>
-          (e.title ?? "").toLowerCase().includes(q) ||
-          (e.content ?? "").toLowerCase().includes(q),
+          (e.title ?? "").toLowerCase().includes(q) || (e.content ?? "").toLowerCase().includes(q),
       );
     }
     return result;
@@ -258,7 +254,8 @@ function NotesTab() {
           onClick={() => setShowCreateModal(true)}
           className="group inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] transition-all duration-300 hover:brightness-110"
         >
-          <Plus className="h-4 w-4 transition-transform duration-300 group-hover:rotate-90" /> New note
+          <Plus className="h-4 w-4 transition-transform duration-300 group-hover:rotate-90" /> New
+          note
         </button>
       </div>
 
@@ -302,7 +299,7 @@ function NotesTab() {
                       {e.title?.trim() || "Untitled note"}
                     </h4>
                     {preview ? (
-                      <p className="mt-2 line-clamp-3 break-words text-xs leading-5 text-muted-foreground [overflow-wrap:anywhere]">
+                      <p className="mt-2 max-h-[3.75rem] overflow-hidden break-words text-xs leading-5 text-muted-foreground [mask-image:linear-gradient(to_bottom,black_72%,transparent_100%)] [overflow-wrap:anywhere]">
                         {preview}
                       </p>
                     ) : (
@@ -318,7 +315,7 @@ function NotesTab() {
                       {tags.slice(0, 4).map((t, tid) => (
                         <span
                           key={tid}
-                          className="max-w-full truncate rounded-md bg-white/[0.035] px-2 py-1 text-[10px] font-medium text-muted-foreground/78 ring-1 ring-white/[0.05]"
+                          className="max-w-full truncate rounded-lg bg-white/[0.045] px-2.5 py-1.5 text-[11px] font-semibold text-muted-foreground/84 ring-1 ring-white/[0.065]"
                           title={t}
                         >
                           {t}
@@ -359,11 +356,21 @@ function NotesTab() {
               isDuplicateTitle={(title) => {
                 const nextTitle = normalizeTitle(title);
                 return nextTitle
-                  ? entries.some((entry) => entry.id !== selected.id && normalizeTitle(entry.title) === nextTitle)
+                  ? entries.some(
+                      (entry) =>
+                        entry.id !== selected.id && normalizeTitle(entry.title) === nextTitle,
+                    )
                   : false;
               }}
               onSave={async (patch) => {
-                if (patch.title && entries.some((entry) => entry.id !== selected.id && normalizeTitle(entry.title) === normalizeTitle(patch.title))) {
+                if (
+                  patch.title &&
+                  entries.some(
+                    (entry) =>
+                      entry.id !== selected.id &&
+                      normalizeTitle(entry.title) === normalizeTitle(patch.title),
+                  )
+                ) {
                   toast.error("You already have a note with this title.");
                   return;
                 }
@@ -387,7 +394,9 @@ function NotesTab() {
           <CreateNoteModal
             onClose={() => setShowCreateModal(false)}
             onCreate={(init) => {
-              if (entries.some((entry) => normalizeTitle(entry.title) === normalizeTitle(init.title))) {
+              if (
+                entries.some((entry) => normalizeTitle(entry.title) === normalizeTitle(init.title))
+              ) {
                 toast.error("You already have a note with this title.");
                 return;
               }
@@ -430,7 +439,12 @@ function NoteEditor({
 }: {
   entry: Entry;
   isDuplicateTitle: (title: string) => boolean;
-  onSave: (p: { title: string | null; content: string; tags: string[]; note_type: NoteType }) => Promise<void>;
+  onSave: (p: {
+    title: string | null;
+    content: string;
+    tags: string[];
+    note_type: NoteType;
+  }) => Promise<void>;
   onDelete: () => void;
   onClose: () => void;
 }) {
@@ -635,7 +649,9 @@ function CreateNoteModal({
             autoFocus
             className={cn(
               "mt-1.5 block w-full rounded-xl border-0 bg-white/[0.04] px-4 py-2.5 text-sm text-foreground ring-1 transition focus:outline-none",
-              duplicateTitle ? "ring-destructive/25 focus:ring-destructive/30" : "ring-white/[0.06] focus:ring-primary/30",
+              duplicateTitle
+                ? "ring-destructive/25 focus:ring-destructive/30"
+                : "ring-white/[0.06] focus:ring-primary/30",
             )}
           />
           {duplicateTitle && (
@@ -749,7 +765,9 @@ function TemplatesTab() {
                   </div>
                 </div>
                 <div>
-                  <h4 className="text-sm font-bold text-foreground transition-colors line-clamp-1">{t.title}</h4>
+                  <h4 className="text-sm font-bold text-foreground transition-colors line-clamp-1">
+                    {t.title}
+                  </h4>
                   <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground/86 line-clamp-2">
                     {templatePreview(t)}
                   </p>
@@ -763,7 +781,12 @@ function TemplatesTab() {
         })}
       </div>
 
-      <Dialog open={!!selected} onOpenChange={(open) => { if (!open) setSelectedId(null); }}>
+      <Dialog
+        open={!!selected}
+        onOpenChange={(open) => {
+          if (!open) setSelectedId(null);
+        }}
+      >
         {selected && (
           <DialogContent className="rounded-2xl border-white/[0.08] bg-[oklch(0.09_0.015_270)] max-w-2xl max-h-[85vh] overflow-y-auto p-6">
             <div className="flex items-start justify-between gap-3 border-b border-white/[0.04] pb-4">
@@ -782,7 +805,10 @@ function TemplatesTab() {
                 }
                 if (b.type === "ifthen") {
                   return (
-                    <div key={i} className="space-y-2 rounded-xl bg-white/[0.02] p-4 border border-white/[0.04]">
+                    <div
+                      key={i}
+                      className="space-y-2 rounded-xl bg-white/[0.02] p-4 border border-white/[0.04]"
+                    >
                       <p className="font-semibold text-foreground">• {b.ifText}</p>
                       <p className="pl-5 text-foreground/75">
                         <span className="font-semibold text-foreground">{b.thenLabel}</span>{" "}
@@ -853,8 +879,7 @@ function MeditationTab() {
             return d.toISOString().slice(0, 10);
           })();
           let newStreak = 1;
-          if (lastDay === today)
-            newStreak = streak;
+          if (lastDay === today) newStreak = streak;
           else if (lastDay === yesterday) newStreak = streak + 1;
           try {
             localStorage.setItem("edgescope.meditation.streak", String(newStreak));

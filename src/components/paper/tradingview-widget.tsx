@@ -36,7 +36,11 @@ function TradingViewWidgetBase({ symbol, interval }: { symbol: string; interval:
   }, [symbol, interval]);
 
   return (
-    <div className="tradingview-widget-container h-full w-full" ref={container} style={{ height: "100%", width: "100%" }} />
+    <div
+      className="tradingview-widget-container h-full w-full"
+      ref={container}
+      style={{ height: "100%", width: "100%" }}
+    />
   );
 }
 

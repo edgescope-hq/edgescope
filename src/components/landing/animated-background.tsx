@@ -13,9 +13,10 @@ export function AnimatedBackground() {
   useEffect(() => {
     const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const lowPower =
-      (navigator as any).deviceMemory && (navigator as any).deviceMemory <= 2 ||
-      (navigator as any).hardwareConcurrency && (navigator as any).hardwareConcurrency <= 4 &&
-        window.innerWidth < 768;
+      ((navigator as any).deviceMemory && (navigator as any).deviceMemory <= 2) ||
+      ((navigator as any).hardwareConcurrency &&
+        (navigator as any).hardwareConcurrency <= 4 &&
+        window.innerWidth < 768);
     setReduced(prefersReduced || lowPower);
   }, []);
 
@@ -25,9 +26,13 @@ export function AnimatedBackground() {
     const wrap = wrapRef.current;
     if (!wrap) return;
     let raf = 0;
-    let tx = 0, ty = 0, cx = 0, cy = 0;
+    let tx = 0,
+      ty = 0,
+      cx = 0,
+      cy = 0;
     const onMove = (e: MouseEvent) => {
-      const w = window.innerWidth, h = window.innerHeight;
+      const w = window.innerWidth,
+        h = window.innerHeight;
       tx = (e.clientX / w - 0.5) * 30;
       ty = (e.clientY / h - 0.5) * 30;
     };
@@ -59,7 +64,9 @@ export function AnimatedBackground() {
     canvas.style.width = "100%";
     canvas.style.height = "100%";
 
-    const count = reduced ? 15 : Math.min(45, Math.floor((window.innerWidth * window.innerHeight) / 35000));
+    const count = reduced
+      ? 15
+      : Math.min(45, Math.floor((window.innerWidth * window.innerHeight) / 35000));
     type P = { x: number; y: number; r: number; vx: number; vy: number; hue: number; a: number };
     const particles: P[] = Array.from({ length: count }, () => ({
       x: Math.random() * w,
@@ -149,8 +156,7 @@ export function AnimatedBackground() {
       <div
         className="absolute top-1/3 -left-20 h-[40vmax] w-[40vmax] rounded-full opacity-30 blur-[110px] aurora-c"
         style={{
-          background:
-            "radial-gradient(circle, oklch(0.6 0.22 270 / 0.45), transparent 60%)",
+          background: "radial-gradient(circle, oklch(0.6 0.22 270 / 0.45), transparent 60%)",
           transform: "translate3d(calc(var(--px,0px) * 0.5), calc(var(--py,0px) * 0.5), 0)",
         }}
       />

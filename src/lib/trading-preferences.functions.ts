@@ -51,15 +51,10 @@ export const upsertTradingPreferences = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) => prefsSchema.parse(d))
   .handler(async ({ data, context }) => {
-    const payload = Object.fromEntries(
-      Object.entries(data).filter(([, v]) => v !== undefined),
-    );
+    const payload = Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined));
     const { data: row, error } = await context.supabase
       .from("trading_preferences")
-      .upsert(
-        { user_id: context.userId, ...payload },
-        { onConflict: "user_id" },
-      )
+      .upsert({ user_id: context.userId, ...payload }, { onConflict: "user_id" })
       .select()
       .single();
     if (error) throw safeError(error);

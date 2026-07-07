@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   BarChart3,
   CalendarDays,
+  Check,
   CheckCircle2,
   ChevronRight,
   ClipboardCheck,
@@ -58,18 +59,9 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PageHeader, PageShell, PremiumEmptyState } from "@/components/ui/premium";
-import { TradeReviewModal } from "@/components/trades/trade-review-modal";
-import {
-  getReviewStatus,
-  REVIEW_STATUS_BADGE,
-  REVIEW_STATUS_LABEL,
-} from "@/lib/review-status";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { getReviewStatus, REVIEW_STATUS_BADGE, REVIEW_STATUS_LABEL } from "@/lib/review-status";
+import { isPaperTrade, recordedR } from "@/lib/trade-mappers";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 export const Route = createFileRoute("/_authenticated/accounts")({
   head: () => ({
@@ -244,11 +236,11 @@ function buildTradeMetrics(trades: TradeRow[]) {
   const total = trades.length;
   const decided = trades.filter((trade) => trade.result === "win" || trade.result === "loss");
   const wins = decided.filter((trade) => trade.result === "win").length;
-  const rTrades = trades.filter((trade) => trade.achieved_rr != null);
-  const netR = rTrades.length
-    ? rTrades.reduce((sum, trade) => sum + Number(trade.achieved_rr ?? 0), 0)
-    : null;
-  const avgR = rTrades.length && netR != null ? netR / rTrades.length : null;
+  const recordedRs = trades
+    .map((trade) => recordedR(trade.achieved_rr))
+    .filter((value): value is number => value !== null);
+  const netR = recordedRs.length ? recordedRs.reduce((sum, value) => sum + value, 0) : null;
+  const avgR = recordedRs.length && netR != null ? netR / recordedRs.length : null;
 
   return {
     total,
@@ -300,8 +292,6 @@ function AccountsPage() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showRulesModal, setShowRulesModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [reviewTrade, setReviewTrade] = useState<{ id: string; number: number } | null>(null);
-
   // Form states
   const [createForm, setCreateForm] = useState({
     name: "",
@@ -347,7 +337,12 @@ function AccountsPage() {
   }, [accounts, editForm.name, selected?.id]);
 
   const allTrades = useMemo(() => (tradesData ?? []) as TradeRow[], [tradesData]);
+  const realTrades = useMemo(() => allTrades.filter((trade) => !isPaperTrade(trade)), [allTrades]);
   const selectedTrades = useMemo(
+    () => (selected ? realTrades.filter((trade) => trade.account_id === selected.id) : []),
+    [realTrades, selected],
+  );
+  const selectedTradesForDeletion = useMemo(
     () => (selected ? allTrades.filter((trade) => trade.account_id === selected.id) : []),
     [allTrades, selected],
   );
@@ -499,7 +494,7 @@ function AccountsPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const canDelete = selectedTrades.length === 0;
+  const canDelete = selectedTradesForDeletion.length === 0;
   const metrics = buildTradeMetrics(selectedTrades);
   const createAccountDialog = (
     <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
@@ -591,520 +586,606 @@ function AccountsPage() {
         }
       />
 
-      <div className="mt-6 space-y-7">
-        {/* Left Column - Workspaces List */}
-        <div className="flex flex-col gap-3">
-          <div className="flex items-center px-1">
-            <div className="flex items-center gap-2">
+      <div className="mt-5 space-y-5">
+        {accounts.length === 0 ? (
+          <div className="flex flex-col">
+            <div className="flex flex-col items-start px-1 gap-2.5">
               <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground/80">
-                Your trading accounts
+                YOUR TRADING ACCOUNTS - 0
               </span>
-              <span className="inline-flex items-center justify-center rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary ring-1 ring-primary/20">
-                {accounts.length}
-              </span>
+              <div className="inline-flex items-center gap-2 rounded-full bg-white/[0.035] px-3 py-1.5 text-xs font-medium text-muted-foreground ring-1 ring-white/[0.07]">
+                <Check className="h-3.5 w-3.5 text-success/75" />
+                Accounts organize your journal only. EdgeScope does not connect to brokers or place
+                trades.
+              </div>
             </div>
-          </div>
 
-          <div className="flex gap-3 overflow-x-auto pb-2">
-            {isLoading && <div className="w-[250px] shrink-0 rounded-2xl bg-white/[0.02] p-4 text-center text-xs text-muted-foreground ring-1 ring-white/[0.05]">Loading trading accounts...</div>}
-            {!isLoading && accounts.length === 0 && (
-              <PremiumEmptyState
-                icon={WalletCards}
-                title="No trading accounts yet"
-                description="Add a trading account to separate personal, demo, funded, or backtest journals."
-                compact
-              />
-            )}
-            {accounts.map((a) => {
-              const isSel = selectedId === a.id;
-              const initial = a.name.charAt(0).toUpperCase();
-              const avatarColor = BG_COLORS[a.name.charCodeAt(0) % BG_COLORS.length];
-
-              return (
-                <button
-                  key={a.id}
-                  onClick={() => setSelectedId(a.id)}
-                  className={cn(
-                    "flex min-h-[116px] w-[270px] shrink-0 items-start gap-4 rounded-2xl p-5 text-left transition-all duration-200",
-                    isSel
-                      ? "bg-primary/[0.08] ring-1 ring-primary/30 text-foreground shadow-[var(--shadow-glow)]"
-                      : "bg-white/[0.02] ring-1 ring-white/[0.05] text-muted-foreground/80 hover:bg-white/[0.04] hover:text-foreground",
-                  )}
-                >
-                  <div className="flex min-w-0 items-start gap-4">
-                    <div className={cn("grid h-11 w-11 shrink-0 place-items-center rounded-xl text-base font-bold ring-1", avatarColor)}>
-                      {initial}
-                    </div>
-                    <div className="min-w-0 flex-1 pt-0.5">
-                      <div className="flex min-w-0 items-center gap-2">
-                        <span className="truncate text-base font-bold leading-snug text-foreground">{a.name}</span>
-                        {a.is_active && (
-                          <span className="shrink-0 rounded-full bg-success/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-success">
-                            Active
-                          </span>
-                        )}
-                      </div>
-                      <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground/70">
-                        <span>{labelForType(a.account_type)}</span>
-                        {isSel && (
-                          <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-primary ring-1 ring-primary/20">
-                            Selected
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Right Column - Workspace Detail */}
-        <div className="section-card min-w-0 rounded-2xl p-6 xl:p-8">
-          {selected ? (
-            <div className="space-y-8">
-              {/* A. Account Snapshot Grid */}
-              <div className="space-y-4">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground/80">
-                  Account Snapshot
-                </h4>
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-                  <InfoCard
-                    icon={ClipboardList}
-                    label="Total Trades"
-                    value={metrics.total || "—"}
-                    tone="primary"
-                  />
-                  <InfoCard
-                    icon={TrendingUp}
-                    label="Net R"
-                    value={formatR(metrics.netR)}
-                    highlight={metrics.netR != null}
-                    positive={metrics.netR != null && metrics.netR >= 0}
-                    tone={metrics.netR != null && metrics.netR < 0 ? "destructive" : "success"}
-                  />
-                  <InfoCard
-                    icon={Trophy}
-                    label="Win Rate"
-                    value={metrics.winRate == null ? "—" : fmtPct(metrics.winRate)}
-                    tone="warning"
-                  />
-                  <InfoCard
-                    icon={ClipboardCheck}
-                    label="Reviewed Trades"
-                    value={metrics.total ? `${metrics.reviewed}/${metrics.total}` : "—"}
-                    tone="info"
-                  />
-                  <InfoCard
-                    icon={BarChart3}
-                    label="Avg R"
-                    value={formatR(metrics.avgR)}
-                    tone="success"
-                  />
-                  <InfoCard
-                    icon={CalendarDays}
-                    label="Last Trade Date"
-                    value={formatDate(metrics.lastTradeDate)}
-                    tone="primary"
-                  />
-                </div>
-              </div>
-
-              {/* B. Risk & Guardrails Section */}
-              <div className="space-y-4 pt-1">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground/80">
-                    Risk & Guardrails
-                  </h4>
-                  <button
-                    onClick={() => setShowRulesModal(true)}
-                    className="inline-flex items-center gap-1.5 text-xs text-primary font-semibold hover:underline"
-                  >
-                    <Pencil className="h-3 w-3" /> Edit rules
-                  </button>
-                </div>
-                <div className="space-y-5 rounded-2xl border border-white/[0.06] bg-white/[0.015] p-5 sm:p-6">
-                  <div className="rounded-xl border border-white/[0.05] bg-white/[0.03] px-4 py-3.5 text-[13px] leading-relaxed text-muted-foreground/90">
-                    Journal reminders only. EdgeScope does not place, block, or manage broker trades.
-                  </div>
-                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                    <div className="flex min-h-[122px] items-center gap-5 rounded-xl bg-white/[0.025] p-5 ring-1 ring-white/[0.05]">
-                      <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-yellow-500/8 text-yellow-300/85 ring-1 ring-yellow-500/15">
-                        <ShieldAlert className="h-[18px] w-[18px]" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground/90">
-                          Max Risk Per Trade
-                        </div>
-                        <div className="mt-2 text-xl font-bold tracking-tight text-foreground">
-                          {selected.max_risk_per_trade_pct != null ? `${selected.max_risk_per_trade_pct}%` : "Not set"}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex min-h-[122px] items-center gap-5 rounded-xl bg-white/[0.025] p-5 ring-1 ring-white/[0.05]">
-                      <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-red-500/8 text-red-300/85 ring-1 ring-red-500/15">
-                        <AlertTriangle className="h-[18px] w-[18px]" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground/90">
-                          Daily Loss Limit
-                        </div>
-                        <div className="mt-2 text-xl font-bold tracking-tight text-foreground">
-                          {selected.daily_loss_limit_pct != null ? `${selected.daily_loss_limit_pct}%` : "Not set"}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex min-h-[122px] items-center gap-5 rounded-xl bg-white/[0.025] p-5 ring-1 ring-white/[0.05]">
-                      <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-blue-500/8 text-blue-300/85 ring-1 ring-blue-500/15">
-                        <ListChecks className="h-[18px] w-[18px]" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground/90">
-                          Max Trades Per Day
-                        </div>
-                        <div className="mt-2 text-xl font-bold tracking-tight text-foreground">
-                          {prefsData?.max_trades_per_day != null ? prefsData.max_trades_per_day : "Not set"}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex min-h-[122px] items-center gap-5 rounded-xl bg-white/[0.025] p-5 ring-1 ring-white/[0.05]">
-                      <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary/85 ring-1 ring-primary/15">
-                        <Bell className="h-[18px] w-[18px]" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground/90">
-                          Journal Reminders
-                        </div>
-                        <div className="mt-2 text-xl font-bold tracking-tight text-foreground">
-                          {guardrailsData?.daily_loss_reminder ?? true ? "On" : "Off"}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Bottom Cards: Recent Trades (Left) & Workspace Actions (Right) */}
-              <div className="space-y-6 pt-1">
-                {/* C. Recent Trades */}
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground/80">
-                      Recent Trades
-                    </h4>
-                    <Link
-                      to="/trades"
-                      search={{ account: selected.id }}
-                      className="text-xs font-semibold text-primary transition-colors hover:text-primary-glow"
-                    >
-                      View account trades →
-                    </Link>
-                  </div>
-                  {selectedTrades.length === 0 ? (
-                    <div className="surface-card rounded-xl p-6 text-center">
-                      <p className="text-xs text-muted-foreground">No trades in this account yet.</p>
-                      <Link
-                        to="/trades"
-                        className="mt-3.5 inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground shadow-[var(--shadow-glow)] hover:brightness-110 transition"
-                      >
-                        <Plus className="h-3.5 w-3.5" /> Log a trade
-                      </Link>
-                    </div>
-                  ) : (
-                    <div className="overflow-hidden rounded-xl border border-white/[0.05] bg-white/[0.012]">
-                      <div className="space-y-1 p-2">
-                        {selectedTrades.slice(0, 5).map((trade) => {
-                          const globalIndex = allTrades.findIndex((item) => item.id === trade.id);
-                          const number = globalIndex >= 0 ? allTrades.length - globalIndex : selectedTrades.length;
-                          const status = getReviewStatus(trade);
-                          const resultLabel =
-                            trade.result === "win"
-                              ? "WIN"
-                              : trade.result === "loss"
-                                ? "LOSS"
-                                : trade.result === "breakeven"
-                                  ? "BE"
-                                  : "—";
-                          const resultClass =
-                            trade.result === "win"
-                              ? "bg-success/10 text-success ring-success/20"
-                              : trade.result === "loss"
-                                ? "bg-destructive/10 text-destructive ring-destructive/20"
-                                : "bg-info/10 text-info ring-info/20";
-                          return (
-                            <button
-                              key={trade.id}
-                              type="button"
-                              onClick={() => setReviewTrade({ id: trade.id, number })}
-                              className="grid w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 rounded-xl px-3 py-3 text-left transition-all duration-200 hover:bg-white/[0.04] focus:outline-none focus-visible:bg-white/[0.05] focus-visible:ring-1 focus-visible:ring-primary/30"
-                            >
-                              <div className="min-w-0">
-                                <div className="truncate text-sm font-semibold text-foreground/95">{trade.instrument}</div>
-                                <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                                  <span>{formatDate(trade.trade_date)}</span>
-                                  <span
-                                    className={cn(
-                                      "rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wide",
-                                      REVIEW_STATUS_BADGE[status],
-                                    )}
-                                  >
-                                    {REVIEW_STATUS_LABEL[status]}
-                                  </span>
-                                </div>
-                              </div>
-                              <span className={cn("rounded-md px-2 py-0.5 text-[10px] font-bold tracking-wider ring-1", resultClass)}>
-                                {resultLabel}
-                              </span>
-                              <span
-                                className={cn(
-                                  "min-w-[70px] text-right text-sm font-semibold tabular-nums",
-                                  trade.achieved_rr != null && trade.achieved_rr > 0 && "text-success",
-                                  trade.achieved_rr != null && trade.achieved_rr < 0 && "text-destructive",
-                                  (trade.achieved_rr == null || trade.achieved_rr === 0) && "text-muted-foreground",
-                                )}
-                              >
-                                {formatR(trade.achieved_rr)}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* D. Account Actions / Settings */}
-                <div className="space-y-3">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground/80">
-                    Account Actions
-                  </h4>
-                  <div className="space-y-2.5 rounded-2xl border border-white/[0.05] bg-white/[0.012] p-4 sm:p-5">
-                    <button
-                      onClick={() => setShowRulesModal(true)}
-                      className="surface-card interactive-card flex w-full items-center gap-4 rounded-xl px-4 py-3.5 text-left"
-                    >
-                      <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary ring-1 ring-primary/15">
-                        <ShieldCheck className="h-3.5 w-3.5" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-xs font-semibold">Manage risk rules</div>
-                        <div className="mt-0.5 text-[10px] leading-normal text-muted-foreground">Modify risk parameters and reminder triggers.</div>
-                      </div>
-                      <ChevronRight className="ml-auto h-4 w-4 shrink-0 text-muted-foreground/50" />
-                    </button>
-
-                    <button
-                      onClick={() => canDelete && setShowDeleteConfirm(true)}
-                      disabled={!canDelete}
-                      className={cn(
-                        "mt-3 flex w-full items-center gap-4 rounded-xl border px-4 py-3.5 text-left transition",
-                        canDelete
-                          ? "cursor-pointer border-destructive/[0.08] bg-white/[0.018] text-destructive/75 hover:border-destructive/[0.16] hover:bg-destructive/[0.025] hover:text-destructive/85"
-                          : "cursor-not-allowed border-white/[0.055] bg-white/[0.025] text-muted-foreground/58",
-                      )}
-                    >
-                      <div className={cn("grid h-8 w-8 shrink-0 place-items-center rounded-lg", canDelete ? "bg-destructive/[0.045] text-destructive/70 ring-1 ring-destructive/[0.1]" : "bg-white/[0.045] text-muted-foreground/68 ring-1 ring-white/[0.055]")}>
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-xs font-semibold">Delete trading account</div>
-                        <div className="mt-0.5 text-[10px] leading-normal">
-                          {canDelete ? "Delete this empty trading account workspace." : "Only empty trading accounts can be deleted."}
-                        </div>
-                      </div>
-                      <ChevronRight className="ml-auto h-4 w-4 shrink-0 text-current opacity-50" />
-                    </button>
-
-                    {!canDelete && (
-                      <p className="pl-1.5 text-[11px] leading-relaxed text-muted-foreground/70">
-                        Trading accounts with logged trades cannot be deleted. Your trade history stays preserved.
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Confirmation and Action Dialog Modals */}
-
-              {/* 2. Edit Workspace Dialog */}
-              <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
-                <DialogContent className="rounded-2xl border-white/[0.08] bg-[oklch(0.09_0.015_270)] max-w-md p-6">
-                  <DialogHeader>
-                    <DialogTitle className="text-base font-bold flex items-center gap-2 text-foreground">
-                      <Pencil className="h-4 w-4 text-primary" /> Edit details
-                    </DialogTitle>
-                  </DialogHeader>
-                  <div className="mt-4 space-y-4">
-                    <Field
-                      label="Trading account name"
-                      value={editForm.name}
-                      onChange={(v) => setEditForm((f) => ({ ...f, name: v }))}
-                      error={editNameDuplicate && "You already have a trading account with this name."}
-                    />
-                    <Select
-                      label="Trading account type"
-                      value={editForm.account_type}
-                      onChange={(v) =>
-                        setEditForm((f) => ({
-                          ...f,
-                          account_type: (v || "personal") as TradingAccount["account_type"],
-                        }))
-                      }
-                      options={[
-                        { value: "personal", label: "Personal" },
-                        { value: "demo", label: "Demo" },
-                        { value: "live", label: "Live" },
-                        { value: "funded", label: "Funded" },
-                        { value: "backtest", label: "Backtest" },
-                      ]}
-                    />
-                    <Field
-                      label="Broker (optional)"
-                      value={editForm.broker}
-                      placeholder="Exness, Binance, Tradovate"
-                      onChange={(v) => setEditForm((f) => ({ ...f, broker: v }))}
-                    />
-                    <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
-                      <button
-                        type="button"
-                        onClick={() => !selected.is_active && setActiveM.mutate(selected.id)}
-                        disabled={selected.is_active || setActiveM.isPending}
-                        className={cn(
-                          "flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-xs font-semibold transition",
-                          selected.is_active
-                            ? "cursor-default bg-white/[0.025] text-foreground ring-1 ring-white/[0.06]"
-                            : "bg-white/[0.03] text-foreground ring-1 ring-white/[0.06] hover:bg-primary/10 hover:text-primary hover:ring-primary/20",
-                          setActiveM.isPending && "opacity-60",
-                        )}
-                      >
-                        <span className="inline-flex items-center gap-2">
-                          <CheckCircle2 className={cn("h-4 w-4", selected.is_active ? "text-primary/80" : "text-muted-foreground/70")} />
-                          {selected.is_active ? "Active trading account" : "Set as active account"}
-                        </span>
-                        {selected.is_active && (
-                          <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-primary ring-1 ring-primary/15">
-                            Active
-                          </span>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="mt-6 flex justify-end gap-2">
-                    <button
-                      onClick={() => setShowEditModal(false)}
-                      className="rounded-xl bg-white/[0.04] px-4 py-2.5 text-xs font-semibold text-muted-foreground hover:text-foreground border border-white/[0.06]"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={() => updateAccountM.mutate()}
-                      disabled={updateAccountM.isPending || !editForm.name.trim() || editNameDuplicate}
-                      className="rounded-xl bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground shadow-[var(--shadow-glow)] hover:brightness-110 disabled:opacity-50"
-                    >
-                      {updateAccountM.isPending ? "Saving..." : "Save changes"}
-                    </button>
-                  </div>
-                </DialogContent>
-              </Dialog>
-
-              {/* 3. Edit Risk Rules & Guardrails Dialog */}
-              <Dialog open={showRulesModal} onOpenChange={setShowRulesModal}>
-                <DialogContent className="rounded-2xl border-white/[0.08] bg-[oklch(0.09_0.015_270)] max-w-md p-6">
-                  <DialogHeader>
-                    <DialogTitle className="text-base font-bold flex items-center gap-2 text-foreground">
-                      <SettingsIcon className="h-4 w-4 text-primary" /> Risk rules & guardrails
-                    </DialogTitle>
-                  </DialogHeader>
-                  <p className="text-[11px] leading-relaxed text-muted-foreground">
-                    Journal reminders only. EdgeScope does not place, block, or manage broker trades.
-                  </p>
-                  <div className="mt-4 space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <Field
-                        label="Max risk per trade (%)"
-                        type="number"
-                        value={rulesForm.max_risk_per_trade_pct}
-                        placeholder="e.g. 1"
-                        onChange={(v) => setRulesForm((f) => ({ ...f, max_risk_per_trade_pct: v }))}
-                      />
-                      <Field
-                        label="Daily loss limit (%)"
-                        type="number"
-                        value={rulesForm.daily_loss_limit_pct}
-                        placeholder="e.g. 3"
-                        onChange={(v) => setRulesForm((f) => ({ ...f, daily_loss_limit_pct: v }))}
-                      />
-                      <Field
-                        label="Max trades per day"
-                        type="number"
-                        value={rulesForm.max_trades_per_day}
-                        placeholder="e.g. 3"
-                        onChange={(v) => setRulesForm((f) => ({ ...f, max_trades_per_day: v }))}
-                      />
-                    </div>
-                    <div className="pt-2">
-                      <ToggleRow
-                        label="Journal reminder toggle"
-                        description="Show a reminder when a logged trade exceeds your daily loss limit setting."
-                        checked={rulesForm.daily_loss_reminder}
-                        onChange={(checked) => setRulesForm((f) => ({ ...f, daily_loss_reminder: checked }))}
-                      />
-                    </div>
-                  </div>
-                  <div className="mt-6 flex justify-end gap-2">
-                    <button
-                      onClick={() => setShowRulesModal(false)}
-                      className="rounded-xl bg-white/[0.04] px-4 py-2.5 text-xs font-semibold text-muted-foreground hover:text-foreground border border-white/[0.06]"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={() => updateRulesM.mutate()}
-                      disabled={updateRulesM.isPending}
-                      className="rounded-xl bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground shadow-[var(--shadow-glow)] hover:brightness-110 disabled:opacity-50"
-                    >
-                      {updateRulesM.isPending ? "Saving..." : "Save rules"}
-                    </button>
-                  </div>
-                </DialogContent>
-              </Dialog>
-
-              {/* 4. Delete Confirm Modal */}
-              <ConfirmDialog
-                open={showDeleteConfirm}
-                onOpenChange={setShowDeleteConfirm}
-                title={`Delete "${selected.name}"?`}
-                description="This deletes only the trading account/workspace, not your EdgeScope user account."
-                confirmLabel="Delete trading account"
-                destructive
-                loading={deleteM.isPending}
-                onConfirm={() => deleteM.mutate()}
-              />
-              {reviewTrade && (
-                <TradeReviewModal
-                  tradeId={reviewTrade.id}
-                  number={reviewTrade.number}
-                  onClose={() => setReviewTrade(null)}
-                />
-              )}
-            </div>
-          ) : (
-            <div className="grid h-full min-h-[400px] place-items-center p-8 text-center">
-              <div className="max-w-sm rounded-2xl bg-white/[0.025] px-6 py-8 ring-1 ring-white/[0.05]">
+            <div className="mt-5 grid min-h-[300px] place-items-center p-8 text-center rounded-2xl border border-white/[0.06] bg-white/[0.015]">
+              <div className="max-w-md">
                 <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-primary/10 text-primary ring-1 ring-primary/20">
                   <WalletCards className="h-5 w-5" />
                 </div>
-                <h3 className="mt-4 text-sm font-bold text-foreground">
-                  Select a trading account or create one to view its stats, risk rules, and recent trades.
+                <h3 className="mt-4 text-base font-bold text-foreground">
+                  No trading accounts yet
                 </h3>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  Create one to separate personal, demo, funded, or backtest trades.
+                </p>
+                <button
+                  onClick={() => setShowCreateModal(true)}
+                  className="mt-5 inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground shadow-[var(--shadow-glow)] transition hover:brightness-110"
+                >
+                  <Plus className="h-3.5 w-3.5" /> Add trading account
+                </button>
               </div>
             </div>
-          )}
-        </div>
+          </div>
+        ) : (
+          <>
+            {/* Left Column - Workspaces List */}
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center px-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground/80">
+                    Your trading accounts
+                  </span>
+                  <span className="inline-flex items-center justify-center rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary ring-1 ring-primary/20">
+                    {accounts.length}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex gap-3 overflow-x-auto pb-2">
+                {isLoading && (
+                  <div className="w-[250px] shrink-0 rounded-2xl bg-white/[0.02] p-4 text-center text-xs text-muted-foreground ring-1 ring-white/[0.05]">
+                    Loading trading accounts...
+                  </div>
+                )}
+                {accounts.map((a) => {
+                  const isSel = selectedId === a.id;
+                  const initial = a.name.charAt(0).toUpperCase();
+                  const avatarColor = BG_COLORS[a.name.charCodeAt(0) % BG_COLORS.length];
+
+                  return (
+                    <button
+                      key={a.id}
+                      onClick={() => setSelectedId(a.id)}
+                      className={cn(
+                        "flex min-h-[116px] w-[270px] shrink-0 items-start gap-4 rounded-2xl p-5 text-left transition-all duration-200",
+                        isSel
+                          ? "bg-primary/[0.08] ring-1 ring-primary/30 text-foreground shadow-[var(--shadow-glow)]"
+                          : "bg-white/[0.02] ring-1 ring-white/[0.05] text-muted-foreground/80 hover:bg-white/[0.04] hover:text-foreground",
+                      )}
+                    >
+                      <div className="flex min-w-0 items-start gap-4">
+                        <div
+                          className={cn(
+                            "grid h-11 w-11 shrink-0 place-items-center rounded-xl text-base font-bold ring-1",
+                            avatarColor,
+                          )}
+                        >
+                          {initial}
+                        </div>
+                        <div className="min-w-0 flex-1 pt-0.5">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="truncate text-base font-bold leading-snug text-foreground">
+                              {a.name}
+                            </span>
+                            {a.is_active && (
+                              <span className="shrink-0 rounded-full bg-success/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-success">
+                                Active
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground/70">
+                            <span>{labelForType(a.account_type)}</span>
+                            {isSel && (
+                              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-primary ring-1 ring-primary/20">
+                                Selected
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Right Column - Workspace Detail */}
+            <div className="section-card min-w-0 rounded-2xl p-5 xl:p-6">
+              {selected ? (
+                <div className="space-y-6">
+                  {/* A. Account Snapshot Grid */}
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground/80">
+                      Account Snapshot
+                    </h4>
+                    {selectedTrades.length === 0 ? (
+                      <div className="surface-card rounded-2xl border border-white/[0.06] bg-white/[0.015] p-6 text-center">
+                        <h5 className="text-sm font-semibold text-foreground">
+                          Stats unlock after your first trade
+                        </h5>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Log a trade in this account to see performance, streaks, and review
+                          progress.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+                        <InfoCard
+                          icon={ClipboardList}
+                          label="Total Trades"
+                          value={metrics.total || "—"}
+                          tone="primary"
+                        />
+                        <InfoCard
+                          icon={TrendingUp}
+                          label="Net R"
+                          value={formatR(metrics.netR)}
+                          highlight={metrics.netR != null}
+                          positive={metrics.netR != null && metrics.netR >= 0}
+                          tone={
+                            metrics.netR != null && metrics.netR < 0 ? "destructive" : "success"
+                          }
+                        />
+                        <InfoCard
+                          icon={Trophy}
+                          label="Win Rate"
+                          value={metrics.winRate == null ? "—" : fmtPct(metrics.winRate)}
+                          tone="warning"
+                        />
+                        <InfoCard
+                          icon={ClipboardCheck}
+                          label="Reviewed Trades"
+                          value={metrics.total ? `${metrics.reviewed}/${metrics.total}` : "—"}
+                          tone="info"
+                        />
+                        <InfoCard
+                          icon={BarChart3}
+                          label="Avg R"
+                          value={formatR(metrics.avgR)}
+                          tone="success"
+                        />
+                        <InfoCard
+                          icon={CalendarDays}
+                          label="Last Trade Date"
+                          value={formatDate(metrics.lastTradeDate)}
+                          tone="primary"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* B. Risk & Guardrails Section */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground/80">
+                        Risk & Guardrails
+                      </h4>
+                      <button
+                        onClick={() => setShowRulesModal(true)}
+                        className="inline-flex items-center gap-1.5 text-xs text-primary font-semibold hover:underline"
+                      >
+                        <Pencil className="h-3 w-3" /> Edit rules
+                      </button>
+                    </div>
+                    <div className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.015] p-4">
+                      <div className="rounded-xl border border-white/[0.055] bg-white/[0.035] px-3.5 py-2.5 text-xs leading-5 text-muted-foreground/88">
+                        Journal reminders only. EdgeScope does not place, block, or manage broker
+                        trades.
+                      </div>
+                      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                        <div className="flex min-h-[92px] items-center gap-3.5 rounded-xl bg-white/[0.028] p-4 ring-1 ring-white/[0.06]">
+                          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-yellow-500/8 text-yellow-300/85 ring-1 ring-yellow-500/15">
+                            <ShieldAlert className="h-4 w-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground/82">
+                              Max Risk Per Trade
+                            </div>
+                            <div className="mt-1.5 text-lg font-bold tracking-tight text-foreground leading-normal py-0.5">
+                              {selected.max_risk_per_trade_pct != null
+                                ? `${selected.max_risk_per_trade_pct}%`
+                                : "Not set"}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex min-h-[92px] items-center gap-3.5 rounded-xl bg-white/[0.028] p-4 ring-1 ring-white/[0.06]">
+                          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-red-500/8 text-red-300/85 ring-1 ring-red-500/15">
+                            <AlertTriangle className="h-4 w-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground/82">
+                              Daily Loss Limit
+                            </div>
+                            <div className="mt-1.5 text-lg font-bold tracking-tight text-foreground leading-normal py-0.5">
+                              {selected.daily_loss_limit_pct != null
+                                ? `${selected.daily_loss_limit_pct}%`
+                                : "Not set"}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex min-h-[92px] items-center gap-3.5 rounded-xl bg-white/[0.028] p-4 ring-1 ring-white/[0.06]">
+                          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-blue-500/8 text-blue-300/85 ring-1 ring-blue-500/15">
+                            <ListChecks className="h-4 w-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground/82">
+                              Max Trades Per Day
+                            </div>
+                            <div className="mt-1.5 text-lg font-bold tracking-tight text-foreground leading-normal py-0.5">
+                              {prefsData?.max_trades_per_day != null
+                                ? prefsData.max_trades_per_day
+                                : "Not set"}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex min-h-[92px] items-center gap-3.5 rounded-xl bg-white/[0.028] p-4 ring-1 ring-white/[0.06]">
+                          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary/85 ring-1 ring-primary/15">
+                            <Bell className="h-4 w-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground/82">
+                              Journal Reminders
+                            </div>
+                            <div className="mt-1.5 text-lg font-bold tracking-tight text-foreground leading-normal py-0.5">
+                              {(guardrailsData?.daily_loss_reminder ?? true) ? "On" : "Off"}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Bottom Cards: Recent Trades (Left) & Workspace Actions (Right) */}
+                  <div className="space-y-5">
+                    {/* C. Recent Trades */}
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground/80">
+                          Recent Trades
+                        </h4>
+                        <Link
+                          to="/trades"
+                          search={{ account: selected.id }}
+                          className="text-xs font-semibold text-primary transition-colors hover:text-primary-glow"
+                        >
+                          View account trades →
+                        </Link>
+                      </div>
+                      {selectedTrades.length === 0 ? (
+                        <div className="surface-card rounded-xl p-6 text-center">
+                          <p className="text-xs text-muted-foreground">
+                            No trades in this account yet.
+                          </p>
+                          <Link
+                            to="/trades"
+                            className="mt-3.5 inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground shadow-[var(--shadow-glow)] hover:brightness-110 transition"
+                          >
+                            <Plus className="h-3.5 w-3.5" /> Log a trade
+                          </Link>
+                        </div>
+                      ) : (
+                        <div className="overflow-hidden rounded-xl border border-white/[0.05] bg-white/[0.012]">
+                          <div className="space-y-1 p-2">
+                            {selectedTrades.slice(0, 3).map((trade) => {
+                              const status = getReviewStatus(trade);
+                              const resultLabel =
+                                trade.result === "win"
+                                  ? "WIN"
+                                  : trade.result === "loss"
+                                    ? "LOSS"
+                                    : trade.result === "breakeven"
+                                      ? "BE"
+                                      : "—";
+                              const resultClass =
+                                trade.result === "win"
+                                  ? "bg-success/10 text-success ring-success/20"
+                                  : trade.result === "loss"
+                                    ? "bg-destructive/10 text-destructive ring-destructive/20"
+                                    : "bg-info/10 text-info ring-info/20";
+                              return (
+                                <div
+                                  key={trade.id}
+                                  className="grid w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 rounded-xl px-3 py-3 text-left"
+                                >
+                                  <div className="min-w-0">
+                                    <div className="truncate text-sm font-semibold text-foreground/95">
+                                      {trade.instrument}
+                                    </div>
+                                    <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                                      <span>{formatDate(trade.trade_date)}</span>
+                                      <span
+                                        className={cn(
+                                          "rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wide",
+                                          REVIEW_STATUS_BADGE[status],
+                                        )}
+                                      >
+                                        {REVIEW_STATUS_LABEL[status]}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <span
+                                    className={cn(
+                                      "rounded-md px-2 py-0.5 text-[10px] font-bold tracking-wider ring-1",
+                                      resultClass,
+                                    )}
+                                  >
+                                    {resultLabel}
+                                  </span>
+                                  <span
+                                    className={cn(
+                                      "min-w-[70px] text-right text-sm font-semibold tabular-nums",
+                                      trade.achieved_rr != null &&
+                                        trade.achieved_rr > 0 &&
+                                        "text-success",
+                                      trade.achieved_rr != null &&
+                                        trade.achieved_rr < 0 &&
+                                        "text-destructive",
+                                      (trade.achieved_rr == null || trade.achieved_rr === 0) &&
+                                        "text-muted-foreground",
+                                    )}
+                                  >
+                                    {formatR(trade.achieved_rr)}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* D. Account Actions / Settings */}
+                    <div className="space-y-3">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground/80">
+                        Account Actions
+                      </h4>
+                      <div className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.018] p-4 sm:p-5">
+                        <button
+                          onClick={() => canDelete && setShowDeleteConfirm(true)}
+                          disabled={!canDelete}
+                          className={cn(
+                            "flex min-h-[76px] w-full items-center gap-4 rounded-xl border px-4 py-4 text-left transition",
+                            canDelete
+                              ? "cursor-pointer border-destructive/[0.08] bg-white/[0.018] text-destructive/75 hover:border-destructive/[0.16] hover:bg-destructive/[0.025] hover:text-destructive/85"
+                              : "cursor-not-allowed border-white/[0.06] bg-white/[0.03] text-muted-foreground/72",
+                          )}
+                        >
+                          <div
+                            className={cn(
+                              "grid h-10 w-10 shrink-0 place-items-center rounded-xl",
+                              canDelete
+                                ? "bg-destructive/[0.045] text-destructive/70 ring-1 ring-destructive/[0.1]"
+                                : "bg-white/[0.05] text-muted-foreground/75 ring-1 ring-white/[0.06]",
+                            )}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <div
+                              className={cn(
+                                "text-sm font-semibold",
+                                canDelete ? "text-destructive/82" : "text-muted-foreground/88",
+                              )}
+                            >
+                              Delete trading account
+                            </div>
+                            <div className="mt-1 text-[11px] leading-5">
+                              {canDelete
+                                ? "Delete this empty trading account workspace."
+                                : "Only empty trading accounts can be deleted."}
+                            </div>
+                          </div>
+                          <ChevronRight className="ml-auto h-4 w-4 shrink-0 text-current opacity-50" />
+                        </button>
+
+                        {!canDelete && (
+                          <p className="pl-1.5 text-[11px] leading-relaxed text-muted-foreground/70">
+                            Trading accounts with logged trades cannot be deleted. Your trade
+                            history stays preserved.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Confirmation and Action Dialog Modals */}
+
+                  {/* 2. Edit Workspace Dialog */}
+                  <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
+                    <DialogContent className="rounded-2xl border-white/[0.08] bg-[oklch(0.09_0.015_270)] max-w-md p-6">
+                      <DialogHeader>
+                        <DialogTitle className="text-base font-bold flex items-center gap-2 text-foreground">
+                          <Pencil className="h-4 w-4 text-primary" /> Edit details
+                        </DialogTitle>
+                      </DialogHeader>
+                      <div className="mt-4 space-y-4">
+                        <Field
+                          label="Trading account name"
+                          value={editForm.name}
+                          onChange={(v) => setEditForm((f) => ({ ...f, name: v }))}
+                          error={
+                            editNameDuplicate &&
+                            "You already have a trading account with this name."
+                          }
+                        />
+                        <Select
+                          label="Trading account type"
+                          value={editForm.account_type}
+                          onChange={(v) =>
+                            setEditForm((f) => ({
+                              ...f,
+                              account_type: (v || "personal") as TradingAccount["account_type"],
+                            }))
+                          }
+                          options={[
+                            { value: "personal", label: "Personal" },
+                            { value: "demo", label: "Demo" },
+                            { value: "live", label: "Live" },
+                            { value: "funded", label: "Funded" },
+                            { value: "backtest", label: "Backtest" },
+                          ]}
+                        />
+                        <Field
+                          label="Broker (optional)"
+                          value={editForm.broker}
+                          placeholder="Exness, Binance, Tradovate"
+                          onChange={(v) => setEditForm((f) => ({ ...f, broker: v }))}
+                        />
+                        <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
+                          <button
+                            type="button"
+                            onClick={() => !selected.is_active && setActiveM.mutate(selected.id)}
+                            disabled={selected.is_active || setActiveM.isPending}
+                            className={cn(
+                              "flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-xs font-semibold transition",
+                              selected.is_active
+                                ? "cursor-default bg-white/[0.025] text-foreground ring-1 ring-white/[0.06]"
+                                : "bg-white/[0.03] text-foreground ring-1 ring-white/[0.06] hover:bg-primary/10 hover:text-primary hover:ring-primary/20",
+                              setActiveM.isPending && "opacity-60",
+                            )}
+                          >
+                            <span className="inline-flex items-center gap-2">
+                              <CheckCircle2
+                                className={cn(
+                                  "h-4 w-4",
+                                  selected.is_active
+                                    ? "text-primary/80"
+                                    : "text-muted-foreground/70",
+                                )}
+                              />
+                              {selected.is_active
+                                ? "Active trading account"
+                                : "Set as active account"}
+                            </span>
+                            {selected.is_active && (
+                              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-primary ring-1 ring-primary/15">
+                                Active
+                              </span>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="mt-6 flex justify-end gap-2">
+                        <button
+                          onClick={() => setShowEditModal(false)}
+                          className="rounded-xl bg-white/[0.04] px-4 py-2.5 text-xs font-semibold text-muted-foreground hover:text-foreground border border-white/[0.06]"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={() => updateAccountM.mutate()}
+                          disabled={
+                            updateAccountM.isPending || !editForm.name.trim() || editNameDuplicate
+                          }
+                          className="rounded-xl bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground shadow-[var(--shadow-glow)] hover:brightness-110 disabled:opacity-50"
+                        >
+                          {updateAccountM.isPending ? "Saving..." : "Save changes"}
+                        </button>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+
+                  {/* 3. Edit Risk Rules & Guardrails Dialog */}
+                  <Dialog open={showRulesModal} onOpenChange={setShowRulesModal}>
+                    <DialogContent className="rounded-2xl border-white/[0.08] bg-[oklch(0.09_0.015_270)] max-w-md p-6">
+                      <DialogHeader>
+                        <DialogTitle className="text-base font-bold flex items-center gap-2 text-foreground">
+                          <SettingsIcon className="h-4 w-4 text-primary" /> Risk rules & guardrails
+                        </DialogTitle>
+                      </DialogHeader>
+                      <p className="text-[11px] leading-relaxed text-muted-foreground">
+                        Journal reminders only. EdgeScope does not place, block, or manage broker
+                        trades.
+                      </p>
+                      <div className="mt-4 space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <Field
+                            label="Max risk per trade (%)"
+                            type="number"
+                            value={rulesForm.max_risk_per_trade_pct}
+                            placeholder="e.g. 1"
+                            onChange={(v) =>
+                              setRulesForm((f) => ({ ...f, max_risk_per_trade_pct: v }))
+                            }
+                          />
+                          <Field
+                            label="Daily loss limit (%)"
+                            type="number"
+                            value={rulesForm.daily_loss_limit_pct}
+                            placeholder="e.g. 3"
+                            onChange={(v) =>
+                              setRulesForm((f) => ({ ...f, daily_loss_limit_pct: v }))
+                            }
+                          />
+                          <Field
+                            label="Max trades per day"
+                            type="number"
+                            value={rulesForm.max_trades_per_day}
+                            placeholder="e.g. 3"
+                            onChange={(v) => setRulesForm((f) => ({ ...f, max_trades_per_day: v }))}
+                          />
+                        </div>
+                        <div className="pt-2">
+                          <ToggleRow
+                            label="Journal reminder toggle"
+                            description="Show a reminder when a logged trade exceeds your daily loss limit setting."
+                            checked={rulesForm.daily_loss_reminder}
+                            onChange={(checked) =>
+                              setRulesForm((f) => ({ ...f, daily_loss_reminder: checked }))
+                            }
+                          />
+                        </div>
+                      </div>
+                      <div className="mt-6 flex justify-end gap-2">
+                        <button
+                          onClick={() => setShowRulesModal(false)}
+                          className="rounded-xl bg-white/[0.04] px-4 py-2.5 text-xs font-semibold text-muted-foreground hover:text-foreground border border-white/[0.06]"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={() => updateRulesM.mutate()}
+                          disabled={updateRulesM.isPending}
+                          className="rounded-xl bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground shadow-[var(--shadow-glow)] hover:brightness-110 disabled:opacity-50"
+                        >
+                          {updateRulesM.isPending ? "Saving..." : "Save rules"}
+                        </button>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+
+                  {/* 4. Delete Confirm Modal */}
+                  <ConfirmDialog
+                    open={showDeleteConfirm}
+                    onOpenChange={setShowDeleteConfirm}
+                    title={`Delete "${selected.name}"?`}
+                    description="This deletes only the trading account/workspace, not your EdgeScope user account."
+                    confirmLabel="Delete trading account"
+                    destructive
+                    loading={deleteM.isPending}
+                    onConfirm={() => deleteM.mutate()}
+                  />
+                </div>
+              ) : (
+                <div className="grid h-full min-h-[400px] place-items-center p-8 text-center">
+                  <div className="max-w-sm rounded-2xl bg-white/[0.025] px-6 py-8 ring-1 ring-white/[0.05]">
+                    <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-primary/10 text-primary ring-1 ring-primary/20">
+                      <WalletCards className="h-5 w-5" />
+                    </div>
+                    <h3 className="mt-4 text-sm font-bold text-foreground">Select an account</h3>
+                  </div>
+                </div>
+              )}
+            </div>
+          </>
+        )}
       </div>
       {createAccountDialog}
     </PageShell>
@@ -1135,10 +1216,15 @@ function InfoCard({
   }[tone];
 
   return (
-    <div className="surface-card group flex min-h-[126px] flex-col justify-between rounded-2xl p-5">
+    <div className="surface-card flex min-h-[118px] flex-col justify-between rounded-2xl p-5">
       <div className="flex items-start gap-3">
         {Icon && (
-          <span className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gradient-to-br ring-1 transition-transform duration-200 group-hover:scale-105", toneClass)}>
+          <span
+            className={cn(
+              "grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gradient-to-br ring-1",
+              toneClass,
+            )}
+          >
             <Icon className="h-4 w-4" />
           </span>
         )}
@@ -1152,11 +1238,7 @@ function InfoCard({
         <div
           className={cn(
             "text-2xl font-bold tracking-tight",
-            highlight
-              ? positive
-                ? "text-success"
-                : "text-destructive"
-              : "text-foreground",
+            highlight ? (positive ? "text-success" : "text-destructive") : "text-foreground",
           )}
         >
           {value}

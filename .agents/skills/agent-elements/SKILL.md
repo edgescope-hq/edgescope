@@ -130,15 +130,15 @@ import { AgentChat } from "@/components/agent-elements";
 ### Tool cards
 
 All tool cards accept a `part` prop of type
-`Extract<UIMessage["parts"][number], { type: \`tool-<Name>\` }>` from the AI
-SDK. Register them via `toolRenderers` on `AgentChat`/`MessageList`:
+`Extract<UIMessage["parts"][number], { type: \`tool-<Name>\` }>`from the AI
+SDK. Register them via`toolRenderers`on`AgentChat`/`MessageList`:
 
 ```tsx
 <AgentChat
   toolRenderers={{
     Bash: BashTool,
     Edit: EditTool,
-    Write: EditTool,      // Write reuses EditTool
+    Write: EditTool, // Write reuses EditTool
     Search: SearchTool,
     WebSearch: SearchTool,
     TodoWrite: TodoTool,
@@ -229,7 +229,7 @@ const models = [
       <ModelPicker models={models} defaultValue="sonnet" />
     </>
   }
-/>
+/>;
 ```
 
 ### Custom tool renderer

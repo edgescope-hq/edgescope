@@ -2,47 +2,19 @@ import { safeError } from "@/lib/server-errors";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { recordedR, tradeDollarPnl } from "@/lib/trade-mappers";
 
 export type AccountStats = {
   starting_balance: number;
   current_balance: number;
   net_pnl: number;
-  win_rate: number; // 0..100
+  win_rate: number | null; // 0..100
   profit_factor: number | null;
   avg_r_multiple: number | null;
   max_drawdown: number; // absolute currency drawdown
   days_traded: number;
   total_trades: number;
 };
-
-// Per-trade $ P/L.
-// Prefers the user-entered reward_amount (the actual P/L), and falls back to
-// achieved_rr × risk%/100 × account_size when reward_amount is absent.
-function tradeDollarPnl(t: {
-  achieved_rr: number | null;
-  risk_percentage: number | null;
-  account_size: number | null;
-  result: string | null;
-  reward_amount?: number | string | null;
-}): number {
-  const rawReward = t.reward_amount;
-  if (rawReward != null && rawReward !== "") {
-    const n = Number(rawReward);
-    if (isFinite(n)) {
-      // Sign by result: losses are negative; wins positive; BE = 0.
-      if (t.result === "loss") return -Math.abs(n);
-      if (t.result === "win") return Math.abs(n);
-      if (t.result === "breakeven") return 0;
-      return n;
-    }
-  }
-  const r = Number(t.achieved_rr ?? 0);
-  const risk = Number(t.risk_percentage ?? 0) / 100;
-  const size = Number(t.account_size ?? 0);
-  if (!isFinite(r) || !isFinite(risk) || !isFinite(size)) return 0;
-  const pnl = r * risk * size;
-  return isFinite(pnl) ? pnl : 0;
-}
 
 export const getAccountStats = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -60,7 +32,7 @@ export const getAccountStats = createServerFn({ method: "GET" })
     const { data: rows, error } = await context.supabase
       .from("trades")
       .select(
-        "achieved_rr, risk_percentage, account_size, result, trade_date, is_paper, reward_amount",
+        "achieved_rr, risk_percentage, account_size, result, trade_date, is_paper, reward_amount, pnl_amount",
       )
       .eq("user_id", context.userId)
       .eq("account_id", data.account_id);
@@ -89,15 +61,16 @@ export const getAccountStats = createServerFn({ method: "GET" })
     let maxDrawdown = 0;
 
     for (const t of ordered) {
-      const pnl = tradeDollarPnl(t);
+      const pnl = tradeDollarPnl(t) ?? 0;
       equity += pnl;
       if (equity > peak) peak = equity;
       const dd = peak - equity;
       if (dd > maxDrawdown) maxDrawdown = dd;
 
       if (t.trade_date) dayCounter.add(t.trade_date);
-      if (t.achieved_rr != null) {
-        rSum += Number(t.achieved_rr);
+      const r = recordedR(t.achieved_rr);
+      if (r != null) {
+        rSum += r;
         rCount += 1;
       }
       if (t.result === "win") {
@@ -115,7 +88,7 @@ export const getAccountStats = createServerFn({ method: "GET" })
       starting_balance: startingBalance,
       current_balance: equity,
       net_pnl: equity - startingBalance,
-      win_rate: decided > 0 ? (wins / decided) * 100 : 0,
+      win_rate: decided > 0 ? (wins / decided) * 100 : null,
       profit_factor: grossWin > 0 && grossLoss > 0 ? grossWin / grossLoss : null,
       avg_r_multiple: rCount > 0 ? rSum / rCount : null,
       max_drawdown: maxDrawdown,

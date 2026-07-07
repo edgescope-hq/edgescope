@@ -17,10 +17,10 @@ const SESSION_RANGES: Record<string, TzRange> = {
 
 // ICT killzones — defined in New York local time, with DST handled.
 const KILLZONE_RANGES: Record<string, TzRange> = {
-  asian: { tz: "America/New_York", startH: 20, endH: 24 },        // 8pm–12am ET
-  london: { tz: "America/New_York", startH: 2, endH: 5 },          // 2am–5am ET
-  new_york: { tz: "America/New_York", startH: 7, endH: 10 },       // 7am–10am ET
-  london_close: { tz: "America/New_York", startH: 10, endH: 12 },  // 10am–12pm ET
+  asian: { tz: "America/New_York", startH: 20, endH: 24 }, // 8pm–12am ET
+  london: { tz: "America/New_York", startH: 2, endH: 5 }, // 2am–5am ET
+  new_york: { tz: "America/New_York", startH: 7, endH: 10 }, // 7am–10am ET
+  london_close: { tz: "America/New_York", startH: 10, endH: 12 }, // 10am–12pm ET
 };
 
 // Returns "today" (in the given tz) as Y/M/D parts.
@@ -102,7 +102,8 @@ function overlapToIST(a: TzRange, b: TzRange, ref: Date): string {
 export function sessionISTRange(v: string, ref: Date = new Date()): string {
   if (v === "sydney_tokyo") return overlapToIST(SESSION_RANGES.sydney, SESSION_RANGES.tokyo, ref);
   if (v === "tokyo_london") return overlapToIST(SESSION_RANGES.tokyo, SESSION_RANGES.london, ref);
-  if (v === "london_new_york") return overlapToIST(SESSION_RANGES.london, SESSION_RANGES.new_york, ref);
+  if (v === "london_new_york")
+    return overlapToIST(SESSION_RANGES.london, SESSION_RANGES.new_york, ref);
   const r = SESSION_RANGES[v];
   return r ? rangeToIST(r, ref) : "";
 }

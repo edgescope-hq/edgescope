@@ -7,7 +7,11 @@ export const exportMyData = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { supabase, userId } = context;
     const [trades, screenshots, notes] = await Promise.all([
-      supabase.from("trades").select("*").eq("user_id", userId).order("trade_date", { ascending: false }),
+      supabase
+        .from("trades")
+        .select("*")
+        .eq("user_id", userId)
+        .order("trade_date", { ascending: false }),
       supabase.from("trade_screenshots").select("*").eq("user_id", userId),
       supabase.from("sticky_notes").select("*").eq("user_id", userId),
     ]);

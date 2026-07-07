@@ -6,7 +6,11 @@ import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-q
 import { useServerFn } from "@tanstack/react-start";
 import { cn } from "@/lib/utils";
 import {
-  listNotes, createNote, updateNote, deleteNote, ensureMeditationNote,
+  listNotes,
+  createNote,
+  updateNote,
+  deleteNote,
+  ensureMeditationNote,
 } from "@/lib/notes.functions";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -27,11 +31,11 @@ type NoteColor = "purple" | "green" | "amber" | "blue" | "rose" | "default";
 // Whole-card tinted surface (background + border) for each color choice.
 const cardTint: Record<NoteColor, string> = {
   default: "bg-primary/10 ring-primary/25 border-primary/20",
-  purple:  "bg-primary/10 ring-primary/25 border-primary/20",
-  green:   "bg-success/10 ring-success/25 border-success/20",
-  amber:   "bg-warning/10 ring-warning/25 border-warning/20",
-  blue:    "bg-info/10 ring-info/25 border-info/20",
-  rose:    "bg-destructive/10 ring-destructive/25 border-destructive/20",
+  purple: "bg-primary/10 ring-primary/25 border-primary/20",
+  green: "bg-success/10 ring-success/25 border-success/20",
+  amber: "bg-warning/10 ring-warning/25 border-warning/20",
+  blue: "bg-info/10 ring-info/25 border-info/20",
+  rose: "bg-destructive/10 ring-destructive/25 border-destructive/20",
 };
 
 const colorSwatch: Record<NoteColor, string> = {
@@ -46,8 +50,12 @@ const colorSwatch: Record<NoteColor, string> = {
 const PALETTE: NoteColor[] = ["purple", "green", "amber", "blue", "rose"];
 
 type Note = {
-  id: string; title: string | null; content: string;
-  color: string; pinned: boolean; kind?: string | null;
+  id: string;
+  title: string | null;
+  content: string;
+  color: string;
+  pinned: boolean;
+  kind?: string | null;
 };
 
 function NotesPage() {
@@ -66,13 +74,18 @@ function NotesPage() {
   useEffect(() => {
     if (seeded.current) return;
     seeded.current = true;
-    ensureMed().then((r) => {
-      if (r?.created) qc.invalidateQueries({ queryKey: ["notes"] });
-    }).catch(() => {});
+    ensureMed()
+      .then((r) => {
+        if (r?.created) qc.invalidateQueries({ queryKey: ["notes"] });
+      })
+      .catch(() => {});
   }, [ensureMed, qc]);
 
   const [editing, setEditing] = useState<string | null>(null);
-  const [draft, setDraft] = useState<{ title: string; content: string }>({ title: "", content: "" });
+  const [draft, setDraft] = useState<{ title: string; content: string }>({
+    title: "",
+    content: "",
+  });
   const [confirmDelId, setConfirmDelId] = useState<string | null>(null);
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["notes"] });
@@ -104,7 +117,10 @@ function NotesPage() {
   const saveM = useMutation({
     mutationFn: (p: { id: string; title: string; content: string }) =>
       upd({ data: { id: p.id, patch: { title: p.title, content: p.content } } }),
-    onSuccess: () => { setEditing(null); invalidate(); },
+    onSuccess: () => {
+      setEditing(null);
+      invalidate();
+    },
     onError: (e: Error) => toast.error(e.message),
   });
   const colorM = useMutation({
@@ -125,17 +141,25 @@ function NotesPage() {
     <div className="px-6 py-8 md:px-10 md:py-10">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <motion.h1 initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }} className="text-3xl font-bold tracking-tight md:text-4xl">
+          <motion.h1
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+            className="text-3xl font-bold tracking-tight md:text-4xl"
+          >
             Trading Desk
           </motion.h1>
-          <p className="mt-1.5 text-sm text-muted-foreground">Mantras, checklists, reminders and pre-trade tools — your daily desk.</p>
+          <p className="mt-1.5 text-sm text-muted-foreground">
+            Mantras, checklists, reminders and pre-trade tools — your daily desk.
+          </p>
         </div>
         <button
           onClick={() => addM.mutate(PALETTE[notes.length % PALETTE.length])}
           disabled={addM.isPending}
           className="group inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] transition-all duration-300 hover:shadow-[var(--shadow-glow-lg)] hover:brightness-110 disabled:opacity-50"
         >
-          <Plus className="h-4 w-4 transition-transform duration-300 group-hover:rotate-90" /> New note
+          <Plus className="h-4 w-4 transition-transform duration-300 group-hover:rotate-90" /> New
+          note
         </button>
       </div>
 
@@ -197,7 +221,9 @@ function NotesPage() {
                     aria-pressed={n.pinned}
                     className={cn(
                       "grid h-7 w-7 place-items-center rounded-lg ring-1 ring-white/[0.08] transition-all duration-200",
-                      n.pinned ? "bg-primary/15 text-primary" : "bg-white/[0.06] text-muted-foreground hover:text-foreground",
+                      n.pinned
+                        ? "bg-primary/15 text-primary"
+                        : "bg-white/[0.06] text-muted-foreground hover:text-foreground",
                     )}
                   >
                     <Pin className={cn("h-3.5 w-3.5", n.pinned && "fill-current")} />
@@ -226,9 +252,16 @@ function NotesPage() {
                     className="mt-3 w-full whitespace-pre-wrap rounded-lg bg-white/[0.06] px-2.5 py-2 text-sm leading-relaxed text-foreground/80 outline-none ring-1 ring-white/[0.1] focus:ring-primary/40"
                   />
                   <div className="mt-3 flex justify-end gap-2">
-                    <button onClick={() => setEditing(null)} className="rounded-lg px-3 py-1.5 text-xs text-muted-foreground transition-colors duration-200 hover:text-foreground">Cancel</button>
                     <button
-                      onClick={() => saveM.mutate({ id: n.id, title: draft.title, content: draft.content })}
+                      onClick={() => setEditing(null)}
+                      className="rounded-lg px-3 py-1.5 text-xs text-muted-foreground transition-colors duration-200 hover:text-foreground"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() =>
+                        saveM.mutate({ id: n.id, title: draft.title, content: draft.content })
+                      }
                       disabled={saveM.isPending}
                       className="rounded-lg bg-primary px-3.5 py-1.5 text-xs font-semibold text-primary-foreground transition-all duration-200 hover:brightness-110 disabled:opacity-50"
                     >
@@ -241,7 +274,9 @@ function NotesPage() {
                   onClick={() => beginEdit(n)}
                   className="mt-3 cursor-text whitespace-pre-wrap font-sans text-sm leading-relaxed text-foreground/80"
                 >
-                  {n.content || <span className="text-muted-foreground/60">Click to add content…</span>}
+                  {n.content || (
+                    <span className="text-muted-foreground/60">Click to add content…</span>
+                  )}
                 </pre>
               )}
               {n.pinned && !isMeditation && (
@@ -255,13 +290,20 @@ function NotesPage() {
       </div>
       <ConfirmDialog
         open={confirmDelId !== null}
-        onOpenChange={(open) => { if (!open) setConfirmDelId(null); }}
+        onOpenChange={(open) => {
+          if (!open) setConfirmDelId(null);
+        }}
         title="Delete this note?"
         description="The note will be permanently removed. This action cannot be undone."
         confirmLabel="Delete note"
         destructive
         loading={removeM.isPending}
-        onConfirm={() => { if (confirmDelId) { removeM.mutate(confirmDelId); setConfirmDelId(null); } }}
+        onConfirm={() => {
+          if (confirmDelId) {
+            removeM.mutate(confirmDelId);
+            setConfirmDelId(null);
+          }
+        }}
       />
     </div>
   );
@@ -293,7 +335,9 @@ function MeditationBody() {
         return r - 1;
       });
     }, 1000);
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
   }, [running]);
 
   const mm = String(Math.floor(remaining / 60)).padStart(2, "0");
@@ -302,7 +346,9 @@ function MeditationBody() {
   return (
     <div className="mt-4">
       <div className="grid place-items-center rounded-xl bg-white/[0.06] py-5 ring-1 ring-white/[0.08]">
-        <div className="font-display text-4xl font-bold tabular-nums tracking-tight">{mm}:{ss}</div>
+        <div className="font-display text-4xl font-bold tabular-nums tracking-tight">
+          {mm}:{ss}
+        </div>
         <div className="mt-1 text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
           {running ? "Breathe…" : "Ready"}
         </div>
@@ -316,7 +362,9 @@ function MeditationBody() {
               onClick={() => setDuration(d)}
               className={cn(
                 "rounded-md px-3 py-1 text-xs font-semibold transition-all duration-200 disabled:opacity-40",
-                duration === d ? "bg-primary/20 text-foreground" : "text-muted-foreground hover:text-foreground",
+                duration === d
+                  ? "bg-primary/20 text-foreground"
+                  : "text-muted-foreground hover:text-foreground",
               )}
             >
               {d} min
@@ -325,14 +373,20 @@ function MeditationBody() {
         </div>
         {running ? (
           <button
-            onClick={() => { setRunning(false); setRemaining(duration * 60); }}
+            onClick={() => {
+              setRunning(false);
+              setRemaining(duration * 60);
+            }}
             className="inline-flex items-center gap-1.5 rounded-lg bg-destructive/15 px-3 py-1.5 text-xs font-semibold text-destructive ring-1 ring-destructive/20 hover:bg-destructive/20"
           >
             <Square className="h-3.5 w-3.5" /> Stop
           </button>
         ) : (
           <button
-            onClick={() => { setRemaining(duration * 60); setRunning(true); }}
+            onClick={() => {
+              setRemaining(duration * 60);
+              setRunning(true);
+            }}
             className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground shadow-[var(--shadow-glow)] hover:brightness-110"
           >
             <Play className="h-3.5 w-3.5" /> Start
@@ -345,7 +399,9 @@ function MeditationBody() {
 
 function playDoneSound() {
   try {
-    const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    const Ctx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     if (!Ctx) return;
     const ctx = new Ctx();
     const playTone = (freq: number, start: number, dur: number) => {
@@ -353,15 +409,19 @@ function playDoneSound() {
       const gain = ctx.createGain();
       osc.frequency.value = freq;
       osc.type = "sine";
-      osc.connect(gain); gain.connect(ctx.destination);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
       const t0 = ctx.currentTime + start;
       gain.gain.setValueAtTime(0.0001, t0);
       gain.gain.exponentialRampToValueAtTime(0.25, t0 + 0.02);
       gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-      osc.start(t0); osc.stop(t0 + dur + 0.05);
+      osc.start(t0);
+      osc.stop(t0 + dur + 0.05);
     };
     playTone(528, 0, 0.6);
     playTone(660, 0.35, 0.8);
     setTimeout(() => ctx.close().catch(() => {}), 1800);
-  } catch { /* no-op */ }
+  } catch {
+    /* no-op */
+  }
 }

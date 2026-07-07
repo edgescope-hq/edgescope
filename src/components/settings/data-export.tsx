@@ -44,7 +44,11 @@ export function DataExportSection() {
       const data = await fetchExport();
       const stamp = new Date().toISOString().slice(0, 10);
       if (format === "json") {
-        download(`edge-journal-export-${stamp}.json`, JSON.stringify(data, null, 2), "application/json");
+        download(
+          `edge-journal-export-${stamp}.json`,
+          JSON.stringify(data, null, 2),
+          "application/json",
+        );
       } else {
         const csv = toCSV(data.trades as Record<string, unknown>[]);
         download(`edge-journal-trades-${stamp}.csv`, csv, "text/csv");
@@ -67,7 +71,11 @@ export function DataExportSection() {
           disabled={busy !== null}
           className="inline-flex items-center gap-2 rounded-xl bg-white/[0.04] px-4 py-2.5 text-sm font-semibold ring-1 ring-white/[0.06] transition-all duration-200 hover:bg-white/[0.08] hover:ring-white/[0.1] disabled:opacity-50"
         >
-          {busy === "csv" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+          {busy === "csv" ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Download className="h-4 w-4" />
+          )}
           Export CSV
         </button>
         <button
@@ -75,7 +83,11 @@ export function DataExportSection() {
           disabled={busy !== null}
           className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] transition-all duration-200 hover:brightness-110 disabled:opacity-50"
         >
-          {busy === "json" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+          {busy === "json" ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Download className="h-4 w-4" />
+          )}
           Export JSON
         </button>
       </div>

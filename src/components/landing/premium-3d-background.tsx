@@ -10,7 +10,15 @@ import * as THREE from "three";
 
 type Scale = "hero" | "auth";
 
-function Particles({ count, mouse, scale }: { count: number; mouse: React.RefObject<THREE.Vector2>; scale: Scale }) {
+function Particles({
+  count,
+  mouse,
+  scale,
+}: {
+  count: number;
+  mouse: React.RefObject<THREE.Vector2>;
+  scale: Scale;
+}) {
   const mesh = useRef<THREE.InstancedMesh>(null!);
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const spread = scale === "hero" ? 18 : 12;
@@ -281,7 +289,10 @@ export function Premium3DBackground({ scale = "hero" }: { scale?: Scale }) {
   // Fallback: static gradient + radial purple glow
   if (!hasWebGL || reducedMotion) {
     return (
-      <div aria-hidden className="pointer-events-none fixed inset-0 z-0 overflow-hidden bg-[#05030a]">
+      <div
+        aria-hidden
+        className="pointer-events-none fixed inset-0 z-0 overflow-hidden bg-[#05030a]"
+      >
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,oklch(0.68_0.23_295/0.28),transparent_55%),radial-gradient(ellipse_at_bottom_right,oklch(0.7_0.2_330/0.18),transparent_50%)]" />
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_30%,#05030a_100%)]" />
       </div>

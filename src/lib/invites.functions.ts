@@ -12,7 +12,10 @@ function generateCode() {
 }
 
 async function assertAdmin(ctx: { supabase: any; userId: string }) {
-  const { data, error } = await ctx.supabase.rpc("has_role", { _user_id: ctx.userId, _role: "admin" });
+  const { data, error } = await ctx.supabase.rpc("has_role", {
+    _user_id: ctx.userId,
+    _role: "admin",
+  });
   if (error) throw safeError(error);
   if (!data) throw new Error("Forbidden: admin only");
 }
@@ -74,7 +77,10 @@ export const bootstrapFirstAdmin = createServerFn({ method: "POST" })
       .from("user_roles")
       .insert({ user_id: context.userId, role: "admin" });
     if (insErr) throw safeError(insErr);
-    await supabaseAdmin.from("profiles").update({ community_access: true }).eq("id", context.userId);
+    await supabaseAdmin
+      .from("profiles")
+      .update({ community_access: true })
+      .eq("id", context.userId);
     return { promoted: true };
   });
 
@@ -110,8 +116,10 @@ export const setInviteDisabled = createServerFn({ method: "POST" })
 export const amIAdmin = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
-      .rpc("has_role", { _user_id: context.userId, _role: "admin" });
+    const { data, error } = await context.supabase.rpc("has_role", {
+      _user_id: context.userId,
+      _role: "admin",
+    });
     if (error) throw safeError(error);
     return { admin: !!data };
   });
@@ -122,7 +130,9 @@ export const listAllUsers = createServerFn({ method: "GET" })
     await assertAdmin(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-    const { data: usersResp, error: uErr } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
+    const { data: usersResp, error: uErr } = await supabaseAdmin.auth.admin.listUsers({
+      perPage: 1000,
+    });
     if (uErr) throw safeError(uErr);
 
     const ids = usersResp.users.map((u) => u.id);
@@ -139,7 +149,7 @@ export const listAllUsers = createServerFn({ method: "GET" })
         return {
           id: u.id,
           email: u.email ?? "",
-          name: p?.display_name ?? p?.username ?? (u.email?.split("@")[0] ?? ""),
+          name: p?.display_name ?? p?.username ?? u.email?.split("@")[0] ?? "",
           join_date: u.created_at,
           profile_created_at: p?.created_at ?? null,
           community_access: !!p?.community_access,

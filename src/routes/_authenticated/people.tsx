@@ -50,7 +50,9 @@ function PeoplePage() {
         <div>
           <ShieldCheck className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
           <h1 className="text-lg font-semibold">Admins only</h1>
-          <p className="mt-1 text-sm text-muted-foreground">You don't have permission to view this page.</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            You don't have permission to view this page.
+          </p>
         </div>
       </div>
     );
@@ -73,14 +75,21 @@ function PeoplePage() {
 
 function UsersTable() {
   const listFn = useServerFn(listAllUsers);
-  const { data: users, isLoading, error } = useQuery({
-    queryKey: ["all-users"], queryFn: () => listFn(),
+  const {
+    data: users,
+    isLoading,
+    error,
+  } = useQuery({
+    queryKey: ["all-users"],
+    queryFn: () => listFn(),
   });
 
   return (
     <div className="glow-card overflow-hidden rounded-2xl">
       {isLoading ? (
-        <div className="grid place-items-center py-16"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+        <div className="grid place-items-center py-16">
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        </div>
       ) : error ? (
         <div className="p-6 text-sm text-rose-300">{(error as Error).message}</div>
       ) : !users?.length ? (
@@ -97,10 +106,15 @@ function UsersTable() {
             </thead>
             <tbody>
               {users.map((u) => (
-                <tr key={u.id} className="border-b border-white/[0.045] transition-colors last:border-0 hover:bg-white/[0.025]">
+                <tr
+                  key={u.id}
+                  className="border-b border-white/[0.045] transition-colors last:border-0 hover:bg-white/[0.025]"
+                >
                   <td className="px-4 py-3 font-semibold text-foreground">{u.name || "—"}</td>
                   <td className="px-4 py-3 text-muted-foreground">{u.email}</td>
-                  <td className="px-4 py-3 text-muted-foreground tabular-nums">{fmt(u.join_date)}</td>
+                  <td className="px-4 py-3 text-muted-foreground tabular-nums">
+                    {fmt(u.join_date)}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -114,7 +128,11 @@ function UsersTable() {
 function fmt(d: string | null | undefined) {
   if (!d) return "—";
   try {
-    return new Date(d).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" });
+    return new Date(d).toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+    });
   } catch {
     return "—";
   }

@@ -38,7 +38,9 @@ export function EmotionPopup({
 
   // Auto-dismiss after 20s if untouched
   useEffect(() => {
-    const t = setTimeout(() => { if (!selected && !save.isPending) onClose(); }, 20000);
+    const t = setTimeout(() => {
+      if (!selected && !save.isPending) onClose();
+    }, 20000);
     return () => clearTimeout(t);
   }, [selected, save.isPending, onClose]);
 
@@ -60,11 +62,17 @@ export function EmotionPopup({
       >
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-[10px] font-semibold tracking-[0.18em] text-primary">JUST LOGGED</div>
+            <div className="text-[10px] font-semibold tracking-[0.18em] text-primary">
+              JUST LOGGED
+            </div>
             <h3 className="mt-0.5 text-sm font-semibold">How did you feel?</h3>
             <p className="mt-0.5 text-[11px] text-muted-foreground">Tap an emotion or dismiss.</p>
           </div>
-          <button onClick={onClose} aria-label="Dismiss" className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-white/[0.06] hover:text-foreground">
+          <button
+            onClick={onClose}
+            aria-label="Dismiss"
+            className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-white/[0.06] hover:text-foreground"
+          >
             <X className="h-3.5 w-3.5" />
           </button>
         </div>
@@ -93,7 +101,10 @@ export function EmotionPopup({
         </div>
 
         <div className="mt-3 flex justify-end">
-          <button onClick={onClose} className="text-[11px] font-medium text-muted-foreground hover:text-foreground">
+          <button
+            onClick={onClose}
+            className="text-[11px] font-medium text-muted-foreground hover:text-foreground"
+          >
             Skip
           </button>
         </div>
