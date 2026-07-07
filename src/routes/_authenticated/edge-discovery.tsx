@@ -18,7 +18,7 @@ import type { LucideIcon } from "lucide-react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { listTrades } from "@/lib/trades.functions";
-import { formatTradeWhen, isPaperTrade, rrNum, type DbTrade } from "@/lib/trade-mappers";
+import { formatTradeWhen, isPaperTrade, recordedR, rrNum, type DbTrade } from "@/lib/trade-mappers";
 import { getReviewStatus } from "@/lib/review-status";
 import {
   buildScopeDiscoveries,
@@ -56,7 +56,7 @@ type ReviewedTrade = DbTrade & {
 function asReviewed(t: DbTrade): ReviewedTrade {
   return {
     ...t,
-    rr: t.achieved_rr == null || t.achieved_rr === "" ? null : rrNum(t.achieved_rr),
+    rr: recordedR(t.achieved_rr),
     category: ((t.categories ?? []).find((c) => c?.trim()) ?? "").trim(),
     directionLabel: t.direction === "short" ? "Short" : "Long",
   };
@@ -495,6 +495,11 @@ function DiscoveryCard({
           </div>
           <h3 className="mt-2.5 text-base font-bold leading-snug">{discovery.title}</h3>
           <p className="mt-1 text-sm leading-6 text-muted-foreground">{discovery.description}</p>
+          {discovery.dateRange && (
+            <div className="mt-2 text-[11px] text-muted-foreground/60">
+              Evidence timeframe: {discovery.dateRange}
+            </div>
+          )}
         </div>
         <span
           className={cn(

@@ -11,7 +11,7 @@ import { SESSIONS } from "@/lib/trade-constants";
 import { localDateKey, localTimeKey, type DbTrade } from "@/lib/trade-mappers";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 import { listTradingAccounts, createTradingAccount } from "@/lib/trading-accounts.functions";
-import { parsePlannedRR } from "@/lib/scope-discovery";
+import { parsePlannedRR } from "@/lib/planned-rr";
 import { getGuardrails } from "@/lib/guardrails.functions";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {

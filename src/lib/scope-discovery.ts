@@ -15,6 +15,7 @@
 import type { DbTrade } from "@/lib/trade-mappers";
 import { recordedR } from "@/lib/trade-mappers";
 import { sessionLabel } from "@/lib/trade-constants";
+import { parsePlannedRR, rrBucketLabel } from "@/lib/planned-rr";
 
 // ============ Public types ============
 
@@ -51,6 +52,7 @@ export type ScopeDiscovery = {
   caution: string;
   matchingTradeIds: string[];
   rankScore: number;
+  dateRange?: string | null;
 };
 
 export type ScopeScanResult = {
@@ -105,32 +107,7 @@ type ScopeTrade = {
   timeMs: number | null;
 };
 
-/** Parse planned_rr text: "2", "2.5R", "1:3", "1/3" → numeric reward multiple. */
-export function parsePlannedRR(raw: number | string | null | undefined): number | null {
-  if (raw == null) return null;
-  if (typeof raw === "number") return Number.isFinite(raw) && raw > 0 && raw <= 50 ? raw : null;
-  const text = raw.trim().toUpperCase().replace(/R$/, "").trim();
-  if (!text) return null;
-  const ratio = text.match(/^(\d+(?:\.\d+)?)\s*[:/]\s*(\d+(?:\.\d+)?)$/);
-  if (ratio) {
-    const risk = Number(ratio[1]);
-    const reward = Number(ratio[2]);
-    if (!Number.isFinite(risk) || !Number.isFinite(reward) || risk <= 0) return null;
-    const rr = reward / risk;
-    return rr > 0 && rr <= 50 ? rr : null;
-  }
-  const n = Number(text);
-  return Number.isFinite(n) && n > 0 && n <= 50 ? n : null;
-}
 
-export function rrBucketLabel(rr: number | null): string | null {
-  if (rr == null) return null;
-  if (rr < 1) return "Planned RR under 1R";
-  if (rr < 2) return "Planned RR 1–2R";
-  if (rr < 3) return "Planned RR 2–3R";
-  if (rr < 4) return "Planned RR 3–4R";
-  return "Planned RR 4R+";
-}
 
 function toScopeTrade(t: DbTrade): ScopeTrade {
   const setup = ((t.categories ?? []).find((c) => c && c.trim()) ?? "").trim() || null;
@@ -235,11 +212,16 @@ function evaluateComparison(input: ComparisonInput): ScopeDiscovery | null {
   const deltaAvgR = m.avgR - b.avgR;
   const deltaWinRate = m.winRate != null && b.winRate != null ? m.winRate - b.winRate : null;
 
+  const isSmallSample = m.sampleSize < 20 || b.sampleSize < 20;
+  const reqDeltaR = isSmallSample ? 0.5 : MIN_ABS_DELTA_R;
+  const reqDeltaRWithWin = isSmallSample ? 0.25 : MIN_DELTA_R_WITH_WIN;
+  const reqDeltaWin = isSmallSample ? 15 : MIN_ABS_DELTA_WIN;
+
   const significant =
-    Math.abs(deltaAvgR) >= MIN_ABS_DELTA_R ||
+    Math.abs(deltaAvgR) >= reqDeltaR ||
     (deltaWinRate != null &&
-      Math.abs(deltaWinRate) >= MIN_ABS_DELTA_WIN &&
-      Math.abs(deltaAvgR) >= MIN_DELTA_R_WITH_WIN);
+      Math.abs(deltaWinRate) >= reqDeltaWin &&
+      Math.abs(deltaAvgR) >= reqDeltaRWithWin);
   if (!significant) return null;
 
   const direction: DiscoveryDirection = deltaAvgR >= 0 ? "positive" : "negative";
@@ -265,6 +247,26 @@ function evaluateComparison(input: ComparisonInput): ScopeDiscovery | null {
     0.25 * Math.max(0, input.factorCount - 2) -
     (input.fieldCompleteness < MIN_FIELD_COMPLETENESS ? 0.2 : 0);
 
+  const dates = input.matching.map((t) => t.tradeDate).filter(Boolean);
+  let dateRange: string | null = null;
+  if (dates.length > 0) {
+    const sortedDates = [...dates].sort();
+    const minDate = sortedDates[0];
+    const maxDate = sortedDates[sortedDates.length - 1];
+    const fmt = (dStr: string) => {
+      try {
+        return new Date(dStr + "T00:00:00").toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        });
+      } catch {
+        return dStr;
+      }
+    };
+    dateRange = minDate === maxDate ? fmt(minDate) : `${fmt(minDate)} – ${fmt(maxDate)}`;
+  }
+
   return {
     id: input.id,
     category: input.category,
@@ -287,6 +289,7 @@ function evaluateComparison(input: ComparisonInput): ScopeDiscovery | null {
     caution: SCOPE_CAUTION,
     matchingTradeIds: m.ids,
     rankScore: Number(rankScore.toFixed(4)),
+    dateRange,
   };
 }
 
@@ -454,23 +457,59 @@ function scanRiskBehavior(trades: ScopeTrade[]): ScopeDiscovery[] {
   // 2) Losses that ran beyond planned risk (achieved R at or below -1.3R).
   const losses = trades.filter((t) => t.result === "loss" && t.r != null);
   const overruns = losses.filter((t) => (t.r ?? 0) <= -1.3);
-  const containedLosses = losses.filter((t) => (t.r ?? 0) > -1.3);
-  if (losses.length > 0 && overruns.length / losses.length >= 0.2) {
-    const discovery = evaluateComparison({
-      id: "risk:loss-overrun",
-      category: "risk",
-      matching: overruns,
-      baselineTrades: containedLosses,
-      baselineLabel: "Your losses contained near 1R",
-      conditionChips: [{ key: "loss", label: "Loss beyond -1.3R" }],
-      conditionLabel: "Losses running past planned risk",
-      factorCount: 2,
-      fieldCompleteness: 1,
-      title: () => "Some losses are running well past planned risk",
-      description: () =>
-        "A repeated share of your reviewed losses closed beyond -1.3R. Review how these stops were handled — this is a review clue, not an instruction.",
-    });
-    if (discovery) discoveries.push(discovery);
+  if (losses.length >= 15 && overruns.length >= 10) {
+    const overrunShare = overruns.length / losses.length;
+    if (overrunShare >= 0.2) {
+      const sharePct = Math.round(overrunShare * 100);
+      const confidence = confidenceFromMatching(overruns.length);
+      const rankScore = 1.0 + overruns.length / 80 + CONFIDENCE_WEIGHT[confidence];
+
+      const dates = overruns.map((t) => t.tradeDate).filter(Boolean);
+      let dateRange: string | null = null;
+      if (dates.length > 0) {
+        const sortedDates = [...dates].sort();
+        const minDate = sortedDates[0];
+        const maxDate = sortedDates[sortedDates.length - 1];
+        const fmt = (dStr: string) => {
+          try {
+            return new Date(dStr + "T00:00:00").toLocaleDateString("en-US", {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+            });
+          } catch {
+            return dStr;
+          }
+        };
+        dateRange = minDate === maxDate ? fmt(minDate) : `${fmt(minDate)} – ${fmt(maxDate)}`;
+      }
+
+      const discovery: ScopeDiscovery = {
+        id: "risk:loss-overrun",
+        category: "risk",
+        direction: "negative",
+        title: "A meaningful share of your losses are exceeding planned risk",
+        description: `${sharePct}% of your reviewed losses (${overruns.length} of ${losses.length}) ran worse than -1.3R. Review how these stops were handled — this is a review clue, not an instruction.`,
+        conditionChips: [{ key: "loss", label: "Loss beyond -1.3R" }],
+        matchingTradeCount: overruns.length,
+        winRate: null,
+        avgR: statsOf(overruns).avgR,
+        baseline: {
+          label: "All reviewed losses",
+          sampleSize: losses.length,
+          winRate: null,
+          avgR: statsOf(losses).avgR,
+        },
+        deltaWinRate: null,
+        deltaAvgR: null,
+        confidence,
+        caution: SCOPE_CAUTION,
+        matchingTradeIds: overruns.map((t) => t.id),
+        rankScore: Number(rankScore.toFixed(4)),
+        dateRange,
+      };
+      discoveries.push(discovery);
+    }
   }
 
   // 3) Oversized risk vs normal risk (needs risk_amount on enough trades).
@@ -641,30 +680,6 @@ function scanJournalPatterns(trades: ScopeTrade[]): ScopeDiscovery[] {
   });
   if (reasoningDiscovery) discoveries.push(reasoningDiscovery);
 
-  // 2) Trades missing a parseable planned RR vs trades with one.
-  const noRR = trades.filter((t) => t.rrBucket == null);
-  const withRR = trades.filter((t) => t.rrBucket != null);
-  if (reviewedCount > 0 && noRR.length / reviewedCount >= 0.3) {
-    const missingRR = evaluateComparison({
-      id: "journal:missing-planned-rr",
-      category: "journal",
-      matching: noRR,
-      baselineTrades: withRR,
-      baselineLabel: "Your trades with a planned RR",
-      conditionChips: [{ key: "review", label: "No planned RR recorded" }],
-      conditionLabel: "Trades without a planned RR",
-      factorCount: 2,
-      fieldCompleteness: 1,
-      title: (d) =>
-        d === "negative"
-          ? "Trades logged without a planned RR are underperforming"
-          : "Trades logged without a planned RR differ from your planned trades",
-      description: () =>
-        "A repeated gap: these trades were logged without a planned RR, and their results differ from your planned trades. This is a review clue about planning consistency.",
-    });
-    if (missingRR) discoveries.push(missingRR);
-  }
-
   return discoveries;
 }
 
@@ -686,6 +701,15 @@ function selectDiscoveries(candidates: ScopeDiscovery[]): ScopeDiscovery[] {
 
   for (const discovery of ranked) {
     if (selected.length >= MAX_TOTAL) break;
+    if (discovery.id.startsWith("risk:rr-bucket:")) {
+      const bucket = discovery.id.replace("risk:rr-bucket:", "");
+      const hasSetupCombo = candidates.some(
+        (c) =>
+          c.category === "setup" &&
+          c.conditionChips.some((chip) => chip.key === "rr" && chip.label === bucket),
+      );
+      if (hasSetupCombo) continue;
+    }
     const signature = signatureOf(discovery);
     if (seenSignatures.has(signature)) continue; // same trade set, keep strongest only
     const count = perCategory.get(discovery.category) ?? 0;
