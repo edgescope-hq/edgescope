@@ -438,12 +438,13 @@ export const listGroupTrades = createServerFn({ method: "POST" })
     if (!memberIds.length) return [];
 
     const { data: shares, error: shareErr } = await supabaseAdmin
-      .from("community_trade_shares" as any)
-      .select("trade_id")
+      .from("community_trade_shares")
+      .select("trade_id, include_reasoning")
       .eq("group_id", data.groupId);
     if (shareErr) throw safeError(shareErr);
     if (!shares?.length) return [];
-    const sharedTradeIds = (shares as any[]).map((s) => s.trade_id);
+    const sharedTradeIds = shares.map((s) => s.trade_id);
+    const reasoningByTrade = new Map(shares.map((s) => [s.trade_id, s.include_reasoning]));
 
     const { data: trades, error } = await supabaseAdmin
       .from("trades")
@@ -466,7 +467,7 @@ export const listGroupTrades = createServerFn({ method: "POST" })
         .in("id", userIds),
       supabaseAdmin
         .from("trade_screenshots")
-        .select("id, trade_id, storage_path")
+        .select("id, trade_id, user_id, storage_path")
         .in("trade_id", tradeIds),
       supabaseAdmin
         .from("community_trade_comments")
@@ -476,9 +477,11 @@ export const listGroupTrades = createServerFn({ method: "POST" })
     ]);
 
     const pMap = new Map((profs ?? []).map((p) => [p.id, p]));
+    const ownerByTrade = new Map(trades.map((t) => [t.id, t.user_id]));
+    const safeShots = (shots ?? []).filter((s) => ownerByTrade.get(s.trade_id) === s.user_id);
     const signedByPath = new Map<string, string>();
     await Promise.all(
-      (shots ?? []).map(async (s) => {
+      safeShots.map(async (s) => {
         const { data: signed } = await supabaseAdmin.storage
           .from("trade-screenshots")
           .createSignedUrl(s.storage_path, 60 * 60);
@@ -486,7 +489,7 @@ export const listGroupTrades = createServerFn({ method: "POST" })
       }),
     );
     const shotsByTrade = new Map<string, { id: string; storage_path: string }[]>();
-    for (const s of shots ?? []) {
+    for (const s of safeShots) {
       if (!shotsByTrade.has(s.trade_id)) shotsByTrade.set(s.trade_id, []);
       shotsByTrade.get(s.trade_id)!.push({ id: s.id, storage_path: s.storage_path });
     }
@@ -501,7 +504,7 @@ export const listGroupTrades = createServerFn({ method: "POST" })
         instrument: t.instrument,
         direction: (t.direction as "long" | "short" | null) ?? null,
         result: (t.result as "win" | "loss" | "breakeven" | null) ?? null,
-        reasoning: t.reasoning ?? null,
+        reasoning: reasoningByTrade.get(t.id) ? (t.reasoning ?? null) : null,
         user_id: t.user_id,
         trader_edge_id: p?.edge_id ?? "",
         trader_display: p?.display_name ?? p?.username ?? "Trader",
@@ -584,7 +587,7 @@ export const addComment = createServerFn({ method: "POST" })
 
     // Verify trade exists and is shared to this exact group via community_trade_shares
     const { data: shareExists } = await supabaseAdmin
-      .from("community_trade_shares" as any)
+      .from("community_trade_shares")
       .select("id")
       .eq("trade_id", data.tradeId)
       .eq("group_id", data.groupId)
@@ -727,51 +730,8 @@ export const markNotificationsRead = createServerFn({ method: "POST" })
 export const setTradeShared = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) => z.object({ tradeId: z.string().uuid(), shared: z.boolean() }).parse(d))
-  .handler(async ({ data, context }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: trade, error } = await supabaseAdmin
-      .from("trades")
-      .update({ is_shared: data.shared })
-      .eq("id", data.tradeId)
-      .eq("user_id", context.userId)
-      .select("id, instrument")
-      .maybeSingle();
-    if (error) throw safeError(error);
-    if (!trade) throw new Error("Trade not found");
-
-    if (data.shared) {
-      // Notify each group the user belongs to (excluding self).
-      const { data: groups } = await supabaseAdmin
-        .from("community_group_members")
-        .select("group_id")
-        .eq("user_id", context.userId);
-      const groupIds = (groups ?? []).map((g) => g.group_id);
-      if (groupIds.length) {
-        const { data: others } = await supabaseAdmin
-          .from("community_group_members")
-          .select("user_id, group_id")
-          .in("group_id", groupIds)
-          .neq("user_id", context.userId);
-        const { data: prof } = await supabaseAdmin
-          .from("profiles")
-          .select("edge_id, display_name, username")
-          .eq("id", context.userId)
-          .maybeSingle();
-        const rows = (others ?? []).map((o) => ({
-          user_id: o.user_id,
-          type: "trade_shared" as const,
-          payload: {
-            group_id: o.group_id,
-            trade_id: trade.id,
-            instrument: trade.instrument,
-            trader_edge_id: prof?.edge_id ?? "",
-            trader_display: prof?.display_name ?? prof?.username ?? "Trader",
-          },
-        }));
-        if (rows.length) await supabaseAdmin.from("community_notifications").insert(rows);
-      }
-    }
-    return { ok: true };
+  .handler(async () => {
+    throw new Error("Global sharing is disabled. Use group-specific sharing.");
   });
 
 export const getTradeShares = createServerFn({ method: "GET" })
@@ -780,12 +740,15 @@ export const getTradeShares = createServerFn({ method: "GET" })
   .handler(async ({ data, context }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: shares, error } = await supabaseAdmin
-      .from("community_trade_shares" as any)
-      .select("group_id")
+      .from("community_trade_shares")
+      .select("group_id, include_reasoning")
       .eq("trade_id", data.tradeId)
       .eq("user_id", context.userId);
     if (error) throw safeError(error);
-    return ((shares as any[]) ?? []).map((s) => s.group_id) as string[];
+    return {
+      groupIds: (shares ?? []).map((s) => s.group_id),
+      includeReasoning: (shares ?? []).some((s) => s.include_reasoning),
+    };
   });
 
 export const shareTradeToGroups = createServerFn({ method: "POST" })
@@ -795,6 +758,7 @@ export const shareTradeToGroups = createServerFn({ method: "POST" })
       .object({
         tradeId: z.string().uuid(),
         groupIds: z.array(z.string().uuid()),
+        includeReasoning: z.boolean().default(false),
       })
       .parse(d),
   )
@@ -803,7 +767,7 @@ export const shareTradeToGroups = createServerFn({ method: "POST" })
     // Verify trade ownership
     const { data: trade } = await context.supabase
       .from("trades")
-      .select("id, instrument, is_shared")
+      .select("id, instrument")
       .eq("id", data.tradeId)
       .eq("user_id", context.userId)
       .maybeSingle();
@@ -811,11 +775,11 @@ export const shareTradeToGroups = createServerFn({ method: "POST" })
 
     // Get current shares
     const { data: currentShares } = await supabaseAdmin
-      .from("community_trade_shares" as any)
+      .from("community_trade_shares")
       .select("group_id")
       .eq("trade_id", data.tradeId)
       .eq("user_id", context.userId);
-    const currentGroupIds = new Set(((currentShares as any[]) ?? []).map((s) => s.group_id));
+    const currentGroupIds = new Set((currentShares ?? []).map((s) => s.group_id));
     const nextGroupIds = new Set(data.groupIds);
 
     const toDelete = Array.from(currentGroupIds).filter((g) => !nextGroupIds.has(g));
@@ -823,7 +787,7 @@ export const shareTradeToGroups = createServerFn({ method: "POST" })
 
     if (toDelete.length) {
       const { error: delErr } = await supabaseAdmin
-        .from("community_trade_shares" as any)
+        .from("community_trade_shares")
         .delete()
         .eq("trade_id", data.tradeId)
         .eq("user_id", context.userId)
@@ -846,9 +810,10 @@ export const shareTradeToGroups = createServerFn({ method: "POST" })
           trade_id: data.tradeId,
           group_id: g,
           user_id: context.userId,
+          include_reasoning: data.includeReasoning,
         }));
         const { error: insErr } = await supabaseAdmin
-          .from("community_trade_shares" as any)
+          .from("community_trade_shares")
           .insert(insertRows);
         if (insErr) throw safeError(insErr);
 
@@ -883,10 +848,14 @@ export const shareTradeToGroups = createServerFn({ method: "POST" })
       }
     }
 
-    // Update trades.is_shared flag for backwards compatibility/UI display
-    const hasAnyShares = data.groupIds.length > 0;
-    if (trade.is_shared !== hasAnyShares) {
-      await supabaseAdmin.from("trades").update({ is_shared: hasAnyShares }).eq("id", data.tradeId);
+    if (data.groupIds.length) {
+      const { error: updateErr } = await supabaseAdmin
+        .from("community_trade_shares")
+        .update({ include_reasoning: data.includeReasoning })
+        .eq("trade_id", data.tradeId)
+        .eq("user_id", context.userId)
+        .in("group_id", data.groupIds);
+      if (updateErr) throw safeError(updateErr);
     }
 
     return { ok: true };

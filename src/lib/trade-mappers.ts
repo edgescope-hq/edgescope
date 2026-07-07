@@ -41,10 +41,11 @@ export type DbTrade = {
 
 // Project a DB trade onto the analytics input shape.
 export function toAnalytics(t: DbTrade): TradeRow {
+  const closedResult = t.result === "win" || t.result === "loss" || t.result === "breakeven";
   return {
     id: t.id,
     result: t.result,
-    achieved_rr: t.achieved_rr,
+    achieved_rr: closedResult ? t.achieved_rr : null,
     grade: t.grade,
     session: t.session,
     killzone: t.killzone,
@@ -104,6 +105,8 @@ export function tradeDollarPnl(t: {
   reward_amount?: number | string | null;
   pnl_amount?: number | string | null;
 }): number | null {
+  if (t.result !== "win" && t.result !== "loss" && t.result !== "breakeven") return null;
+
   const actual = finiteNumber(t.pnl_amount) ?? finiteNumber(t.reward_amount);
   if (actual != null) {
     if (t.result === "loss") return -Math.abs(actual);

@@ -34,15 +34,12 @@ function AuthenticatedLayout() {
     queryFn: () => getProfileFn(),
   });
 
-  const emailPrefixVal = profile?.email?.split("@")[0]?.trim().toLowerCase() ?? "";
-  const usernameVal = (profile?.username ?? "").trim().toLowerCase();
-  const displayVal = (profile?.display_name ?? "").trim().toLowerCase();
   const profileIncomplete =
-    profile && (!displayVal || displayVal === emailPrefixVal || usernameVal === emailPrefixVal);
+    profile && (profile as { profile_completed?: boolean | null }).profile_completed !== true;
 
   useEffect(() => {
-    if (profileIncomplete && location.pathname !== "/" && location.pathname !== "/dashboard") {
-      navigate({ to: "/", replace: true });
+    if (profileIncomplete && location.pathname !== "/dashboard") {
+      navigate({ to: "/dashboard", replace: true });
     }
   }, [profileIncomplete, location.pathname, navigate]);
   const cancelDeletionM = useMutation({

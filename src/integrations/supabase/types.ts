@@ -237,6 +237,48 @@ export type Database = {
           },
         ];
       };
+      community_trade_shares: {
+        Row: {
+          created_at: string;
+          group_id: string;
+          id: string;
+          include_reasoning: boolean;
+          trade_id: string;
+          user_id: string;
+        };
+        Insert: {
+          created_at?: string;
+          group_id: string;
+          id?: string;
+          include_reasoning?: boolean;
+          trade_id: string;
+          user_id: string;
+        };
+        Update: {
+          created_at?: string;
+          group_id?: string;
+          id?: string;
+          include_reasoning?: boolean;
+          trade_id?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "community_trade_shares_group_id_fkey";
+            columns: ["group_id"];
+            isOneToOne: false;
+            referencedRelation: "community_groups";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "community_trade_shares_trade_id_fkey";
+            columns: ["trade_id"];
+            isOneToOne: false;
+            referencedRelation: "trades";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       invites: {
         Row: {
           code: string;
@@ -315,6 +357,7 @@ export type Database = {
           has_seen_intro: boolean;
           id: string;
           notification_preferences: Json;
+          profile_completed: boolean;
           updated_at: string;
           username: string;
         };
@@ -329,6 +372,7 @@ export type Database = {
           has_seen_intro?: boolean;
           id: string;
           notification_preferences?: Json;
+          profile_completed?: boolean;
           updated_at?: string;
           username: string;
         };
@@ -343,6 +387,7 @@ export type Database = {
           has_seen_intro?: boolean;
           id?: string;
           notification_preferences?: Json;
+          profile_completed?: boolean;
           updated_at?: string;
           username?: string;
         };

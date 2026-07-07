@@ -258,7 +258,6 @@ export function TradeFormModal({
         categories: editing?.categories ?? [],
         subcategories: editing?.subcategories ?? [],
         mistake_tags: editing?.mistake_tags ?? [],
-        is_shared: editing?.is_shared ?? false,
       };
 
       const trade = editing

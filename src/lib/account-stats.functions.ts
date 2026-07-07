@@ -68,7 +68,10 @@ export const getAccountStats = createServerFn({ method: "GET" })
       if (dd > maxDrawdown) maxDrawdown = dd;
 
       if (t.trade_date) dayCounter.add(t.trade_date);
-      const r = recordedR(t.achieved_rr);
+      const r =
+        t.result === "win" || t.result === "loss" || t.result === "breakeven"
+          ? recordedR(t.achieved_rr)
+          : null;
       if (r != null) {
         rSum += r;
         rCount += 1;

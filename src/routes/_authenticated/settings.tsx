@@ -98,7 +98,7 @@ function SettingsPage() {
   const [displayName, setDisplayName] = useState("");
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
-  const [providerLabel, setProviderLabel] = useState("Email/password");
+  const [providerLabel, setProviderLabel] = useState("Google");
 
   useEffect(() => {
     if (!profile) return;
@@ -111,10 +111,10 @@ function SettingsPage() {
       .getUser()
       .then(({ data }) => {
         const providers = data.user?.app_metadata?.providers as string[] | undefined;
-        setProviderLabel(providers?.includes("google") ? "Google" : "Email/password");
+        setProviderLabel(providers?.includes("google") ? "Google" : "Google");
       })
       .catch(() => {
-        setProviderLabel("Email/password");
+        setProviderLabel("Google");
       });
   }, []);
 
@@ -136,7 +136,7 @@ function SettingsPage() {
       qc.invalidateQueries({ queryKey: ["profile"] });
       setDeleteOpen(false);
       toast.success(
-        `Your EdgeScope account is scheduled for deletion on ${formatDate(result.deletion_scheduled_for)}. You can cancel this before then.`,
+        `Your EdgeScope account deletion request is scheduled for ${formatDate(result.deletion_scheduled_for)}. You can cancel this before then.`,
       );
     },
     onError: (e: Error) => toast.error(e.message),
@@ -150,18 +150,6 @@ function SettingsPage() {
     },
     onError: (e: Error) => toast.error(e.message),
   });
-
-  const sendReset = async () => {
-    if (!profile?.email) {
-      toast.error("No email on profile");
-      return;
-    }
-    const { error } = await supabase.auth.resetPasswordForEmail(profile.email, {
-      redirectTo: `${window.location.origin}/reset-password`,
-    });
-    if (error) toast.error(error.message);
-    else toast.success("Password reset email sent");
-  };
 
   const copyEdgeId = async () => {
     const edgeId = (profile as { edge_id?: string | null } | undefined)?.edge_id;
@@ -317,19 +305,10 @@ function SettingsPage() {
                 <h2 className="text-lg font-bold">Security</h2>
               </div>
               <div className="rounded-xl bg-white/[0.03] p-4 ring-1 ring-white/[0.06]">
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <div className="text-sm font-semibold">Change password</div>
-                    <div className="text-xs text-muted-foreground">
-                      We'll email you a reset link.
-                    </div>
-                  </div>
-                  <button
-                    onClick={sendReset}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-white/[0.06] px-3.5 py-2 text-xs font-semibold ring-1 ring-white/[0.08] transition hover:bg-white/[0.1]"
-                  >
-                    Send reset email
-                  </button>
+                <div className="text-sm font-semibold">Google sign-in</div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  EdgeScope uses Google sign-in only. Manage password and recovery settings in your
+                  Google account.
                 </div>
               </div>
               <div className="rounded-xl bg-white/[0.03] p-4 ring-1 ring-white/[0.06]">
@@ -361,8 +340,8 @@ function SettingsPage() {
                     </div>
                     <div className="mt-1 text-xs leading-5 text-muted-foreground">
                       {deletionScheduledFor
-                        ? `Account deletion scheduled for ${formatDate(deletionScheduledFor)}. You can cancel before that date.`
-                        : "Schedule permanent deletion of your profile, login, trades, reviews, screenshots, playbook notes, and private review content."}
+                        ? `Account deletion request scheduled for ${formatDate(deletionScheduledFor)}. You can cancel before that date.`
+                        : "Request deletion of your profile, login, trades, reviews, screenshots, playbook notes, and private review content."}
                     </div>
                   </div>
                   {deletionScheduledFor ? (
@@ -447,11 +426,11 @@ function SettingsPage() {
                 <Trash2 className="h-5 w-5" />
               </div>
               <div>
-                <h2 className="text-lg font-bold">Schedule EdgeScope account deletion?</h2>
+                <h2 className="text-lg font-bold">Request EdgeScope account deletion?</h2>
                 <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                  This schedules your EdgeScope account for permanent deletion after 15 days unless
-                  you cancel. This includes profile, trading accounts, trades, reviews, screenshots,
-                  playbook notes, avatar, and private review/community data where applicable.
+                  This marks your EdgeScope account for deletion review after 15 days unless you
+                  cancel. Permanent deletion is completed by the EdgeScope team until automated
+                  account purging is available.
                 </p>
               </div>
             </div>
@@ -480,7 +459,7 @@ function SettingsPage() {
                 disabled={deleteConfirmText !== "DELETE" || scheduleDeletionM.isPending}
                 className="rounded-xl bg-destructive/[0.48] px-5 py-2.5 text-sm font-semibold text-destructive-foreground ring-1 ring-destructive/[0.14] transition hover:bg-destructive/[0.62] disabled:opacity-45"
               >
-                {scheduleDeletionM.isPending ? "Scheduling..." : "Schedule account deletion"}
+                {scheduleDeletionM.isPending ? "Scheduling..." : "Request account deletion"}
               </button>
             </div>
           </motion.div>

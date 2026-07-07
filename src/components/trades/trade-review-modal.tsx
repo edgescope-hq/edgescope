@@ -148,7 +148,7 @@ export function TradeReviewModal({
       } = await supabase.auth.getUser();
       if (!user) return 0;
       const { data, error } = await supabase
-        .from("community_trade_shares" as any)
+        .from("community_trade_shares")
         .select("trade_id")
         .eq("user_id", user.id);
       if (error) {
@@ -170,6 +170,7 @@ export function TradeReviewModal({
   const [inKillzone, setInKillzone] = useState(false);
   const [tradeDate, setTradeDate] = useState<string>("");
   const [sharedGroupIds, setSharedGroupIds] = useState<string[]>([]);
+  const [includeReasoning, setIncludeReasoning] = useState(false);
   const [previewShot, setPreviewShot] = useState<Shot | null>(null);
   const [confirmShotDelete, setConfirmShotDelete] = useState<Shot | null>(null);
   const [hydrated, setHydrated] = useState(false);
@@ -194,7 +195,8 @@ export function TradeReviewModal({
 
   useEffect(() => {
     if (initialShares !== undefined && !sharesHydrated) {
-      setSharedGroupIds(initialShares);
+      setSharedGroupIds(initialShares.groupIds);
+      setIncludeReasoning(initialShares.includeReasoning);
       setSharesHydrated(true);
     }
   }, [initialShares, sharesHydrated]);
@@ -297,6 +299,7 @@ export function TradeReviewModal({
           data: {
             tradeId: trade.id,
             groupIds: canToggleShare ? sharedGroupIds : [],
+            includeReasoning: canToggleShare ? includeReasoning : false,
           },
         }),
       ]);
@@ -829,6 +832,16 @@ export function TradeReviewModal({
                     {sharedGroupIds.length} {sharedGroupIds.length === 1 ? "group" : "groups"}{" "}
                     selected
                   </div>
+                  <label className="mt-2 flex cursor-pointer items-center gap-2 rounded-lg bg-white/[0.03] px-3 py-2 text-xs text-muted-foreground ring-1 ring-white/[0.05]">
+                    <input
+                      type="checkbox"
+                      checked={includeReasoning}
+                      disabled={sharedGroupIds.length === 0}
+                      onChange={(event) => setIncludeReasoning(event.target.checked)}
+                      className="h-4 w-4 accent-primary"
+                    />
+                    <span>Include reasoning</span>
+                  </label>
                 </div>
               )}
             </div>

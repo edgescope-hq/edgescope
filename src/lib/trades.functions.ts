@@ -4,6 +4,11 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { checkRateLimitOrThrow } from "@/lib/rate-limiter";
 import { localDateKey, localTimeKey } from "@/lib/trade-mappers";
+import type { Database } from "@/integrations/supabase/types";
+
+type TradeListRow = Database["public"]["Tables"]["trades"]["Row"] & {
+  trade_screenshots: { id: string }[] | null;
+};
 
 const tradeSchema = z.object({
   market: z.enum(["forex", "crypto", "stocks", "indices", "futures", "commodities", "other"]),
@@ -34,7 +39,6 @@ const tradeSchema = z.object({
   mistake_tags: z.array(z.string().max(64)).max(20).default([]),
   categories: z.array(z.string().max(64)).max(20).default([]),
   subcategories: z.array(z.string().max(64)).max(20).default([]),
-  is_shared: z.boolean().default(false),
   // New journal/P&L fields (Phase 1 cleanup)
   risk_amount: z.number().nullable().optional(),
   reward_amount: z.number().nullable().optional(),
@@ -188,15 +192,23 @@ export const deleteTrade = createServerFn({ method: "POST" })
 export const listTrades = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
-      .from("trades")
-      .select("*, trade_screenshots(id)")
-      .eq("user_id", context.userId)
-      .order("trade_date", { ascending: false })
-      .order("created_at", { ascending: false })
-      .limit(500);
-    if (error) throw safeError(error);
-    return data;
+    const pageSize = 500;
+    const rows: TradeListRow[] = [];
+
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await context.supabase
+        .from("trades")
+        .select("*, trade_screenshots(id)")
+        .eq("user_id", context.userId)
+        .order("trade_date", { ascending: false })
+        .order("created_at", { ascending: false })
+        .range(from, from + pageSize - 1);
+      if (error) throw safeError(error);
+      rows.push(...((data ?? []) as TradeListRow[]));
+      if (!data || data.length < pageSize) break;
+    }
+
+    return rows;
   });
 
 export const getTrade = createServerFn({ method: "GET" })

@@ -108,6 +108,7 @@ type DashboardProfile = {
   display_name: string | null;
   email: string | null;
   has_seen_intro: boolean;
+  profile_completed: boolean;
 } | null;
 
 function emailPrefix(email?: string | null) {
@@ -127,10 +128,7 @@ function suggestedUsername(profile: DashboardProfile) {
 
 function isProfileIncomplete(profile: DashboardProfile) {
   if (!profile) return false;
-  const prefix = emailPrefix(profile.email);
-  const username = normalizeHandle(profile.username);
-  const display = normalizeHandle(profile.display_name);
-  return !display || display === prefix || username === prefix;
+  return profile.profile_completed !== true;
 }
 
 const card = {

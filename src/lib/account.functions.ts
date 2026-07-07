@@ -19,6 +19,12 @@ function isMissingDeletionColumns(error: { code?: string; message?: string } | n
   );
 }
 
+function isMissingProfileCompletedColumn(error: { code?: string; message?: string } | null) {
+  return (
+    error?.code === "42703" && error.message?.toLowerCase().includes("profiles.profile_completed")
+  );
+}
+
 function deletionScheduledFor(from = new Date()) {
   const date = new Date(from);
   date.setDate(date.getDate() + 15);
@@ -31,7 +37,7 @@ export const getProfile = createServerFn({ method: "GET" })
     const profileWithIntro = await context.supabase
       .from("profiles")
       .select(
-        "id, username, display_name, notification_preferences, has_seen_intro, deletion_requested_at, deletion_scheduled_for, deletion_cancelled_at",
+        "id, username, display_name, notification_preferences, has_seen_intro, deletion_requested_at, deletion_scheduled_for, deletion_cancelled_at, profile_completed",
       )
       .eq("id", context.userId)
       .maybeSingle();
@@ -39,7 +45,11 @@ export const getProfile = createServerFn({ method: "GET" })
     let data = profileWithIntro.data;
     let error = profileWithIntro.error;
 
-    if (isMissingIntroSeenColumn(error) || isMissingDeletionColumns(error)) {
+    if (
+      isMissingIntroSeenColumn(error) ||
+      isMissingDeletionColumns(error) ||
+      isMissingProfileCompletedColumn(error)
+    ) {
       const profileWithoutIntro = await context.supabase
         .from("profiles")
         .select("id, username, display_name, notification_preferences")
@@ -53,6 +63,7 @@ export const getProfile = createServerFn({ method: "GET" })
             deletion_requested_at: null,
             deletion_scheduled_for: null,
             deletion_cancelled_at: null,
+            profile_completed: true,
           }
         : null;
       error = profileWithoutIntro.error;
@@ -80,7 +91,11 @@ export const updateProfile = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { error } = await context.supabase
       .from("profiles")
-      .update({ username: data.username, display_name: data.display_name ?? null })
+      .update({
+        username: data.username,
+        display_name: data.display_name ?? null,
+        profile_completed: true,
+      })
       .eq("id", context.userId);
     if (error) {
       if (error.code === "23505") throw new Error("That username is already taken");

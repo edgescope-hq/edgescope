@@ -18,7 +18,7 @@ import type { LucideIcon } from "lucide-react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { listTrades } from "@/lib/trades.functions";
-import { formatTradeWhen, rrNum, type DbTrade } from "@/lib/trade-mappers";
+import { formatTradeWhen, isPaperTrade, rrNum, type DbTrade } from "@/lib/trade-mappers";
 import { getReviewStatus } from "@/lib/review-status";
 import {
   buildScopeDiscoveries,
@@ -115,7 +115,7 @@ function ScopePage() {
   const { data } = useSuspenseQuery({ queryKey: ["trades"], queryFn: () => list() });
   const trades = useMemo(() => (data ?? []) as DbTrade[], [data]);
   const reviewedDb = useMemo(
-    () => trades.filter((t) => getReviewStatus(t) === "reviewed"),
+    () => trades.filter((t) => !isPaperTrade(t) && getReviewStatus(t) === "reviewed"),
     [trades],
   );
   const reviewedTrades = useMemo(() => reviewedDb.map(asReviewed), [reviewedDb]);

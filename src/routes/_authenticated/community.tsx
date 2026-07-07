@@ -641,7 +641,7 @@ function TradesTab({ group, trades }: { group: GroupSummary; trades: GroupTrade[
           </h3>
           <p className="mt-1 text-sm text-muted-foreground">
             {trades.length === 0
-              ? "When you share a trade, group members will only see the screenshot, instrument, result, date, and reasoning."
+              ? "When you share a trade, group members will only see the screenshot, instrument, result, date, and any reasoning you choose to include."
               : "Try switching back to 'All time' or choosing a different filter option."}
           </p>
           {trades.length === 0 && (
