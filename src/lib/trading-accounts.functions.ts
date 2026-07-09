@@ -157,21 +157,50 @@ export const setActiveTradingAccount = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
-    // Clear current active, then set the chosen one. Two steps to satisfy the
-    // partial unique index.
+    const { data: target, error: targetErr } = await context.supabase
+      .from("trading_accounts")
+      .select("id, is_active")
+      .eq("id", data.id)
+      .eq("user_id", context.userId)
+      .maybeSingle();
+    if (targetErr) throw safeError(targetErr);
+    if (!target) throw new Error("Trading account not found");
+    if (target.is_active) return { ok: true };
+
+    const { data: previousActive, error: prevErr } = await context.supabase
+      .from("trading_accounts")
+      .select("id")
+      .eq("user_id", context.userId)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (prevErr) throw safeError(prevErr);
+
     const { error: clearErr } = await context.supabase
       .from("trading_accounts")
       .update({ is_active: false })
       .eq("user_id", context.userId)
-      .eq("is_active", true);
+      .eq("is_active", true)
+      .neq("id", data.id);
     if (clearErr) throw safeError(clearErr);
 
-    const { error } = await context.supabase
+    const { data: activated, error } = await context.supabase
       .from("trading_accounts")
       .update({ is_active: true, status: "active" })
       .eq("id", data.id)
-      .eq("user_id", context.userId);
-    if (error) throw safeError(error);
+      .eq("user_id", context.userId)
+      .select("id")
+      .maybeSingle();
+    if (error || !activated) {
+      if (previousActive?.id) {
+        await context.supabase
+          .from("trading_accounts")
+          .update({ is_active: true })
+          .eq("id", previousActive.id)
+          .eq("user_id", context.userId);
+      }
+      if (error) throw safeError(error);
+      throw new Error("Trading account not found");
+    }
     return { ok: true };
   });
 

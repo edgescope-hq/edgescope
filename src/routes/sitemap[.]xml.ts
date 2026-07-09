@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import type {} from "@tanstack/react-start";
+import { getPublicSiteUrl } from "@/lib/site-url";
 
-const BASE_URL = process.env.SITE_URL || "https://your-domain.com";
+const BASE_URL = getPublicSiteUrl();
 
 interface SitemapEntry {
   path: string;

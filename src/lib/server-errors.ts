@@ -31,7 +31,6 @@ export function safeError(
   fallback = "An unexpected error occurred. Please try again.",
 ): Error {
   // Always log the full error server-side for diagnostics.
-  // eslint-disable-next-line no-console
   console.error("[server-fn]", error);
   const code = error?.code;
   if (code && SAFE_MESSAGES[code]) return new Error(SAFE_MESSAGES[code]);

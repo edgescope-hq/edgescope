@@ -22,13 +22,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { EMOTIONS } from "@/lib/emotions";
-
-// These types are re-exported because other modules import them from this file.
-export type Grade = "A+" | "A" | "B+" | "B" | "C" | "D";
-export const GRADES: Grade[] = ["A+", "A", "B+", "B", "C", "D"];
-export type Taxonomy = Record<string, string[]>;
+import type { Taxonomy } from "@/lib/trade-constants";
 
 const modalTransition = { duration: 0.22, ease: [0.16, 1, 0.3, 1] as const };
+const modalPanelMotion = {
+  initial: { opacity: 0, y: 8, scale: 0.98 },
+  animate: { opacity: 1, y: 0, scale: 1 },
+  exit: { opacity: 0, y: 6, scale: 0.98 },
+};
 
 function formatRewardForResult(value: string, result: "WIN" | "LOSS" | "BE"): string {
   const trimmed = value.trim();
@@ -400,13 +401,12 @@ export function TradeFormModal({
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
+        transition={modalTransition}
         onClick={closeSuccess}
         className="fixed inset-0 z-50 grid place-items-center bg-black/25 backdrop-blur-[2px] p-4"
       >
         <motion.div
-          initial={{ scale: 0.98, y: 8 }}
-          animate={{ scale: 1, y: 0 }}
-          exit={{ scale: 0.98, y: 8 }}
+          {...modalPanelMotion}
           transition={modalTransition}
           onClick={(e: MouseEvent) => e.stopPropagation()}
           className="glow-card w-full max-w-md rounded-2xl p-6"
@@ -448,13 +448,12 @@ export function TradeFormModal({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
+      transition={modalTransition}
       onClick={handleClose}
       className="fixed inset-0 z-50 grid place-items-center bg-black/70 backdrop-blur-md p-4"
     >
       <motion.div
-        initial={{ scale: 0.98, y: 8 }}
-        animate={{ scale: 1, y: 0 }}
-        exit={{ scale: 0.98, y: 8 }}
+        {...modalPanelMotion}
         transition={modalTransition}
         onClick={(e: MouseEvent) => e.stopPropagation()}
         className="glow-card w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl p-6 shadow-[var(--shadow-elevated)]"

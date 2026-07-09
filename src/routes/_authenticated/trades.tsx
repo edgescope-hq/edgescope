@@ -4,6 +4,13 @@ import { useLocation, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import type { MouseEvent } from "react";
 import { Search, Plus, X, FolderPlus, LineChart, Trash2 } from "lucide-react";
+import {
+  Select as ShadcnSelect,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -18,12 +25,8 @@ import {
   REVIEW_STATUS_LABEL,
   type ReviewStatus,
 } from "@/lib/review-status";
-import {
-  TradeFormModal,
-  GRADES,
-  type Grade,
-  type Taxonomy,
-} from "@/components/trades/trade-form-modal";
+import { TradeFormModal } from "@/components/trades/trade-form-modal";
+import { GRADES, type Grade, type Taxonomy } from "@/lib/trade-constants";
 import { TradeReviewModal } from "@/components/trades/trade-review-modal";
 import { PageHeader, PageShell, PremiumEmptyState } from "@/components/ui/premium";
 
@@ -119,7 +122,6 @@ function TradesPage() {
   const del = useServerFn(deleteTrade);
   const update = useServerFn(updateTrade);
 
-  const [paperFilter, setPaperFilter] = useState<"ALL" | "LIVE" | "PAPER">("ALL");
   const { data } = useSuspenseQuery({ queryKey: ["trades"], queryFn: () => list() });
   const { data: accounts = [] } = useSuspenseQuery({
     queryKey: ["trading-accounts"],
@@ -143,14 +145,11 @@ function TradesPage() {
   const dbRows = useMemo(
     () =>
       allDbRows.filter((t) => {
-        const isPaper = (t as DbTrade & { is_paper?: boolean; status?: string }).is_paper === true;
         const isOpen = (t as DbTrade & { status?: string }).status === "open";
         if (isOpen) return false; // hide live open positions; they live on /paper
-        if (paperFilter === "PAPER") return isPaper;
-        if (paperFilter === "LIVE") return !isPaper;
         return true;
       }),
-    [allDbRows, paperFilter],
+    [allDbRows],
   );
   const rows = useMemo<Row[]>(() => {
     const total = dbRows.length;
@@ -253,7 +252,7 @@ function TradesPage() {
 
   useEffect(() => {
     setVisibleCount(10);
-  }, [q, filter, activeCategory, paperFilter, accountFilter]);
+  }, [q, filter, activeCategory, accountFilter]);
 
   const removeM = useMutation({
     mutationFn: (id: string) => del({ data: { id } }),
@@ -362,19 +361,22 @@ function TradesPage() {
             className="w-full rounded-xl bg-white/[0.04] py-2.5 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground/50 ring-1 ring-white/[0.06] transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary/40"
           />
         </div>
-        <select
-          value={accountFilter}
-          onChange={(event) => setAccountFilter(event.target.value)}
-          aria-label="Filter by account"
-          className="min-w-[160px] rounded-xl bg-white/[0.04] px-3.5 py-2.5 text-xs font-semibold text-muted-foreground ring-1 ring-white/[0.06] transition-all duration-200 hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
-        >
-          <option value="ALL">All accounts</option>
-          {accounts.map((account) => (
-            <option key={account.id} value={account.id}>
-              {account.name}
-            </option>
-          ))}
-        </select>
+        <ShadcnSelect value={accountFilter} onValueChange={setAccountFilter}>
+          <SelectTrigger
+            aria-label="Filter by account"
+            className="min-w-[140px] max-w-[200px] rounded-xl bg-white/[0.04] px-3 py-2 text-xs font-semibold text-muted-foreground ring-1 ring-white/[0.06] transition-all duration-200 hover:text-foreground focus:ring-2 focus:ring-primary/40 h-auto"
+          >
+            <SelectValue placeholder="All accounts" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ALL">All accounts</SelectItem>
+            {accounts.map((account) => (
+              <SelectItem key={account.id} value={account.id}>
+                {account.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </ShadcnSelect>
         <div className="flex items-center gap-1 rounded-xl bg-white/[0.03] p-1 ring-1 ring-white/[0.06]">
           {(["ALL", "WIN", "LOSS", "BE"] as const).map((f) => (
             <button
@@ -383,22 +385,6 @@ function TradesPage() {
               className={cn(
                 "rounded-lg px-3.5 py-1.5 text-xs font-semibold tracking-wider transition-all duration-200",
                 filter === f
-                  ? "bg-primary text-primary-foreground shadow-[var(--shadow-glow)]"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {f}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-1 rounded-xl bg-white/[0.03] p-1 ring-1 ring-white/[0.06]">
-          {(["ALL", "LIVE", "PAPER"] as const).map((f) => (
-            <button
-              key={f}
-              onClick={() => setPaperFilter(f)}
-              className={cn(
-                "rounded-lg px-3.5 py-1.5 text-xs font-semibold tracking-wider transition-all duration-200",
-                paperFilter === f
                   ? "bg-primary text-primary-foreground shadow-[var(--shadow-glow)]"
                   : "text-muted-foreground hover:text-foreground",
               )}
@@ -437,7 +423,6 @@ function TradesPage() {
               onClick={() => {
                 setQ("");
                 setFilter("ALL");
-                setPaperFilter("ALL");
                 setActiveCategory("ALL");
                 setAccountFilter("ALL");
               }}
@@ -562,6 +547,7 @@ function TradesPage() {
       <AnimatePresence>
         {newOpen && (
           <TradeFormModal
+            key="new-trade"
             taxonomy={taxonomy}
             nextNum={rows.length + 1}
             onClose={() => setNewOpen(false)}
@@ -575,17 +561,19 @@ function TradesPage() {
         )}
         {catManagerOpen && (
           <CategoryManager
+            key="cat-manager"
             taxonomy={taxonomy}
             onClose={() => setCatManagerOpen(false)}
             onChange={setExtraTaxonomy}
             base={extraTaxonomy}
             usage={categoryUsage}
             onRemoveCategory={(category) => removeCategoryM.mutate(category)}
-            removing={removeCategoryM.isPending}
+            removing={removeM.isPending}
           />
         )}
         {detail && (
           <TradeReviewModal
+            key={detail.id}
             tradeId={detail.id}
             number={detail.num}
             onClose={() => setDetail(null)}
@@ -599,6 +587,7 @@ function TradesPage() {
             the review stays mounted underneath and regains focus on close. */}
         {editingDb && (
           <TradeFormModal
+            key={`edit-${editingDb.id}`}
             taxonomy={taxonomy}
             nextNum={dbRows.length - dbRows.findIndex((t) => t.id === editingDb.id)}
             editing={editingDb}
@@ -680,10 +669,10 @@ function CategoryManager({
       onClick={onClose}
     >
       <motion.div
-        initial={{ scale: 0.96, y: 10 }}
+        initial={{ scale: 0.98, y: 8 }}
         animate={{ scale: 1, y: 0 }}
-        exit={{ scale: 0.96, y: 10 }}
-        transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+        exit={{ scale: 0.98, y: 6 }}
+        transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
         onClick={(e: MouseEvent) => e.stopPropagation()}
         className="glow-card w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl p-6"
       >

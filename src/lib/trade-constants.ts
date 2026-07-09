@@ -1,5 +1,6 @@
 // Shared trade vocabulary used across forms, filters, and analytics.
 
+export type Taxonomy = Record<string, string[]>;
 export const MARKETS = [
   "forex",
   "crypto",
@@ -26,7 +27,8 @@ const LEGACY_SESSION_LABELS: Record<string, string> = {
   overlap: "LDN/NY Overlap",
 };
 
-export const GRADES = ["A+", "A", "B+", "B", "C", "D"] as const;
+export type Grade = "A+" | "A" | "B+" | "B" | "C" | "D";
+export const GRADES: Grade[] = ["A+", "A", "B+", "B", "C", "D"];
 
 export const RESULTS = ["win", "loss", "breakeven"] as const;
 

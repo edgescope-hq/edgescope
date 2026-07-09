@@ -173,9 +173,8 @@ export const cancelAccountDeletion = createServerFn({ method: "POST" })
   });
 
 // Permanently deletes the signed-in user and all their data (cascades via FKs).
-// TODO: wire a scheduled server-side job/cron to call this cleanup for accounts
-// whose deletion_scheduled_for is in the past. Keep service-role auth deletion
-// on the server only.
+// Until a scheduled purge job exists, run docs/launch/account-deletion-runbook.md
+// for accounts whose deletion_scheduled_for is in the past.
 export const deleteAccount = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {

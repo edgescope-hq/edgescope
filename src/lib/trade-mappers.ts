@@ -93,6 +93,23 @@ export function localTimeKey(date = new Date()): string {
   ].join(":");
 }
 
+export function isResultComplete(t: {
+  result?: string | null;
+  risk_amount?: number | string | null;
+  pnl_amount?: number | string | null;
+  reward_amount?: number | string | null;
+}): boolean {
+  if (t.result !== "win" && t.result !== "loss" && t.result !== "breakeven") return false;
+  const riskOk =
+    t.risk_amount != null && t.risk_amount !== "" && Number.isFinite(Number(t.risk_amount));
+  if (!riskOk) return false;
+  const pnlOk =
+    t.pnl_amount != null && t.pnl_amount !== "" && Number.isFinite(Number(t.pnl_amount));
+  const rewardOk =
+    t.reward_amount != null && t.reward_amount !== "" && Number.isFinite(Number(t.reward_amount));
+  return pnlOk || rewardOk;
+}
+
 export function isPaperTrade(t: { is_paper?: boolean | null }): boolean {
   return t.is_paper === true;
 }

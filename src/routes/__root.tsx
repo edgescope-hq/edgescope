@@ -73,15 +73,15 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Edge Scope — Trading Journal & Analytics" },
+      { title: "EdgeScope — Trading Journal & Analytics" },
       {
         name: "description",
         content:
           "EdgeScope is a trading journal and analytics platform built for traders who want to review execution, analyze performance, and improve long-term consistency.",
       },
-      { name: "author", content: "Edge Journal" },
-      { property: "og:title", content: "Edge Scope — Trading Journal & Analytics" },
-      { name: "twitter:title", content: "Edge Scope — Trading Journal & Analytics" },
+      { name: "author", content: "EdgeScope" },
+      { property: "og:title", content: "EdgeScope — Trading Journal & Analytics" },
+      { name: "twitter:title", content: "EdgeScope — Trading Journal & Analytics" },
       {
         property: "og:description",
         content:

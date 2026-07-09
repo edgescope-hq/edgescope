@@ -1,31 +1,21 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
-  BarChart3,
-  CalendarDays,
+  BriefcaseBusiness,
   Check,
   CheckCircle2,
   ChevronRight,
-  ClipboardCheck,
-  ClipboardList,
-  Clock,
   ListChecks,
   Plus,
   Settings as SettingsIcon,
   ShieldCheck,
   ShieldAlert,
   Sparkles,
-  Star,
-  TrendingUp,
   Trash2,
-  Trophy,
-  WalletCards,
   Pencil,
   Bell,
 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -59,8 +49,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PageHeader, PageShell, PremiumEmptyState } from "@/components/ui/premium";
-import { getReviewStatus, REVIEW_STATUS_BADGE, REVIEW_STATUS_LABEL } from "@/lib/review-status";
-import { isPaperTrade, recordedR } from "@/lib/trade-mappers";
+import { isPaperTrade } from "@/lib/trade-mappers";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 export const Route = createFileRoute("/_authenticated/accounts")({
@@ -194,10 +183,6 @@ function normalizeName(value: string | null | undefined) {
   return (value ?? "").trim().toLocaleLowerCase();
 }
 
-function fmtPct(n: number, d = 1) {
-  return `${n.toFixed(d)}%`;
-}
-
 function labelForType(t: TradingAccount["account_type"]) {
   switch (t) {
     case "funded":
@@ -213,43 +198,6 @@ function labelForType(t: TradingAccount["account_type"]) {
     default:
       return "Personal";
   }
-}
-
-function formatDate(value: string | null | undefined) {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-}
-
-function formatR(value: number | null) {
-  if (value == null) return "—";
-  const prefix = value > 0 ? "+" : "";
-  return `${prefix}${value.toFixed(2)}R`;
-}
-
-function isReviewedTrade(trade: TradeRow) {
-  return getReviewStatus(trade) === "reviewed";
-}
-
-function buildTradeMetrics(trades: TradeRow[]) {
-  const total = trades.length;
-  const decided = trades.filter((trade) => trade.result === "win" || trade.result === "loss");
-  const wins = decided.filter((trade) => trade.result === "win").length;
-  const recordedRs = trades
-    .map((trade) => recordedR(trade.achieved_rr))
-    .filter((value): value is number => value !== null);
-  const netR = recordedRs.length ? recordedRs.reduce((sum, value) => sum + value, 0) : null;
-  const avgR = recordedRs.length && netR != null ? netR / recordedRs.length : null;
-
-  return {
-    total,
-    winRate: decided.length ? (wins / decided.length) * 100 : null,
-    netR,
-    avgR,
-    reviewed: trades.filter(isReviewedTrade).length,
-    lastTradeDate: trades[0]?.trade_date ?? null,
-  };
 }
 
 const BG_COLORS = [
@@ -495,13 +443,12 @@ function AccountsPage() {
   });
 
   const canDelete = selectedTradesForDeletion.length === 0;
-  const metrics = buildTradeMetrics(selectedTrades);
   const createAccountDialog = (
     <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
       <DialogContent className="rounded-2xl border-white/[0.08] bg-[oklch(0.09_0.015_270)] max-w-md p-6">
         <DialogHeader>
           <DialogTitle className="text-base font-bold flex items-center gap-2 text-foreground">
-            <WalletCards className="h-4 w-4 text-primary" /> Create trading account
+            <BriefcaseBusiness className="h-4 w-4 text-primary" /> Create trading account
           </DialogTitle>
         </DialogHeader>
         <p className="text-[11px] leading-relaxed text-muted-foreground">
@@ -563,7 +510,7 @@ function AccountsPage() {
   return (
     <PageShell>
       <PageHeader
-        icon={WalletCards}
+        icon={BriefcaseBusiness}
         title="Accounts"
         description="Manage trading accounts, risk rules, and review context."
         actions={
@@ -600,10 +547,10 @@ function AccountsPage() {
               </div>
             </div>
 
-            <div className="mt-5 grid min-h-[300px] place-items-center p-8 text-center rounded-2xl border border-white/[0.06] bg-white/[0.015]">
+            <div className="mt-5 grid min-h-[300px] place-items-center p-8 text-center rounded-2xl bg-white/[0.02] ring-1 ring-white/[0.06]">
               <div className="max-w-md">
                 <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-primary/10 text-primary ring-1 ring-primary/20">
-                  <WalletCards className="h-5 w-5" />
+                  <BriefcaseBusiness className="h-5 w-5" />
                 </div>
                 <h3 className="mt-4 text-base font-bold text-foreground">
                   No trading accounts yet
@@ -653,8 +600,8 @@ function AccountsPage() {
                       className={cn(
                         "flex min-h-[116px] w-[270px] shrink-0 items-start gap-4 rounded-2xl p-5 text-left transition-all duration-200",
                         isSel
-                          ? "bg-primary/[0.08] ring-1 ring-primary/30 text-foreground shadow-[var(--shadow-glow)]"
-                          : "bg-white/[0.02] ring-1 ring-white/[0.05] text-muted-foreground/80 hover:bg-white/[0.04] hover:text-foreground",
+                          ? "bg-gradient-to-br from-primary/[0.1] to-primary/[0.03] ring-1 ring-primary/30 text-foreground shadow-[var(--shadow-glow)]"
+                          : "bg-white/[0.025] ring-1 ring-white/[0.06] text-muted-foreground/80 hover:bg-white/[0.04] hover:text-foreground hover:ring-white/[0.1]",
                       )}
                     >
                       <div className="flex min-w-0 items-start gap-4">
@@ -697,68 +644,6 @@ function AccountsPage() {
             <div className="section-card min-w-0 rounded-2xl p-5 xl:p-6">
               {selected ? (
                 <div className="space-y-6">
-                  {/* A. Account Snapshot Grid */}
-                  <div className="space-y-3">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground/80">
-                      Account Snapshot
-                    </h4>
-                    {selectedTrades.length === 0 ? (
-                      <div className="surface-card rounded-2xl border border-white/[0.06] bg-white/[0.015] p-6 text-center">
-                        <h5 className="text-sm font-semibold text-foreground">
-                          Stats unlock after your first trade
-                        </h5>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          Log a trade in this account to see performance, streaks, and review
-                          progress.
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-                        <InfoCard
-                          icon={ClipboardList}
-                          label="Total Trades"
-                          value={metrics.total || "—"}
-                          tone="primary"
-                        />
-                        <InfoCard
-                          icon={TrendingUp}
-                          label="Net R"
-                          value={formatR(metrics.netR)}
-                          highlight={metrics.netR != null}
-                          positive={metrics.netR != null && metrics.netR >= 0}
-                          tone={
-                            metrics.netR != null && metrics.netR < 0 ? "destructive" : "success"
-                          }
-                        />
-                        <InfoCard
-                          icon={Trophy}
-                          label="Win Rate"
-                          value={metrics.winRate == null ? "—" : fmtPct(metrics.winRate)}
-                          tone="warning"
-                        />
-                        <InfoCard
-                          icon={ClipboardCheck}
-                          label="Reviewed Trades"
-                          value={metrics.total ? `${metrics.reviewed}/${metrics.total}` : "—"}
-                          tone="info"
-                        />
-                        <InfoCard
-                          icon={BarChart3}
-                          label="Avg R"
-                          value={formatR(metrics.avgR)}
-                          tone="success"
-                        />
-                        <InfoCard
-                          icon={CalendarDays}
-                          label="Last Trade Date"
-                          value={formatDate(metrics.lastTradeDate)}
-                          tone="primary"
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  {/* B. Risk & Guardrails Section */}
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground/80">
@@ -771,69 +656,66 @@ function AccountsPage() {
                         <Pencil className="h-3 w-3" /> Edit rules
                       </button>
                     </div>
-                    <div className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.015] p-4">
-                      <div className="rounded-xl border border-white/[0.055] bg-white/[0.035] px-3.5 py-2.5 text-xs leading-5 text-muted-foreground/88">
+                    <div className="rounded-2xl bg-white/[0.025] p-5 ring-1 ring-white/[0.06]">
+                      <div className="rounded-xl bg-white/[0.035] px-4 py-3 text-xs leading-5 text-muted-foreground/85 ring-1 ring-white/[0.06]">
                         Journal reminders only. EdgeScope does not place, block, or manage broker
                         trades.
                       </div>
-                      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-                        <div className="flex min-h-[92px] items-center gap-3.5 rounded-xl bg-white/[0.028] p-4 ring-1 ring-white/[0.06]">
-                          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-yellow-500/8 text-yellow-300/85 ring-1 ring-yellow-500/15">
-                            <ShieldAlert className="h-4 w-4" />
+                      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+                        <div className="flex items-center gap-3 rounded-xl glow-card px-5 py-5">
+                          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-yellow-500/20 to-yellow-500/5 text-yellow-300/85 ring-1 ring-yellow-500/15">
+                            <ShieldAlert className="h-5 w-5" />
                           </div>
                           <div className="min-w-0">
-                            <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground/82">
+                            <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                               Max Risk Per Trade
                             </div>
-                            <div className="mt-1.5 text-lg font-bold tracking-tight text-foreground leading-normal py-0.5">
+                            <div className="mt-1.5 text-lg font-bold tracking-tight text-foreground">
                               {selected.max_risk_per_trade_pct != null
                                 ? `${selected.max_risk_per_trade_pct}%`
                                 : "Not set"}
                             </div>
                           </div>
                         </div>
-
-                        <div className="flex min-h-[92px] items-center gap-3.5 rounded-xl bg-white/[0.028] p-4 ring-1 ring-white/[0.06]">
-                          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-red-500/8 text-red-300/85 ring-1 ring-red-500/15">
-                            <AlertTriangle className="h-4 w-4" />
+                        <div className="flex items-center gap-3 rounded-xl glow-card px-5 py-5">
+                          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-red-500/20 to-red-500/5 text-red-300/85 ring-1 ring-red-500/15">
+                            <AlertTriangle className="h-5 w-5" />
                           </div>
                           <div className="min-w-0">
-                            <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground/82">
+                            <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                               Daily Loss Limit
                             </div>
-                            <div className="mt-1.5 text-lg font-bold tracking-tight text-foreground leading-normal py-0.5">
+                            <div className="mt-1.5 text-lg font-bold tracking-tight text-foreground">
                               {selected.daily_loss_limit_pct != null
                                 ? `${selected.daily_loss_limit_pct}%`
                                 : "Not set"}
                             </div>
                           </div>
                         </div>
-
-                        <div className="flex min-h-[92px] items-center gap-3.5 rounded-xl bg-white/[0.028] p-4 ring-1 ring-white/[0.06]">
-                          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-blue-500/8 text-blue-300/85 ring-1 ring-blue-500/15">
-                            <ListChecks className="h-4 w-4" />
+                        <div className="flex items-center gap-3 rounded-xl glow-card px-5 py-5">
+                          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-blue-500/20 to-blue-500/5 text-blue-300/85 ring-1 ring-blue-500/15">
+                            <ListChecks className="h-5 w-5" />
                           </div>
                           <div className="min-w-0">
-                            <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground/82">
+                            <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                               Max Trades Per Day
                             </div>
-                            <div className="mt-1.5 text-lg font-bold tracking-tight text-foreground leading-normal py-0.5">
+                            <div className="mt-1.5 text-lg font-bold tracking-tight text-foreground">
                               {prefsData?.max_trades_per_day != null
                                 ? prefsData.max_trades_per_day
                                 : "Not set"}
                             </div>
                           </div>
                         </div>
-
-                        <div className="flex min-h-[92px] items-center gap-3.5 rounded-xl bg-white/[0.028] p-4 ring-1 ring-white/[0.06]">
-                          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary/85 ring-1 ring-primary/15">
-                            <Bell className="h-4 w-4" />
+                        <div className="flex items-center gap-3 rounded-xl glow-card px-5 py-5">
+                          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-primary/25 to-primary/5 text-primary/85 ring-1 ring-primary/15">
+                            <Bell className="h-5 w-5" />
                           </div>
                           <div className="min-w-0">
-                            <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground/82">
+                            <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                               Journal Reminders
                             </div>
-                            <div className="mt-1.5 text-lg font-bold tracking-tight text-foreground leading-normal py-0.5">
+                            <div className="mt-1.5 text-lg font-bold tracking-tight text-foreground">
                               {(guardrailsData?.daily_loss_reminder ?? true) ? "On" : "Off"}
                             </div>
                           </div>
@@ -842,162 +724,58 @@ function AccountsPage() {
                     </div>
                   </div>
 
-                  {/* Bottom Cards: Recent Trades (Left) & Workspace Actions (Right) */}
-                  <div className="space-y-5">
-                    {/* C. Recent Trades */}
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground/80">
-                          Recent Trades
-                        </h4>
-                        <Link
-                          to="/trades"
-                          search={{ account: selected.id }}
-                          className="text-xs font-semibold text-primary transition-colors hover:text-primary-glow"
-                        >
-                          View account trades →
-                        </Link>
-                      </div>
-                      {selectedTrades.length === 0 ? (
-                        <div className="surface-card rounded-xl p-6 text-center">
-                          <p className="text-xs text-muted-foreground">
-                            No trades in this account yet.
-                          </p>
-                          <Link
-                            to="/trades"
-                            className="mt-3.5 inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground shadow-[var(--shadow-glow)] hover:brightness-110 transition"
-                          >
-                            <Plus className="h-3.5 w-3.5" /> Log a trade
-                          </Link>
-                        </div>
-                      ) : (
-                        <div className="overflow-hidden rounded-xl border border-white/[0.05] bg-white/[0.012]">
-                          <div className="space-y-1 p-2">
-                            {selectedTrades.slice(0, 3).map((trade) => {
-                              const status = getReviewStatus(trade);
-                              const resultLabel =
-                                trade.result === "win"
-                                  ? "WIN"
-                                  : trade.result === "loss"
-                                    ? "LOSS"
-                                    : trade.result === "breakeven"
-                                      ? "BE"
-                                      : "—";
-                              const resultClass =
-                                trade.result === "win"
-                                  ? "bg-success/10 text-success ring-success/20"
-                                  : trade.result === "loss"
-                                    ? "bg-destructive/10 text-destructive ring-destructive/20"
-                                    : "bg-info/10 text-info ring-info/20";
-                              return (
-                                <div
-                                  key={trade.id}
-                                  className="grid w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 rounded-xl px-3 py-3 text-left"
-                                >
-                                  <div className="min-w-0">
-                                    <div className="truncate text-sm font-semibold text-foreground/95">
-                                      {trade.instrument}
-                                    </div>
-                                    <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                                      <span>{formatDate(trade.trade_date)}</span>
-                                      <span
-                                        className={cn(
-                                          "rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wide",
-                                          REVIEW_STATUS_BADGE[status],
-                                        )}
-                                      >
-                                        {REVIEW_STATUS_LABEL[status]}
-                                      </span>
-                                    </div>
-                                  </div>
-                                  <span
-                                    className={cn(
-                                      "rounded-md px-2 py-0.5 text-[10px] font-bold tracking-wider ring-1",
-                                      resultClass,
-                                    )}
-                                  >
-                                    {resultLabel}
-                                  </span>
-                                  <span
-                                    className={cn(
-                                      "min-w-[70px] text-right text-sm font-semibold tabular-nums",
-                                      trade.achieved_rr != null &&
-                                        trade.achieved_rr > 0 &&
-                                        "text-success",
-                                      trade.achieved_rr != null &&
-                                        trade.achieved_rr < 0 &&
-                                        "text-destructive",
-                                      (trade.achieved_rr == null || trade.achieved_rr === 0) &&
-                                        "text-muted-foreground",
-                                    )}
-                                  >
-                                    {formatR(trade.achieved_rr)}
-                                  </span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* D. Account Actions / Settings */}
-                    <div className="space-y-3">
-                      <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground/80">
-                        Account Actions
-                      </h4>
-                      <div className="space-y-3 rounded-2xl border border-white/[0.06] bg-white/[0.018] p-4 sm:p-5">
-                        <button
-                          onClick={() => canDelete && setShowDeleteConfirm(true)}
-                          disabled={!canDelete}
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground/80">
+                      Account Actions
+                    </h4>
+                    <div className="rounded-2xl bg-white/[0.025] p-4 sm:p-5 ring-1 ring-white/[0.06]">
+                      <button
+                        onClick={() => canDelete && setShowDeleteConfirm(true)}
+                        disabled={!canDelete}
+                        className={cn(
+                          "flex w-full items-center gap-4 rounded-xl px-4 py-3.5 text-left transition",
+                          canDelete
+                            ? "cursor-pointer bg-destructive/[0.03] text-destructive/75 ring-1 ring-destructive/[0.08] hover:bg-destructive/[0.05] hover:text-destructive/85 hover:ring-destructive/[0.15]"
+                            : "cursor-not-allowed bg-white/[0.02] text-muted-foreground/72 ring-1 ring-white/[0.06]",
+                        )}
+                      >
+                        <div
                           className={cn(
-                            "flex min-h-[76px] w-full items-center gap-4 rounded-xl border px-4 py-4 text-left transition",
+                            "grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gradient-to-br ring-1",
                             canDelete
-                              ? "cursor-pointer border-destructive/[0.08] bg-white/[0.018] text-destructive/75 hover:border-destructive/[0.16] hover:bg-destructive/[0.025] hover:text-destructive/85"
-                              : "cursor-not-allowed border-white/[0.06] bg-white/[0.03] text-muted-foreground/72",
+                              ? "from-destructive/20 to-destructive/5 text-destructive/70 ring-destructive/[0.12]"
+                              : "from-white/[0.05] to-white/[0.02] text-muted-foreground/75 ring-white/[0.06]",
                           )}
                         >
+                          <Trash2 className="h-4 w-4" />
+                        </div>
+                        <div className="min-w-0">
                           <div
                             className={cn(
-                              "grid h-10 w-10 shrink-0 place-items-center rounded-xl",
-                              canDelete
-                                ? "bg-destructive/[0.045] text-destructive/70 ring-1 ring-destructive/[0.1]"
-                                : "bg-white/[0.05] text-muted-foreground/75 ring-1 ring-white/[0.06]",
+                              "text-sm font-semibold",
+                              canDelete ? "text-destructive/82" : "text-muted-foreground/88",
                             )}
                           >
-                            <Trash2 className="h-4 w-4" />
+                            Delete trading account
                           </div>
-                          <div className="min-w-0">
-                            <div
-                              className={cn(
-                                "text-sm font-semibold",
-                                canDelete ? "text-destructive/82" : "text-muted-foreground/88",
-                              )}
-                            >
-                              Delete trading account
-                            </div>
-                            <div className="mt-1 text-[11px] leading-5">
-                              {canDelete
-                                ? "Delete this empty trading account workspace."
-                                : "Only empty trading accounts can be deleted."}
-                            </div>
+                          <div className="mt-0.5 text-[11px] leading-5">
+                            {canDelete
+                              ? "Delete this empty trading account workspace."
+                              : "Only empty trading accounts can be deleted."}
                           </div>
-                          <ChevronRight className="ml-auto h-4 w-4 shrink-0 text-current opacity-50" />
-                        </button>
+                        </div>
+                        <ChevronRight className="ml-auto h-4 w-4 shrink-0 text-current opacity-50" />
+                      </button>
 
-                        {!canDelete && (
-                          <p className="pl-1.5 text-[11px] leading-relaxed text-muted-foreground/70">
-                            Trading accounts with logged trades cannot be deleted. Your trade
-                            history stays preserved.
-                          </p>
-                        )}
-                      </div>
+                      {!canDelete && (
+                        <p className="pl-1.5 text-[11px] leading-relaxed text-muted-foreground/70">
+                          Trading accounts with logged trades cannot be deleted. Your trade history
+                          stays preserved.
+                        </p>
+                      )}
                     </div>
                   </div>
 
-                  {/* Confirmation and Action Dialog Modals */}
-
-                  {/* 2. Edit Workspace Dialog */}
                   <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
                     <DialogContent className="rounded-2xl border-white/[0.08] bg-[oklch(0.09_0.015_270)] max-w-md p-6">
                       <DialogHeader>
@@ -1021,7 +799,9 @@ function AccountsPage() {
                           onChange={(v) =>
                             setEditForm((f) => ({
                               ...f,
-                              account_type: (v || "personal") as TradingAccount["account_type"],
+                              account_type: (typeof v === "string"
+                                ? v
+                                : "personal") as TradingAccount["account_type"],
                             }))
                           }
                           options={[
@@ -1092,7 +872,6 @@ function AccountsPage() {
                     </DialogContent>
                   </Dialog>
 
-                  {/* 3. Edit Risk Rules & Guardrails Dialog */}
                   <Dialog open={showRulesModal} onOpenChange={setShowRulesModal}>
                     <DialogContent className="rounded-2xl border-white/[0.08] bg-[oklch(0.09_0.015_270)] max-w-md p-6">
                       <DialogHeader>
@@ -1135,7 +914,7 @@ function AccountsPage() {
                         <div className="pt-2">
                           <ToggleRow
                             label="Journal reminder toggle"
-                            description="Show a reminder when a logged trade exceeds your daily loss limit setting."
+                            description="Check to show a reminder when a logged trade exceeds your daily loss limit setting."
                             checked={rulesForm.daily_loss_reminder}
                             onChange={(checked) =>
                               setRulesForm((f) => ({ ...f, daily_loss_reminder: checked }))
@@ -1161,7 +940,6 @@ function AccountsPage() {
                     </DialogContent>
                   </Dialog>
 
-                  {/* 4. Delete Confirm Modal */}
                   <ConfirmDialog
                     open={showDeleteConfirm}
                     onOpenChange={setShowDeleteConfirm}
@@ -1177,7 +955,7 @@ function AccountsPage() {
                 <div className="grid h-full min-h-[400px] place-items-center p-8 text-center">
                   <div className="max-w-sm rounded-2xl bg-white/[0.025] px-6 py-8 ring-1 ring-white/[0.05]">
                     <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-primary/10 text-primary ring-1 ring-primary/20">
-                      <WalletCards className="h-5 w-5" />
+                      <BriefcaseBusiness className="h-5 w-5" />
                     </div>
                     <h3 className="mt-4 text-sm font-bold text-foreground">Select an account</h3>
                   </div>
@@ -1189,61 +967,5 @@ function AccountsPage() {
       </div>
       {createAccountDialog}
     </PageShell>
-  );
-}
-
-function InfoCard({
-  icon: Icon,
-  label,
-  value,
-  highlight = false,
-  positive = true,
-  tone = "primary",
-}: {
-  icon?: LucideIcon;
-  label: string;
-  value: ReactNode;
-  highlight?: boolean;
-  positive?: boolean;
-  tone?: "primary" | "success" | "warning" | "info" | "destructive";
-}) {
-  const toneClass = {
-    primary: "from-primary/18 to-primary/5 text-primary ring-primary/20",
-    success: "from-success/18 to-success/5 text-success ring-success/20",
-    warning: "from-warning/18 to-warning/5 text-warning ring-warning/20",
-    info: "from-info/18 to-info/5 text-info ring-info/20",
-    destructive: "from-destructive/18 to-destructive/5 text-destructive ring-destructive/20",
-  }[tone];
-
-  return (
-    <div className="surface-card flex min-h-[118px] flex-col justify-between rounded-2xl p-5">
-      <div className="flex items-start gap-3">
-        {Icon && (
-          <span
-            className={cn(
-              "grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gradient-to-br ring-1",
-              toneClass,
-            )}
-          >
-            <Icon className="h-4 w-4" />
-          </span>
-        )}
-        <div className="min-w-0 pt-0.5">
-          <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground/80">
-            {label}
-          </div>
-        </div>
-      </div>
-      <div className="mt-3">
-        <div
-          className={cn(
-            "text-2xl font-bold tracking-tight",
-            highlight ? (positive ? "text-success" : "text-destructive") : "text-foreground",
-          )}
-        >
-          {value}
-        </div>
-      </div>
-    </div>
   );
 }

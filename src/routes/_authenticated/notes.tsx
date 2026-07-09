@@ -144,7 +144,7 @@ function NotesPage() {
           <motion.h1
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+            transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
             className="text-3xl font-bold tracking-tight md:text-4xl"
           >
             Trading Desk
@@ -170,7 +170,7 @@ function NotesPage() {
       )}
 
       <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {sorted.map((n, i) => {
+        {sorted.map((n) => {
           const color = (PALETTE.includes(n.color as NoteColor) ? n.color : "default") as NoteColor;
           const isEditing = editing === n.id;
           const isMeditation = n.kind === "meditation";
@@ -179,7 +179,7 @@ function NotesPage() {
               key={n.id}
               initial={{ opacity: 0, y: 10, scale: 0.98 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              transition={{ delay: 0.03 * i, duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+              transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
               className={cn(
                 "group relative rounded-2xl p-5 border ring-1 transition-all duration-200 shadow-[0_8px_24px_-12px_oklch(0_0_0/0.5)]",
                 cardTint[color],

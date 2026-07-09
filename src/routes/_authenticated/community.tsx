@@ -2,17 +2,18 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { motion, AnimatePresence } from "framer-motion";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent } from "react";
 import {
   ArrowLeft,
   Bell,
+  CalendarDays,
   Check,
+  ChevronDown,
   Copy,
   PencilLine,
-  MessageCircle,
   Plus,
-  Send,
+  Search,
   Trash2,
   UserMinus,
   Users,
@@ -20,10 +21,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import {
-  addComment,
   cancelInvitation,
   createGroup,
-  deleteComment,
   deleteGroup,
   getMyProfile,
   inviteByEdgeId,
@@ -34,19 +33,25 @@ import {
   listMyGroups,
   listMyInvitations,
   listNotifications,
-  listTradeComments,
+  listTradeReactions,
   markNotificationsRead,
   removeMember,
   renameGroup,
   respondInvitation,
-  updateComment,
+  upsertReaction,
+  deleteReaction,
   type GroupSummary,
   type GroupTrade,
-  type TradeComment,
+  type TradeReaction,
 } from "@/lib/groups.functions";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { PageHeader, PageShell, PremiumEmptyState } from "@/components/ui/premium";
+
+const MOTION_EASE = [0.16, 1, 0.3, 1] as const;
+const MODAL_TRANSITION = { duration: 0.22, ease: MOTION_EASE };
 
 export const Route = createFileRoute("/_authenticated/community")({
   head: () => ({
@@ -213,9 +218,10 @@ function NotificationsPanel({ onClose }: { onClose: () => void }) {
       className="fixed inset-0 z-50 grid place-items-end bg-black/60 p-4 backdrop-blur-md sm:place-items-center"
     >
       <motion.div
-        initial={{ scale: 0.96, y: 10 }}
+        initial={{ scale: 0.98, y: 8 }}
         animate={{ scale: 1, y: 0 }}
-        exit={{ scale: 0.96, y: 10 }}
+        exit={{ scale: 0.98, y: 8 }}
+        transition={MODAL_TRANSITION}
         onClick={(e: MouseEvent) => e.stopPropagation()}
         className="glow-card w-full max-w-md max-h-[80vh] overflow-y-auto rounded-2xl p-5"
       >
@@ -349,7 +355,7 @@ function GroupsList({ onOpen }: { onOpen: (g: GroupSummary) => void }) {
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: 0.05, duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+      transition={{ duration: 0.22, ease: MOTION_EASE }}
       className="mt-6"
     >
       <div className="flex items-center justify-between">
@@ -507,7 +513,7 @@ function GroupDetail({ group, onBack }: { group: GroupSummary; onBack: () => voi
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+      transition={MODAL_TRANSITION}
       className="mt-6"
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -556,46 +562,267 @@ function GroupDetail({ group, onBack }: { group: GroupSummary; onBack: () => voi
   );
 }
 
+// ============ Date / week / month helpers ============
+
+function startOfWeekISO(d: Date): Date {
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  const s = new Date(d.getFullYear(), d.getMonth(), d.getDate() + diff);
+  s.setHours(0, 0, 0, 0);
+  return s;
+}
+
+function weekKey(d: Date): string {
+  const start = startOfWeekISO(d);
+  return `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-${String(start.getDate()).padStart(2, "0")}`;
+}
+
+function ymKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function addDays(d: Date, days: number): Date {
+  const next = new Date(d);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function labelWeekRange(key: string): string {
+  const start = new Date(key + "T00:00:00");
+  const end = addDays(start, 6);
+  const fmt = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const sameYear = start.getFullYear() === end.getFullYear();
+  const startLabel = sameYear ? fmt(start) : fmt(start);
+  const endLabel = sameYear
+    ? end.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    : end.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return `${startLabel} - ${endLabel}`;
+}
+
+function cleanMonthLabel(key: string): string {
+  const [y, m] = key.split("-").map(Number);
+  const d = new Date(y, m - 1, 1);
+  return d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+}
+
+function parseDateKey(value: string): Date | undefined {
+  if (!value) return undefined;
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
+function formatDateKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function displayDate(value: string): string {
+  const date = parseDateKey(value);
+  return date
+    ? date.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
+    : "Select date";
+}
+
+type DateFilterMode = "all" | "date" | "week" | "month";
+
+function generateWeekKeysFromTrades(trades: GroupTrade[]): string[] {
+  const set = new Set<string>();
+  for (const t of trades) {
+    const d = new Date(t.trade_date + "T00:00:00");
+    if (!isNaN(d.getTime())) set.add(weekKey(d));
+  }
+  const now = new Date();
+  set.add(weekKey(now));
+  return Array.from(set).sort((a, b) => b.localeCompare(a));
+}
+
+function generateMonthKeysFromTrades(trades: GroupTrade[]): string[] {
+  const set = new Set<string>();
+  for (const t of trades) {
+    const d = new Date(t.trade_date + "T00:00:00");
+    if (!isNaN(d.getTime())) set.add(ymKey(d));
+  }
+  const now = new Date();
+  set.add(ymKey(now));
+  return Array.from(set).sort((a, b) => b.localeCompare(a));
+}
+
+function PeriodPickerList({
+  items,
+  labelFor,
+  selected,
+  onSelect,
+  onClose,
+}: {
+  items: string[];
+  labelFor: (key: string) => string;
+  selected: string | null;
+  onSelect: (key: string) => void;
+  onClose: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [visibleCount, setVisibleCount] = useState(5);
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return items;
+    return items.filter((key) => `${labelFor(key)} ${key}`.toLowerCase().includes(q));
+  }, [items, labelFor, query]);
+  const visible = filtered.slice(0, visibleCount);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      onClick={onClose}
+      className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-md"
+    >
+      <motion.div
+        initial={{ scale: 0.98, y: 8 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.98, y: 8 }}
+        transition={MODAL_TRANSITION}
+        onClick={(e: MouseEvent) => e.stopPropagation()}
+        className="glow-card w-full max-w-md rounded-2xl p-5"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-lg font-bold">Select period</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded-lg p-1.5 text-muted-foreground transition hover:bg-white/[0.06] hover:text-foreground"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="relative mt-4">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/50" />
+          <input
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setVisibleCount(5);
+            }}
+            placeholder="Search range"
+            className="w-full rounded-xl bg-white/[0.04] py-2.5 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground/50 ring-1 ring-white/[0.06] transition focus:outline-none focus:ring-2 focus:ring-primary/40"
+          />
+        </div>
+        <div className="mt-4 space-y-2 max-h-[300px] overflow-y-auto pr-1">
+          {visible.map((key) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => {
+                onSelect(key);
+                onClose();
+              }}
+              className={cn(
+                "flex w-full items-center justify-between rounded-xl px-3.5 py-3 text-left text-sm ring-1 transition",
+                selected === key
+                  ? "bg-primary/12 text-foreground ring-primary/35"
+                  : "bg-white/[0.025] text-muted-foreground ring-white/[0.05] hover:bg-white/[0.045] hover:text-foreground",
+              )}
+            >
+              <span>{labelFor(key)}</span>
+              <span
+                className={cn(
+                  "text-[10px] font-bold uppercase tracking-[0.16em] text-primary transition-opacity duration-150",
+                  selected === key ? "opacity-100" : "opacity-0",
+                )}
+                aria-hidden={selected !== key}
+              >
+                Selected
+              </span>
+            </button>
+          ))}
+          {visible.length === 0 && (
+            <div className="rounded-xl bg-white/[0.025] px-3.5 py-6 text-center text-sm text-muted-foreground ring-1 ring-white/[0.05]">
+              No periods found.
+            </div>
+          )}
+        </div>
+        {visibleCount < filtered.length && (
+          <button
+            type="button"
+            onClick={() => setVisibleCount((c) => c + 5)}
+            className="mt-4 w-full rounded-xl bg-white/[0.04] px-4 py-2.5 text-xs font-semibold text-muted-foreground ring-1 ring-white/[0.06] transition hover:text-foreground"
+          >
+            Show more
+          </button>
+        )}
+      </motion.div>
+    </motion.div>
+  );
+}
+
 // ============ Trades tab ============
 
 function TradesTab({ group, trades }: { group: GroupSummary; trades: GroupTrade[] }) {
   const [open, setOpen] = useState<GroupTrade | null>(null);
   const [limit, setLimit] = useState(6);
-  const [dateFilter, setDateFilter] = useState<"all" | "today" | "week" | "month">("all");
+  const [filterMode, setFilterMode] = useState<DateFilterMode>("all");
+  const [customDate, setCustomDate] = useState("");
+  const [customWeekKey, setCustomWeekKey] = useState("");
+  const [customMonthKey, setCustomMonthKey] = useState("");
+  const [weekPickerOpen, setWeekPickerOpen] = useState(false);
+  const [monthPickerOpen, setMonthPickerOpen] = useState(false);
+
+  const weekKeys = useMemo(() => generateWeekKeysFromTrades(trades), [trades]);
+  const monthKeys = useMemo(() => generateMonthKeysFromTrades(trades), [trades]);
+
+  const { minYear, maxYear } = useMemo(() => {
+    let min = Infinity,
+      max = -Infinity;
+    for (const t of trades) {
+      const y = new Date(t.trade_date + "T00:00:00").getFullYear();
+      if (y < min) min = y;
+      if (y > max) max = y;
+    }
+    return trades.length > 0
+      ? { minYear: min, maxYear: max }
+      : { minYear: 2024, maxYear: new Date().getFullYear() + 1 };
+  }, [trades]);
 
   const filteredTrades = useMemo(() => {
-    if (dateFilter === "all") return trades;
-    const now = new Date();
-    const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    if (filterMode === "all") return trades;
+    if (filterMode === "date" && customDate) {
+      return trades.filter((t) => t.trade_date === customDate);
+    }
+    if (filterMode === "week" && customWeekKey) {
+      const start = new Date(customWeekKey + "T00:00:00");
+      const end = addDays(start, 6);
+      const endStr = formatDateKey(end);
+      return trades.filter((t) => t.trade_date >= customWeekKey && t.trade_date <= endStr);
+    }
+    if (filterMode === "month" && customMonthKey) {
+      return trades.filter((t) => t.trade_date.startsWith(customMonthKey));
+    }
+    return trades;
+  }, [trades, filterMode, customDate, customWeekKey, customMonthKey]);
 
-    const todayStart = startOfDay(now).getTime();
+  const filterLabel = useMemo(() => {
+    if (filterMode === "all") return "";
+    if (filterMode === "date") return displayDate(customDate);
+    if (filterMode === "week") return labelWeekRange(customWeekKey);
+    if (filterMode === "month") return cleanMonthLabel(customMonthKey);
+    return "";
+  }, [filterMode, customDate, customWeekKey, customMonthKey]);
 
-    // Start of current week (Monday)
-    const currentDay = now.getDay();
-    const distanceToMonday = currentDay === 0 ? 6 : currentDay - 1;
-    const mondayStart = startOfDay(
-      new Date(now.getTime() - distanceToMonday * 24 * 60 * 60 * 1000),
-    ).getTime();
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
 
-    // Start of current month
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-
-    return trades.filter((t) => {
-      const parts = t.trade_date.split("-").map(Number);
-      if (parts.length !== 3) return false;
-      const tradeDate = new Date(parts[0], parts[1] - 1, parts[2]).getTime();
-      if (dateFilter === "today") {
-        return tradeDate >= todayStart;
-      }
-      if (dateFilter === "week") {
-        return tradeDate >= mondayStart;
-      }
-      if (dateFilter === "month") {
-        return tradeDate >= monthStart;
-      }
-      return true;
-    });
-  }, [trades, dateFilter]);
+  const toggleFilter = (mode: DateFilterMode) => {
+    if (filterMode === mode && mode === "all") return;
+    setFilterMode(mode);
+    setLimit(6);
+    if (mode === "date") setDatePickerOpen(true);
+    if (mode === "week") setWeekPickerOpen(true);
+    if (mode === "month") setMonthPickerOpen(true);
+    if (mode === "all") {
+      setCustomDate("");
+      setCustomWeekKey("");
+      setCustomMonthKey("");
+    }
+  };
 
   return (
     <div className="mt-6 space-y-4">
@@ -604,45 +831,56 @@ function TradesTab({ group, trades }: { group: GroupSummary; trades: GroupTrade[
           <div className="text-xs font-semibold text-muted-foreground">
             {filteredTrades.length} {filteredTrades.length === 1 ? "trade" : "trades"} shared
           </div>
-          <div className="flex gap-1 rounded-xl bg-white/[0.02] p-1 ring-1 ring-white/[0.05]">
-            {(
-              [
-                { v: "all", l: "All time" },
-                { v: "today", l: "Today" },
-                { v: "week", l: "This week" },
-                { v: "month", l: "This month" },
-              ] as const
-            ).map((opt) => (
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex gap-1 rounded-xl bg-white/[0.02] p-1 ring-1 ring-white/[0.05]">
+              {(
+                [
+                  { v: "all", l: "All" },
+                  { v: "date", l: "Date" },
+                  { v: "week", l: "Week" },
+                  { v: "month", l: "Month" },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.v}
+                  onClick={() => toggleFilter(opt.v)}
+                  className={cn(
+                    "rounded-lg px-2.5 py-1 text-[11px] font-semibold transition",
+                    filterMode === opt.v
+                      ? "bg-white/[0.06] text-foreground"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {opt.l}
+                </button>
+              ))}
+            </div>
+            {filterMode !== "all" && filterLabel && (
               <button
-                key={opt.v}
                 onClick={() => {
-                  setDateFilter(opt.v);
-                  setLimit(6);
+                  if (filterMode === "date") setDatePickerOpen(true);
+                  if (filterMode === "week") setWeekPickerOpen(true);
+                  if (filterMode === "month") setMonthPickerOpen(true);
                 }}
-                className={cn(
-                  "rounded-lg px-2.5 py-1 text-[11px] font-semibold transition",
-                  dateFilter === opt.v
-                    ? "bg-white/[0.06] text-foreground"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
+                className="inline-flex items-center gap-1 rounded-lg bg-primary/10 px-2.5 py-1 text-[10px] font-semibold text-primary ring-1 ring-primary/20 hover:bg-primary/15"
               >
-                {opt.l}
+                {filterLabel}
               </button>
-            ))}
+            )}
           </div>
         </div>
       )}
 
       {filteredTrades.length === 0 ? (
         <div className="glow-card rounded-2xl p-10 text-center">
-          <MessageCircle className="mx-auto h-8 w-8 text-muted-foreground/78" />
+          <Users className="mx-auto h-8 w-8 text-muted-foreground/78" />
           <h3 className="mt-3 text-base font-semibold">
             {trades.length === 0 ? "No shared trades yet." : "No trades match the filter."}
           </h3>
           <p className="mt-1 text-sm text-muted-foreground">
             {trades.length === 0
               ? "When you share a trade, group members will only see the screenshot, instrument, result, date, and any reasoning you choose to include."
-              : "Try switching back to 'All time' or choosing a different filter option."}
+              : "Try switching back to All or choosing a different filter option."}
           </p>
           {trades.length === 0 && (
             <p className="mt-1 text-sm text-muted-foreground">Your full journal stays private.</p>
@@ -650,7 +888,7 @@ function TradesTab({ group, trades }: { group: GroupSummary; trades: GroupTrade[
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {filteredTrades.slice(0, limit).map((t) => (
               <TradeCard key={t.id} trade={t} onOpen={() => setOpen(t)} />
             ))}
@@ -659,15 +897,86 @@ function TradesTab({ group, trades }: { group: GroupSummary; trades: GroupTrade[
             <div className="mt-4 flex justify-center">
               <button
                 type="button"
-                onClick={() => setLimit((l) => l + 6)}
+                onClick={() => setLimit((l) => l + 4)}
                 className="rounded-xl bg-white/[0.04] px-4 py-2 text-xs font-semibold text-muted-foreground ring-1 ring-white/[0.06] hover:text-foreground transition duration-200"
               >
-                Show more
+                Show more shared trades
               </button>
             </div>
           )}
         </>
       )}
+
+      {/* Date picker popover */}
+      <AnimatePresence>
+        {datePickerOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setDatePickerOpen(false)}
+            className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-md"
+          >
+            <motion.div
+              initial={{ scale: 0.98, y: 8 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.98, y: 8 }}
+              transition={MODAL_TRANSITION}
+              onClick={(e: MouseEvent) => e.stopPropagation()}
+              className="glow-card w-auto rounded-2xl p-5"
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-bold">Select date</h3>
+                <button
+                  onClick={() => setDatePickerOpen(false)}
+                  className="rounded-lg p-1 text-muted-foreground hover:bg-white/[0.06]"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <Calendar
+                mode="single"
+                showOutsideDays={false}
+                selected={parseDateKey(customDate)}
+                onSelect={(date) => {
+                  if (date) {
+                    setCustomDate(formatDateKey(date));
+                    setDatePickerOpen(false);
+                  }
+                }}
+                captionLayout="dropdown"
+                fromYear={minYear}
+                toYear={maxYear}
+                className="[--cell-size:1.9rem]"
+              />
+            </motion.div>
+          </motion.div>
+        )}
+        {weekPickerOpen && (
+          <PeriodPickerList
+            items={weekKeys}
+            labelFor={labelWeekRange}
+            selected={customWeekKey}
+            onSelect={(key) => {
+              setCustomWeekKey(key);
+              setWeekPickerOpen(false);
+            }}
+            onClose={() => setWeekPickerOpen(false)}
+          />
+        )}
+        {monthPickerOpen && (
+          <PeriodPickerList
+            items={monthKeys}
+            labelFor={cleanMonthLabel}
+            selected={customMonthKey}
+            onSelect={(key) => {
+              setCustomMonthKey(key);
+              setMonthPickerOpen(false);
+            }}
+            onClose={() => setMonthPickerOpen(false)}
+          />
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {open && <TradeDetail trade={open} groupId={group.id} onClose={() => setOpen(null)} />}
@@ -684,15 +993,15 @@ function TradeCard({ trade, onOpen }: { trade: GroupTrade; onOpen: () => void })
       className="glow-card group overflow-hidden rounded-2xl p-0 text-left transition hover:ring-white/[0.12]"
     >
       {shot ? (
-        <div className="relative h-32 w-full overflow-hidden bg-black/40">
+        <div className="relative aspect-[2/1] w-full overflow-hidden bg-black/60">
           <img
             src={shot}
             alt={trade.instrument}
-            className="h-full w-full object-cover opacity-90 transition group-hover:scale-[1.02] group-hover:opacity-100"
+            className="h-full w-full object-contain opacity-90 transition group-hover:opacity-100"
           />
         </div>
       ) : (
-        <div className="grid h-32 w-full place-items-center bg-white/[0.02] text-[11px] text-muted-foreground">
+        <div className="grid aspect-[2/1] w-full place-items-center bg-white/[0.02] text-[11px] text-muted-foreground">
           No screenshot
         </div>
       )}
@@ -740,48 +1049,95 @@ function TradeDetail({
   const profileFn = useServerFn(getMyProfile);
   const { data: profile } = useQuery({ queryKey: ["my-profile"], queryFn: () => profileFn() });
   const myId = profile?.id;
-  const [visibleCommentsCount, setVisibleCommentsCount] = useState(5);
 
-  const commentsFn = useServerFn(listTradeComments);
-  const { data: comments = [] } = useQuery({
-    queryKey: ["trade-comments", trade.id, groupId],
-    queryFn: () => commentsFn({ data: { tradeId: trade.id, groupId } }),
+  const reactionsFn = useServerFn(listTradeReactions);
+  const { data: reactions = [], isFetched } = useQuery<TradeReaction[]>({
+    queryKey: ["trade-reactions", trade.id, groupId],
+    queryFn: () => reactionsFn({ data: { tradeId: trade.id, groupId } }),
   });
 
-  const addFn = useServerFn(addComment);
-  const [body, setBody] = useState("");
-  const [replyTo, setReplyTo] = useState<string | null>(null);
-  const add = useMutation({
-    mutationFn: () =>
-      addFn({
-        data: {
-          tradeId: trade.id,
-          groupId,
-          parentId: replyTo,
-          body: body.trim(),
-        },
-      }),
-    onSuccess: () => {
-      setBody("");
-      setReplyTo(null);
-      qc.invalidateQueries({ queryKey: ["trade-comments", trade.id, groupId] });
-      qc.invalidateQueries({ queryKey: ["group-trades", groupId] });
+  const [localType, setLocalType] = useState<string | null>(null);
+  const [localCounts, setLocalCounts] = useState<Record<string, number>>({});
+  const [submitting, setSubmitting] = useState(false);
+  const initRef = useRef(false);
+  const rollbackRef = useRef<{ type: string | null; counts: Record<string, number> }>({
+    type: null,
+    counts: {},
+  });
+
+  // Reset init flag when modal opens a different trade
+  useEffect(() => {
+    initRef.current = false;
+  }, [trade.id, groupId]);
+
+  // Initialize local state from server data once when first fetch completes
+  useEffect(() => {
+    if (initRef.current) return;
+    if (!isFetched) return;
+    if (!myId) return;
+    const my = reactions.find((r) => r.user_id === myId);
+    setLocalType(my?.reaction_type ?? null);
+    const m: Record<string, number> = {};
+    for (const r of reactions) m[r.reaction_type] = (m[r.reaction_type] ?? 0) + 1;
+    setLocalCounts(m);
+    initRef.current = true;
+  }, [isFetched, myId, reactions]);
+
+  const REACTIONS = [
+    { type: "reviewed", emoji: "👀", label: "Reviewed" },
+    { type: "good_execution", emoji: "✅", label: "Good execution" },
+    { type: "rule_break", emoji: "⚠️", label: "Rule break" },
+    { type: "useful_note", emoji: "💡", label: "Useful note" },
+    { type: "clean_setup", emoji: "🎯", label: "Clean setup" },
+  ] as const;
+
+  const upsertFn = useServerFn(upsertReaction);
+  const deleteFn = useServerFn(deleteReaction);
+
+  const reactMut = useMutation({
+    mutationFn: (type: string) =>
+      upsertFn({ data: { tradeId: trade.id, groupId, reactionType: type as any } }),
+    onError: (e: Error) => {
+      setLocalType(rollbackRef.current.type);
+      setLocalCounts(rollbackRef.current.counts);
+      toast.error(e.message);
     },
-    onError: (e: Error) => toast.error(e.message),
+    onSettled: () => setSubmitting(false),
   });
 
-  // Build threaded structure
-  const roots = useMemo(() => comments.filter((c) => !c.parent_id), [comments]);
-  const childrenMap = useMemo(() => {
-    const m = new Map<string, TradeComment[]>();
-    for (const c of comments) {
-      if (c.parent_id) {
-        if (!m.has(c.parent_id)) m.set(c.parent_id, []);
-        m.get(c.parent_id)!.push(c);
-      }
+  const unreactMut = useMutation({
+    mutationFn: () => deleteFn({ data: { tradeId: trade.id, groupId } }),
+    onError: (e: Error) => {
+      setLocalType(rollbackRef.current.type);
+      setLocalCounts(rollbackRef.current.counts);
+      toast.error(e.message);
+    },
+    onSettled: () => setSubmitting(false),
+  });
+
+  function handleClick(type: string) {
+    if (submitting) return;
+    const next = localType === type ? null : type;
+
+    rollbackRef.current = { type: localType, counts: { ...localCounts } };
+    setLocalType(next);
+
+    const newCounts = { ...localCounts };
+    if (localType) {
+      newCounts[localType] = Math.max(0, (newCounts[localType] ?? 0) - 1);
     }
-    return m;
-  }, [comments]);
+    if (next) {
+      newCounts[next] = (newCounts[next] ?? 0) + 1;
+    }
+    setLocalCounts(newCounts);
+    setSubmitting(true);
+
+    if (next === null) {
+      unreactMut.mutate();
+    } else {
+      reactMut.mutate(type);
+    }
+  }
 
   return (
     <ModalShell onClose={onClose} title={trade.instrument} wide>
@@ -813,12 +1169,16 @@ function TradeDetail({
             {trade.screenshots
               .filter((s) => s.url)
               .map((s) => (
-                <img
+                <div
                   key={s.id}
-                  src={s.url!}
-                  alt={trade.instrument}
-                  className="w-full rounded-xl ring-1 ring-white/[0.06]"
-                />
+                  className="flex items-center justify-center overflow-hidden rounded-xl bg-black/40"
+                >
+                  <img
+                    src={s.url!}
+                    alt={trade.instrument}
+                    className="max-h-[55vh] w-full object-contain"
+                  />
+                </div>
               ))}
           </div>
         )}
@@ -831,218 +1191,39 @@ function TradeDetail({
           )}
         </div>
 
-        <div>
-          <h4 className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-            Comments
-          </h4>
-          <div className="mt-3 space-y-3">
-            {roots.length === 0 && (
-              <p className="text-sm text-muted-foreground">No comments yet. Start the review.</p>
-            )}
-            {roots.slice(0, visibleCommentsCount).map((c) => (
-              <CommentNode
-                key={c.id}
-                comment={c}
-                replies={childrenMap.get(c.id) ?? []}
-                myId={myId ?? ""}
-                onReply={(id) => setReplyTo(id)}
-                groupId={groupId}
-                tradeId={trade.id}
-              />
-            ))}
-            {roots.length > visibleCommentsCount && (
-              <div className="mt-2.5 flex justify-center">
-                <button
-                  type="button"
-                  onClick={() => setVisibleCommentsCount((count) => count + 5)}
-                  className="rounded-lg bg-white/[0.04] px-3.5 py-1.5 text-xs font-semibold text-muted-foreground ring-1 ring-white/[0.06] hover:text-foreground transition duration-200"
-                >
-                  Show more comments
-                </button>
-              </div>
-            )}
-          </div>
-
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (body.trim()) add.mutate();
-            }}
-            className="mt-4 flex items-start gap-2"
-          >
-            <textarea
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              placeholder={replyTo ? "Write a reply…" : "Add a comment…"}
-              rows={2}
-              maxLength={4000}
-              className="flex-1 rounded-xl bg-white/[0.04] px-3 py-2.5 text-sm ring-1 ring-white/[0.06] focus:outline-none focus:ring-2 focus:ring-primary/40"
-            />
-            <div className="flex flex-col gap-2">
-              {replyTo && (
-                <button
-                  type="button"
-                  onClick={() => setReplyTo(null)}
-                  className="rounded-lg bg-white/[0.04] px-2.5 py-1 text-[10px] text-muted-foreground"
-                >
-                  Cancel reply
-                </button>
-              )}
+        <div className="flex flex-wrap gap-2">
+          {REACTIONS.map((r) => {
+            const selected = localType === r.type;
+            const count = localCounts[r.type] ?? 0;
+            return (
               <button
-                type="submit"
-                disabled={!body.trim() || add.isPending}
-                className="rounded-xl bg-primary px-3 py-2.5 text-primary-foreground shadow-[var(--shadow-glow)] disabled:opacity-50"
+                key={r.type}
+                type="button"
+                onClick={() => handleClick(r.type)}
+                className={cn(
+                  "inline-flex min-h-9 items-center gap-1.5 rounded-xl border px-3 py-1.5 text-sm transition-colors duration-150",
+                  selected
+                    ? "border-purple-400/30 bg-purple-500/[0.07] text-purple-300/90"
+                    : "border-transparent bg-white/[0.04] text-muted-foreground hover:bg-white/[0.07] hover:text-foreground",
+                )}
               >
-                <Send className="h-4 w-4" />
+                <span className="text-base leading-none">{r.emoji}</span>
+                <span className="text-xs font-medium">{r.label}</span>
+                <span
+                  className={cn(
+                    "ml-0.5 min-w-3 text-right text-[11px] font-semibold tabular-nums text-muted-foreground/80 transition-opacity duration-150",
+                    count > 0 ? "opacity-100" : "opacity-0",
+                  )}
+                  aria-hidden={count === 0}
+                >
+                  {count}
+                </span>
               </button>
-            </div>
-          </form>
+            );
+          })}
         </div>
       </div>
     </ModalShell>
-  );
-}
-
-function CommentNode({
-  comment,
-  replies,
-  myId,
-  onReply,
-  groupId,
-  tradeId,
-}: {
-  comment: TradeComment;
-  replies: TradeComment[];
-  myId: string;
-  onReply: (id: string) => void;
-  groupId: string;
-  tradeId: string;
-}) {
-  const qc = useQueryClient();
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(comment.body);
-
-  const updateFn = useServerFn(updateComment);
-  const deleteFn = useServerFn(deleteComment);
-  const update = useMutation({
-    mutationFn: () => updateFn({ data: { id: comment.id, body: draft.trim() } }),
-    onSuccess: () => {
-      setEditing(false);
-      qc.invalidateQueries({ queryKey: ["trade-comments", tradeId, groupId] });
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-  const del = useMutation({
-    mutationFn: () => deleteFn({ data: { id: comment.id } }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["trade-comments", tradeId, groupId] }),
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  const isMine = myId === comment.user_id;
-
-  return (
-    <div className="rounded-xl bg-white/[0.025] p-3.5 ring-1 ring-white/[0.04]">
-      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-        <div>
-          <span className="font-semibold text-foreground/90">
-            {comment.author_display?.trim() || "Member"}
-          </span>
-          {comment.updated_at !== comment.created_at && (
-            <span className="ml-2 text-[10px] text-muted-foreground/60 italic">edited</span>
-          )}
-        </div>
-        <div className="flex gap-1.5">
-          <button
-            onClick={() => onReply(comment.id)}
-            className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground transition hover:text-foreground"
-          >
-            Reply
-          </button>
-          {isMine && !editing && (
-            <>
-              <button
-                onClick={() => setEditing(true)}
-                className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground transition hover:text-foreground"
-              >
-                Edit
-              </button>
-              <button
-                onClick={() => del.mutate()}
-                className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground transition hover:text-destructive"
-              >
-                Delete
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-      {editing ? (
-        <div className="mt-2 flex flex-col gap-2">
-          <textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            rows={2}
-            className="rounded-lg bg-white/[0.04] px-3 py-2 text-sm ring-1 ring-white/[0.06] focus:outline-none focus:ring-2 focus:ring-primary/40"
-          />
-          <div className="flex justify-end gap-2">
-            <button
-              onClick={() => {
-                setEditing(false);
-                setDraft(comment.body);
-              }}
-              className="rounded-lg bg-white/[0.04] px-3 py-1 text-[11px] text-muted-foreground"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => update.mutate()}
-              disabled={!draft.trim() || update.isPending}
-              className="rounded-lg bg-primary px-3 py-1 text-[11px] font-semibold text-primary-foreground disabled:opacity-50"
-            >
-              Save
-            </button>
-          </div>
-        </div>
-      ) : (
-        <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed">{comment.body}</p>
-      )}
-
-      {replies.length > 0 && (
-        <div className="mt-3 space-y-2 border-l border-white/[0.06] pl-3">
-          {replies.map((r) => (
-            <div key={r.id} className="rounded-lg bg-white/[0.02] p-3 ring-1 ring-white/[0.04]">
-              <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                <div>
-                  <span className="font-semibold text-foreground/90">
-                    {r.author_display?.trim() || "Member"}
-                  </span>
-                  {r.updated_at !== r.created_at && (
-                    <span className="ml-2 text-[10px] text-muted-foreground/60 italic">edited</span>
-                  )}
-                </div>
-                {myId === r.user_id && (
-                  <button
-                    onClick={() => {
-                      const fn = async () => {
-                        await (
-                          await import("@/lib/groups.functions")
-                        ).deleteComment({ data: { id: r.id } });
-                        qc.invalidateQueries({ queryKey: ["trade-comments", tradeId, groupId] });
-                      };
-                      fn();
-                    }}
-                    className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground transition hover:text-destructive"
-                  >
-                    Delete
-                  </button>
-                )}
-              </div>
-              <p className="mt-1.5 whitespace-pre-wrap text-sm">{r.body}</p>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -1380,10 +1561,10 @@ function ModalShell({
       className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-md"
     >
       <motion.div
-        initial={{ scale: 0.96, y: 10 }}
+        initial={{ scale: 0.98, y: 8 }}
         animate={{ scale: 1, y: 0 }}
-        exit={{ scale: 0.96, y: 10 }}
-        transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+        exit={{ scale: 0.98, y: 8 }}
+        transition={MODAL_TRANSITION}
         onClick={(e: MouseEvent) => e.stopPropagation()}
         className={cn(
           "glow-card relative flex max-h-[90vh] w-full flex-col rounded-2xl p-6",

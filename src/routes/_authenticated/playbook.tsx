@@ -168,7 +168,7 @@ function NotesTab() {
   const del = useServerFn(deleteEntry);
 
   const { data } = useSuspenseQuery({ queryKey: ["notebook"], queryFn: () => list() });
-  const entries = (data ?? []) as Entry[];
+  const entries = useMemo(() => (data ?? []) as Entry[], [data]);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);

@@ -599,10 +599,10 @@ function RelatedTradesModal({
       onClick={onClose}
     >
       <motion.div
-        initial={{ scale: 0.96, y: 10 }}
+        initial={{ scale: 0.98, y: 8 }}
         animate={{ scale: 1, y: 0 }}
-        exit={{ scale: 0.96, y: 10 }}
-        transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+        exit={{ scale: 0.98, y: 6 }}
+        transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
         onClick={(e: MouseEvent) => e.stopPropagation()}
         className="glow-card w-full max-w-3xl rounded-2xl p-5"
       >

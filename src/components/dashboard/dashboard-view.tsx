@@ -10,27 +10,34 @@ import {
   YAxis,
 } from "recharts";
 import {
-  Target,
-  Briefcase,
-  TrendingUp,
-  TrendingDown,
-  Calendar,
-  Trophy,
-  Crosshair,
-  History,
   Flame,
-  Plus,
-  AlertTriangle,
+  BriefcaseBusiness,
+  CalendarDays,
+  Check,
   ClipboardCheck,
   ClipboardList,
+  Crosshair,
+  Goal,
+  History,
+  Plus,
+  Scale,
   Sparkles,
+  Target,
+  TrendingDown,
+  TrendingUp,
   User,
-  Check,
   type LucideIcon,
 } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { TradeFormModal } from "@/components/trades/trade-form-modal";
 import { TradeReviewModal } from "@/components/trades/trade-review-modal";
+import {
+  Select as ShadcnSelect,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useSuspenseQuery, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { listTrades } from "@/lib/trades.functions";
@@ -42,6 +49,7 @@ import { cn } from "@/lib/utils";
 import { overview, equityCurve } from "@/lib/analytics";
 import {
   isPaperTrade,
+  isResultComplete,
   localDateKey,
   numberTradesById,
   recordedR,
@@ -136,7 +144,9 @@ const card = {
   animate: { opacity: 1, y: 0 },
 };
 
-const motionTransition = { duration: 0.22, ease: [0.16, 1, 0.3, 1] as const };
+const MOTION_EASE = [0.16, 1, 0.3, 1] as const;
+const motionTransition = { duration: 0.22, ease: MOTION_EASE };
+const modalTransition = { duration: 0.22, ease: MOTION_EASE };
 
 function StatCard({
   icon: Icon,
@@ -270,10 +280,10 @@ function ProfileSetupModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="profile-setup-title"
-        initial={{ scale: 0.96, y: 10 }}
+        initial={{ scale: 0.98, y: 8 }}
         animate={{ scale: 1, y: 0 }}
-        exit={{ scale: 0.96, y: 10 }}
-        transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+        exit={{ scale: 0.98, y: 6 }}
+        transition={modalTransition}
         onSubmit={(event) => {
           event.preventDefault();
           if (!canSave) return;
@@ -418,6 +428,18 @@ export function DashboardView() {
   const db = useMemo(() => (trades ?? []) as DbTrade[], [trades]);
   const realDb = useMemo(() => db.filter((trade) => !isPaperTrade(trade)), [db]);
 
+  const [selectedAccountId, setSelectedAccountId] = useState<string>("ALL");
+
+  const dashboardDb = useMemo(() => {
+    if (selectedAccountId === "ALL") return realDb;
+    return realDb.filter((t) => t.account_id === selectedAccountId);
+  }, [realDb, selectedAccountId]);
+
+  const dashboardResultCompleteDb = useMemo(
+    () => dashboardDb.filter((t) => isResultComplete(t)),
+    [dashboardDb],
+  );
+
   useEffect(() => {
     const updateGreeting = () => setDisplayGreeting(getBrowserLocalGreeting());
     updateGreeting();
@@ -425,67 +447,80 @@ export function DashboardView() {
     return () => window.clearInterval(timer);
   }, []);
 
-  const activeAccount: TradingAccount | null = useMemo(
-    () => (accounts ?? []).find((a) => a.is_active) ?? null,
-    [accounts],
+  const dashboardRows = useMemo(() => dashboardDb.map(toAnalytics), [dashboardDb]);
+  const dashboardResultCompleteRows = useMemo(
+    () => dashboardResultCompleteDb.map(toAnalytics),
+    [dashboardResultCompleteDb],
   );
 
-  // Lifetime = real trades across every account.
-  const lifetimeRows = useMemo(() => realDb.map(toAnalytics), [realDb]);
+  const o = useMemo(() => overview(dashboardRows), [dashboardRows]);
+  const eq = useMemo(() => equityCurve(dashboardResultCompleteRows), [dashboardResultCompleteRows]);
+  const streak = useMemo(() => streaks(dashboardDb), [dashboardDb]);
 
-  // Active-account-scoped rows (for current balance / charts).
-  const activeDb = useMemo(() => {
-    if (!activeAccount) return realDb;
-    return realDb.filter((t) => t.account_id === activeAccount.id);
-  }, [realDb, activeAccount]);
-  const activeRows = useMemo(() => {
-    if (!activeAccount) return lifetimeRows;
-    return activeDb.map(toAnalytics);
-  }, [activeAccount, activeDb, lifetimeRows]);
-
-  const o = useMemo(() => overview(activeRows), [activeRows]);
-  const eq = useMemo(() => equityCurve(activeRows), [activeRows]);
-  const streak = useMemo(() => streaks(realDb), [realDb]);
-
-  const recent = useMemo(() => [...realDb].slice(0, 5), [realDb]);
-  const tradeNumbersById = useMemo(() => numberTradesById(realDb), [realDb]);
+  const recent = useMemo(() => [...dashboardDb].slice(0, 5), [dashboardDb]);
+  const tradeNumbersById = useMemo(() => numberTradesById(dashboardDb), [dashboardDb]);
 
   // ------ Today snapshot (Phase 3: lighter daily-focused dashboard) ------
   const todayStr = localDateKey();
   const todayTrades = useMemo(
-    () => realDb.filter((t) => t.trade_date === todayStr),
-    [realDb, todayStr],
+    () => dashboardDb.filter((t) => t.trade_date === todayStr),
+    [dashboardDb, todayStr],
   );
   const todayNetR = useMemo(() => sumRecordedR(todayTrades.map(toAnalytics)), [todayTrades]);
 
   // ------ Journal completeness reminder ------
-  // Status is derived from quick-capture essentials plus screenshot + reasoning.
   const journalGaps = useMemo(() => {
-    const incomplete = realDb.filter((t) => getReviewStatus(t) === "incomplete").length;
-    const needsReview = realDb.filter((t) => getReviewStatus(t) === "needs_review").length;
-    const reviewed = realDb.filter((t) => getReviewStatus(t) === "reviewed").length;
+    const incomplete = dashboardDb.filter((t) => getReviewStatus(t) === "incomplete").length;
+    const needsReview = dashboardDb.filter((t) => getReviewStatus(t) === "needs_review").length;
+    const reviewed = dashboardDb.filter((t) => getReviewStatus(t) === "reviewed").length;
     return { incomplete, needsReview, reviewed };
-  }, [realDb]);
-  const hasJournalGaps = realDb.length > 0 && journalGaps.incomplete + journalGaps.needsReview > 0;
+  }, [dashboardDb]);
+  const hasJournalGaps =
+    dashboardDb.length > 0 && journalGaps.incomplete + journalGaps.needsReview > 0;
 
   const now = new Date();
   const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   const monthLabel = now.toLocaleString("en-US", { month: "long", year: "numeric" });
-  const currentMonthRows = useMemo(
-    () => activeRows.filter((t) => t.trade_date.startsWith(ym)),
-    [activeRows, ym],
+  const currentMonthCompleteRows = useMemo(
+    () => dashboardResultCompleteRows.filter((t) => t.trade_date.startsWith(ym)),
+    [dashboardResultCompleteRows, ym],
+  );
+  const currentMonthLogged = useMemo(
+    () => dashboardRows.filter((t) => t.trade_date.startsWith(ym)),
+    [dashboardRows, ym],
   );
   const monthChart = useMemo(() => {
-    const eqM = equityCurve(currentMonthRows);
+    const eqM = equityCurve(currentMonthCompleteRows);
     return eqM.map((p) => ({ d: p.tradeIndex === 0 ? "0" : p.date.slice(8), v: p.cumR }));
-  }, [currentMonthRows]);
+  }, [currentMonthCompleteRows]);
 
   const equityAll = useMemo(() => {
     return eq.map((point) => ({ d: point.tradeIndex === 0 ? "0" : point.date, v: point.cumR }));
   }, [eq]);
 
-  // Account overview math uses canonical per-trade dollar P&L.
-  const sumR = useMemo(() => sumRecordedR(activeRows), [activeRows]);
+  const closedCount = useMemo(
+    () =>
+      dashboardDb.filter(
+        (t) => t.result === "win" || t.result === "loss" || t.result === "breakeven",
+      ).length,
+    [dashboardDb],
+  );
+  const resultCompleteCount = dashboardResultCompleteDb.length;
+  const showResultNote = resultCompleteCount > 0 && resultCompleteCount < closedCount;
+  const resultNote = showResultNote
+    ? `Based on ${resultCompleteCount} of ${Math.max(closedCount, resultCompleteCount)} trades`
+    : undefined;
+
+  const sumR = useMemo(
+    () => sumRecordedR(dashboardResultCompleteRows),
+    [dashboardResultCompleteRows],
+  );
+  const avgRR = useMemo(() => {
+    const rrs = dashboardResultCompleteRows
+      .map((t) => recordedR(t.achieved_rr))
+      .filter((n): n is number => n !== null);
+    return rrs.length ? rrs.reduce((a, b) => a + b, 0) / rrs.length : null;
+  }, [dashboardResultCompleteRows]);
 
   const accountCount = accounts?.length ?? 0;
   const profileIncomplete = isProfileIncomplete(profile);
@@ -493,8 +528,8 @@ export function DashboardView() {
   const shouldShowIntroGuide = accounts !== undefined && accountCount === 0 && realDb.length === 0;
   const displayName = profile?.display_name?.trim() || "Trader";
   const reviewedTradesCount = useMemo(
-    () => realDb.filter((trade) => getReviewStatus(trade) === "reviewed").length,
-    [realDb],
+    () => dashboardDb.filter((trade) => getReviewStatus(trade) === "reviewed").length,
+    [dashboardDb],
   );
   const [scopeUnlockDismissed, setScopeUnlockDismissed] = useState(() => {
     try {
@@ -505,38 +540,37 @@ export function DashboardView() {
   });
   const hasFirstReview = reviewedTradesCount > 0;
   const scopeReady = reviewedTradesCount >= SCOPE_UNLOCK_THRESHOLD;
-  const activeReviewedTradesCount = useMemo(
-    () => activeDb.filter((trade) => getReviewStatus(trade) === "reviewed").length,
-    [activeDb],
-  );
   const executionFocus = useMemo(() => {
-    const latestTrade = [...realDb].sort((a, b) =>
+    const allDb = realDb;
+    const s = streaks(allDb);
+    const latestTrade = [...allDb].sort((a, b) =>
       (b.trade_date + (b.trade_time ?? "")).localeCompare(a.trade_date + (a.trade_time ?? "")),
     )[0];
     const latestR = latestTrade ? rrNum(latestTrade.achieved_rr) : 0;
 
-    if (streak.currentLoss >= 3) {
+    const icon = Goal;
+    if (s.currentLoss >= 3) {
       return {
         tone: "warning" as Tone,
-        icon: AlertTriangle,
+        icon,
         headline: "Losing streak detected",
-        message: `You're on a ${streak.currentLoss}-trade losing streak. Slow down and make sure the next trade fits your plan.`,
+        message: `You're on a ${s.currentLoss}-trade losing streak. Slow down and make sure the next trade fits your plan.`,
         secondary: "Loss streaks can happen. Keep risk steady.",
       };
     }
-    if (streak.currentWin >= 3) {
+    if (s.currentWin >= 3) {
       return {
         tone: "primary" as Tone,
-        icon: Check,
+        icon,
         headline: "Strong run detected",
-        message: `You've had ${streak.currentWin} winning trades in a row. Keep the next trade planned and risk steady.`,
+        message: `You've had ${s.currentWin} winning trades in a row. Keep the next trade planned and risk steady.`,
         secondary: "Good results should not change your rules.",
       };
     }
     if (latestTrade && latestR <= -2) {
       return {
         tone: "warning" as Tone,
-        icon: AlertTriangle,
+        icon,
         headline: "Large loss logged",
         message:
           "Your latest trade was a larger loss. Review what happened before taking the next one.",
@@ -545,12 +579,12 @@ export function DashboardView() {
     }
     return {
       tone: "primary" as Tone,
-      icon: ClipboardCheck,
+      icon,
       headline: "Stay process-first",
       message: "Wait for your plan, keep risk steady, and review the trade after execution.",
       secondary: "Consistent records make your edge easier to see.",
     };
-  }, [realDb, streak.currentLoss, streak.currentWin]);
+  }, [realDb]);
   const currentStreakStat = useMemo(() => formatCurrentStreak(streak), [streak]);
 
   // Guide stage — only show before first review is complete
@@ -625,22 +659,41 @@ export function DashboardView() {
         eyebrow="Dashboard"
         title={`${displayGreeting}, ${displayName}`}
         description="Your trading overview, journal gaps, account health, and review momentum."
+        className="sm:items-center"
         actions={
-          <button
-            onClick={() => setNewOpen(true)}
-            className="group relative inline-flex items-center gap-2 rounded-xl bg-gradient-to-br from-primary to-primary/85 px-5 py-2.5 text-sm font-semibold text-primary-foreground ring-1 ring-primary/40 shadow-[0_0_0_1px_oklch(0.68_0.23_295/0.35),0_8px_28px_-6px_oklch(0.68_0.23_295/0.55),0_0_44px_-10px_oklch(0.68_0.23_295/0.65)] transition-all duration-200 hover:-translate-y-px hover:brightness-110 hover:shadow-[0_0_0_1px_oklch(0.68_0.23_295/0.5),0_12px_36px_-6px_oklch(0.68_0.23_295/0.7),0_0_64px_-12px_oklch(0.68_0.23_295/0.85)]"
-          >
-            <span
-              aria-hidden
-              className="pointer-events-none absolute -inset-px rounded-xl bg-gradient-to-br from-white/15 to-transparent opacity-60 mix-blend-overlay"
-            />
-            <Plus className="relative h-4 w-4 transition-transform duration-200 group-hover:rotate-90" />
-            <span className="relative">New trade</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <ShadcnSelect value={selectedAccountId} onValueChange={setSelectedAccountId}>
+              <SelectTrigger
+                aria-label="Filter by account"
+                className="min-w-[160px] max-w-[220px] rounded-xl bg-white/[0.04] px-3 py-2 text-xs font-semibold text-muted-foreground ring-1 ring-white/[0.06] transition-all duration-200 hover:text-foreground focus:ring-2 focus:ring-primary/40 h-auto"
+              >
+                <SelectValue placeholder="All accounts" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">All accounts</SelectItem>
+                {(accounts ?? []).map((account) => (
+                  <SelectItem key={account.id} value={account.id}>
+                    {account.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </ShadcnSelect>
+            <button
+              onClick={() => setNewOpen(true)}
+              className="group relative inline-flex items-center gap-2 rounded-xl bg-gradient-to-br from-primary to-primary/85 px-5 py-2.5 text-sm font-semibold text-primary-foreground whitespace-nowrap ring-1 ring-primary/40 shadow-[0_0_0_1px_oklch(0.68_0.23_295/0.35),0_8px_28px_-6px_oklch(0.68_0.23_295/0.55),0_0_44px_-10px_oklch(0.68_0.23_295/0.65)] transition-all duration-200 hover:-translate-y-px hover:brightness-110 hover:shadow-[0_0_0_1px_oklch(0.68_0.23_295/0.5),0_12px_36px_-6px_oklch(0.68_0.23_295/0.7),0_0_64px_-12px_oklch(0.68_0.23_295/0.85)]"
+            >
+              <span
+                aria-hidden
+                className="pointer-events-none absolute -inset-px rounded-xl bg-gradient-to-br from-white/15 to-transparent opacity-60 mix-blend-overlay"
+              />
+              <Plus className="relative h-4 w-4 transition-transform duration-200 group-hover:rotate-90" />
+              <span className="relative">New trade</span>
+            </button>
+          </div>
         }
       />
 
-      {/* Activation guide — only before first review */}
+      {/* Activation guide — use only before first review */}
       {accounts !== undefined && !profileIncomplete && activationGuide && (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
@@ -754,10 +807,10 @@ export function DashboardView() {
               role="dialog"
               aria-modal="true"
               aria-labelledby="intro-guide-title"
-              initial={{ scale: 0.96, y: 10 }}
+              initial={{ scale: 0.98, y: 8 }}
               animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.96, y: 10 }}
-              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+              exit={{ scale: 0.98, y: 6 }}
+              transition={modalTransition}
               className={`relative w-full max-w-xl overflow-hidden rounded-2xl border border-white/[0.1] bg-[radial-gradient(circle_at_top_left,oklch(0.68_0.23_295/0.1),transparent_34%),linear-gradient(145deg,oklch(0.12_0.02_270/0.96),oklch(0.075_0.012_270/0.98))] p-7 shadow-[0_22px_70px_-34px_oklch(0_0_0/0.86),0_0_38px_-28px_oklch(0.68_0.23_295/0.46)] ${INTRO_CARD_HOVER}`}
             >
               <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-primary/70 to-transparent" />
@@ -933,7 +986,7 @@ export function DashboardView() {
                 toneStyles[executionFocus.tone].icon,
               )}
             >
-              <executionFocus.icon className="h-5 w-5" />
+              <ClipboardCheck className="h-5 w-5" />
             </div>
             <div className="min-w-0">
               <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground/85">
@@ -990,7 +1043,7 @@ export function DashboardView() {
 
       {/* KPI Cards */}
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 xl:auto-rows-fr">
-        <StatCard icon={Briefcase} label="TOTAL TRADES" value={o.total} tone="info" />
+        <StatCard icon={BriefcaseBusiness} label="TOTAL TRADES" value={o.total} tone="info" />
         <StatCard
           icon={Target}
           label="WIN RATE"
@@ -1001,28 +1054,35 @@ export function DashboardView() {
           sub={o.winRate == null ? "No closed trades" : undefined}
         />
         <StatCard
-          icon={TrendingUp}
+          icon={Scale}
           label="AVERAGE RR"
-          value={o.avgRR ?? 0}
+          value={avgRR ?? 0}
           decimals={2}
           suffix="R"
           tone="success"
-          sub={o.avgRR == null ? "No R recorded" : undefined}
+          sub={
+            avgRR == null
+              ? closedCount > 0
+                ? "Add risk + P/L to see avg R"
+                : "No closed trades"
+              : resultNote
+          }
         />
         <StatCard
-          icon={Trophy}
+          icon={TrendingUp}
           label="NET R"
           value={sumR}
           decimals={2}
           suffix="R"
           tone={sumR >= 0 ? "success" : "destructive"}
+          sub={resultNote}
         />
         <StatCard
-          icon={ClipboardList}
+          icon={ClipboardCheck}
           label="REVIEWED TRADES"
-          value={activeReviewedTradesCount}
+          value={reviewedTradesCount}
           tone="warning"
-          sub={o.total ? `${activeReviewedTradesCount} of ${o.total}` : "No trades yet"}
+          sub={o.total ? `${reviewedTradesCount} of ${o.total}` : "No trades yet"}
         />
         <StatCard
           icon={currentStreakStat.icon}
@@ -1051,7 +1111,7 @@ export function DashboardView() {
               View all →
             </Link>
           </div>
-          <div className="mt-4 space-y-1">
+          <div className="mt-4 space-y-2">
             {recent.length === 0 && (
               <PremiumEmptyState
                 icon={History}
@@ -1061,7 +1121,8 @@ export function DashboardView() {
               />
             )}
             {recent.map((t, index) => {
-              const rr = rrNum(t.achieved_rr);
+              const displayR = recordedR(t.achieved_rr);
+              const rr = displayR ?? 0;
               const tradeNumber = tradeNumbersById.get(t.id) ?? realDb.length - index;
               const tone: Tone =
                 t.result === "win" ? "success" : t.result === "loss" ? "destructive" : "info";
@@ -1078,7 +1139,7 @@ export function DashboardView() {
                   key={t.id}
                   type="button"
                   onClick={() => setReviewTrade({ id: t.id, number: tradeNumber })}
-                  className="grid w-full grid-cols-[minmax(0,1fr)_minmax(78px,92px)_minmax(68px,78px)] items-center gap-3 rounded-xl px-2 py-2.5 text-left transition-all duration-200 hover:bg-white/[0.04] focus:outline-none focus-visible:bg-white/[0.05] focus-visible:ring-1 focus-visible:ring-primary/30"
+                  className="grid w-full grid-cols-[minmax(0,1fr)_minmax(78px,92px)_minmax(68px,78px)] items-center gap-3 rounded-xl bg-white/[0.025] px-3 py-3 text-left ring-1 ring-white/[0.05] transition-all duration-200 hover:bg-white/[0.04] focus:outline-none focus-visible:bg-white/[0.05] focus-visible:ring-1 focus-visible:ring-primary/30"
                 >
                   <div className="min-w-0 leading-tight">
                     <div className="truncate text-sm font-medium">{t.instrument}</div>
@@ -1097,13 +1158,12 @@ export function DashboardView() {
                   <span
                     className={cn(
                       "shrink-0 justify-self-end text-sm font-semibold tabular-nums",
-                      tone === "success" && "text-success",
-                      tone === "destructive" && "text-destructive",
-                      tone === "info" && "text-muted-foreground",
+                      displayR != null && rr > 0 && "text-success",
+                      displayR != null && rr < 0 && "text-destructive",
+                      (displayR == null || rr === 0) && "text-muted-foreground",
                     )}
                   >
-                    {rr > 0 ? "+" : ""}
-                    {rr.toFixed(2)}R
+                    {displayR != null ? (rr > 0 ? "+" : "") + rr.toFixed(2) + "R" : "—"}
                   </span>
                 </button>
               );
@@ -1115,13 +1175,18 @@ export function DashboardView() {
           <MonthlyPerformanceTabbed
             monthChart={monthChart}
             monthLabel={monthLabel}
-            currentMonthTradeCount={currentMonthRows.length}
+            currentMonthTradeCount={currentMonthCompleteRows.length}
+            loggedMonthCount={currentMonthLogged.length}
           />
         </div>
       </div>
 
       {/* Overall Equity Curve */}
-      <OverallEquitySection data={equityAll} tradeCount={activeRows.length} />
+      <OverallEquitySection
+        data={equityAll}
+        tradeCount={dashboardResultCompleteRows.length}
+        loggedCount={dashboardRows.length}
+      />
 
       <AnimatePresence>
         {reviewTrade && (
@@ -1140,11 +1205,14 @@ function MonthlyPerformanceTabbed({
   monthChart,
   monthLabel,
   currentMonthTradeCount,
+  loggedMonthCount,
 }: {
   monthChart: { d: string; v: number }[];
   monthLabel: string;
   currentMonthTradeCount: number;
+  loggedMonthCount: number;
 }) {
+  const missingCount = Math.max(0, 3 - currentMonthTradeCount);
   return (
     <motion.div
       {...card}
@@ -1153,7 +1221,7 @@ function MonthlyPerformanceTabbed({
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="flex items-center gap-2 text-sm font-semibold">
-          <Calendar className="h-4 w-4 text-primary" /> Monthly performance
+          <CalendarDays className="h-4 w-4 text-primary" /> Monthly performance
         </h3>
         <span className="rounded-md bg-white/[0.05] px-2.5 py-1 text-xs font-medium text-muted-foreground">
           {monthLabel}
@@ -1162,7 +1230,14 @@ function MonthlyPerformanceTabbed({
 
       <div className="mt-4 h-[260px]">
         {currentMonthTradeCount < 3 ? (
-          <DashboardLowDataState description="Log at least 3 trades to make monthly performance useful." />
+          loggedMonthCount >= 3 ? (
+            <DashboardLowDataState
+              title="Add trade result details"
+              description={`Add risk and profit/loss for ${missingCount} more trade${missingCount === 1 ? "" : "s"}.`}
+            />
+          ) : (
+            <DashboardLowDataState description="Log at least 3 trades to make monthly performance useful." />
+          )
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={monthChart} margin={{ top: 10, right: 8, left: -16, bottom: 8 }}>
@@ -1212,10 +1287,13 @@ function MonthlyPerformanceTabbed({
 function OverallEquitySection({
   data,
   tradeCount,
+  loggedCount,
 }: {
   data: { d: string; v: number }[];
   tradeCount: number;
+  loggedCount: number;
 }) {
+  const missingCount = Math.max(0, 3 - tradeCount);
   return (
     <motion.div
       {...card}
@@ -1232,7 +1310,14 @@ function OverallEquitySection({
       </div>
       <div className="mt-4 h-[320px]">
         {tradeCount < 3 ? (
-          <DashboardLowDataState description="Log at least 3 trades to make the equity curve useful." />
+          loggedCount >= 3 ? (
+            <DashboardLowDataState
+              title="Add trade result details"
+              description={`Add risk and profit/loss for ${missingCount} more trade${missingCount === 1 ? "" : "s"}.`}
+            />
+          ) : (
+            <DashboardLowDataState description="Log at least 3 trades to make the equity curve useful." />
+          )
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={data} margin={{ top: 10, right: 8, left: -16, bottom: 8 }}>
@@ -1289,7 +1374,7 @@ function DashboardLowDataState({
   description: string;
 }) {
   return (
-    <div className="grid h-full min-h-[160px] place-items-center rounded-xl bg-white/[0.02] px-5 py-8 text-center ring-1 ring-white/[0.04]">
+    <div className="flex h-full min-h-[160px] items-center justify-center rounded-xl bg-white/[0.02] px-5 text-center ring-1 ring-white/[0.04]">
       <div>
         <div className="text-sm font-semibold text-foreground">{title}</div>
         <p className="mt-1 text-sm leading-5 text-muted-foreground">{description}</p>

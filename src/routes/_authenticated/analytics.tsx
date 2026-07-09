@@ -14,32 +14,50 @@ import {
   Tooltip,
 } from "recharts";
 import {
-  Activity,
+  AlertTriangle,
+  ArrowLeftRight,
+  Award,
   BarChart3,
-  Target,
-  Flame,
+  Brain,
+  Calculator,
   CalendarDays,
+  CalendarFold,
   CalendarRange,
-  Trophy,
-  Layers,
-  DollarSign,
-  Grid3x3,
-  Smile,
-  Search,
-  X,
+  CandlestickChart,
   ChevronDown,
+  ClipboardCheck,
+  Clock,
+  Crosshair,
+  Lightbulb,
+  Scale,
+  Search,
+  ShieldAlert,
+  Sigma,
+  Tags,
+  Target,
+  TrendingUp,
+  X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { EMOTIONS } from "@/lib/emotions";
 import { PageHeader, PageShell, PremiumEmptyState } from "@/components/ui/premium";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useSuspenseQuery, useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { listTrades } from "@/lib/trades.functions";
+import { listTradingAccounts } from "@/lib/trading-accounts.functions";
+import {
+  Select as ShadcnSelect,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { AnimatedNumber } from "@/components/dashboard/animated-number";
 import { cn } from "@/lib/utils";
 import { sessionLabel, SESSIONS, KILLZONES, killzoneLabel } from "@/lib/trade-constants";
 import {
   isPaperTrade,
+  isResultComplete,
   localDateKey,
   recordedR,
   rrNum,
@@ -55,6 +73,14 @@ import {
   killzoneStats,
 } from "@/lib/analytics";
 import { getReviewStatus } from "@/lib/review-status";
+import { parsePlannedRR } from "@/lib/planned-rr";
+
+const MOTION_EASE = [0.16, 1, 0.3, 1] as const;
+const CALM_TRANSITION = { duration: 0.22, ease: MOTION_EASE };
+const MIN_BREAKDOWN_SAMPLE = 3;
+const MIN_SESSION_HIGHLIGHT_SAMPLE = 5;
+const MIN_KILLZONE_HIGHLIGHT_SAMPLE = 3;
+const MIN_EMOTION_HIGHLIGHT_SAMPLE = 3;
 
 export const Route = createFileRoute("/_authenticated/analytics")({
   head: () => ({
@@ -81,6 +107,7 @@ type ReportScope = "overall" | "weekly" | "monthly" | "quarterly" | "yearly";
 
 type Report = {
   totalTrades: number;
+  resultCompleteCount: number;
   winRate: number | null;
   avgRR: number;
   totalR: number;
@@ -245,6 +272,13 @@ function listMonthKeys(all: DbTrade[]): string[] {
   return Array.from(set).sort((a, b) => b.localeCompare(a));
 }
 
+function listQuarterKeys(all: DbTrade[]): string[] {
+  const set = new Set<string>();
+  for (const t of all) set.add(quarterKey(new Date(t.trade_date + "T00:00:00")));
+  set.add(quarterKey(new Date()));
+  return Array.from(set).sort((a, b) => b.localeCompare(a));
+}
+
 function recentWeekKeys(count: number): string[] {
   const currentStart = startOfWeekISO(new Date());
   return Array.from({ length: count }, (_item, index) =>
@@ -331,21 +365,26 @@ function labelWeekRange(key: string): string {
 
 function buildReport(trades: DbTrade[], scope: ReportScope): Report {
   const ana = trades.map(toAnalytics);
+  const resultCompleteTrades = trades.filter(isResultComplete);
+  const resultCompleteAna = resultCompleteTrades.map(toAnalytics);
   const total = trades.length;
+  const resultCompleteCount = resultCompleteTrades.length;
   const wins = trades.filter((t) => t.result === "win").length;
   const losses = trades.filter((t) => t.result === "loss").length;
   const decided = wins + losses;
   const winRate = decided ? (wins / decided) * 100 : null;
 
-  const rrs = ana.map((t) => recordedR(t.achieved_rr)).filter((n): n is number => n !== null);
+  const rrs = resultCompleteAna
+    .map((t) => recordedR(t.achieved_rr))
+    .filter((n): n is number => n !== null);
   const totalR = rrs.reduce((a, b) => a + b, 0);
   const avgRR = rrs.length ? totalR / rrs.length : 0;
 
-  const winsR = trades
+  const winsR = resultCompleteTrades
     .filter((t) => t.result === "win")
     .map((t) => recordedR(t.achieved_rr))
     .filter((n): n is number => n !== null);
-  const lossR = trades
+  const lossR = resultCompleteTrades
     .filter((t) => t.result === "loss")
     .map((t) => recordedR(t.achieved_rr))
     .filter((n): n is number => n !== null);
@@ -354,7 +393,7 @@ function buildReport(trades: DbTrade[], scope: ReportScope): Report {
   const expectancy = rrs.length ? totalR / rrs.length : null;
   const profitFactor = sumWin > 0 && sumLoss > 0 ? sumWin / sumLoss : null;
 
-  const eq = equityCurve(ana);
+  const eq = equityCurve(resultCompleteAna);
   let peak = 0,
     maxDD = 0;
   for (const p of eq) {
@@ -381,7 +420,9 @@ function buildReport(trades: DbTrade[], scope: ReportScope): Report {
       avgRR: rrList.length ? Number((netR / rrList.length).toFixed(2)) : null,
     };
   });
-  const eligibleSessions = sStats.filter((s) => s.winRate != null && s.count >= 5);
+  const eligibleSessions = sStats.filter(
+    (s) => s.winRate != null && s.count >= MIN_SESSION_HIGHLIGHT_SAMPLE,
+  );
   const bestSessionStat = [...eligibleSessions].sort(
     (a, b) => (b.winRate ?? 0) - (a.winRate ?? 0),
   )[0];
@@ -402,7 +443,9 @@ function buildReport(trades: DbTrade[], scope: ReportScope): Report {
       avgRR: s?.avgRR ?? null,
     };
   });
-  const eligibleKz = kzStats.filter((s) => s.winRate != null && s.count >= 3);
+  const eligibleKz = kzStats.filter(
+    (s) => s.winRate != null && s.count >= MIN_KILLZONE_HIGHLIGHT_SAMPLE,
+  );
   const bestKzStat = [...eligibleKz].sort((a, b) => (b.winRate ?? 0) - (a.winRate ?? 0))[0];
   const worstKzStat = [...eligibleKz].sort((a, b) => (a.winRate ?? 0) - (b.winRate ?? 0))[0];
 
@@ -428,12 +471,9 @@ function buildReport(trades: DbTrade[], scope: ReportScope): Report {
   });
   const bestCategory = categories[0]?.name ?? "—";
 
-  const closedTrades = trades.filter(
-    (t) => t.result === "win" || t.result === "loss" || t.result === "breakeven",
-  );
   let best: DbTrade | null = null,
     worst: DbTrade | null = null;
-  for (const t of closedTrades) {
+  for (const t of resultCompleteTrades) {
     const v = rrNum(t.achieved_rr);
     if (!best || v > rrNum(best.achieved_rr)) best = t;
     if (!worst || v < rrNum(worst.achieved_rr)) worst = t;
@@ -501,14 +541,17 @@ function buildReport(trades: DbTrade[], scope: ReportScope): Report {
     };
   });
 
-  // Planned vs Achieved — only trades where both are present
-  const pairBoth = trades
+  // Planned vs Achieved — planned uses any trade with planned_rr, achieved needs result-complete
+  const pairBoth = resultCompleteTrades
     .filter((t) => t.result === "win" || t.result === "loss" || t.result === "breakeven")
     .map((t) => ({
-      planned: t.planned_rr != null && t.planned_rr !== "" ? parseFloat(String(t.planned_rr)) : NaN,
+      planned: parsePlannedRR(t.planned_rr),
       achieved: t.achieved_rr != null && t.achieved_rr !== "" ? Number(t.achieved_rr) : NaN,
     }))
-    .filter((p) => Number.isFinite(p.planned) && Number.isFinite(p.achieved));
+    .filter(
+      (p): p is { planned: number; achieved: number } =>
+        p.planned != null && Number.isFinite(p.achieved),
+    );
   const plannedVsAchieved = (() => {
     if (pairBoth.length === 0)
       return { plannedAvg: null, achievedAvg: null, capturePct: null, sampleSize: 0 };
@@ -523,11 +566,11 @@ function buildReport(trades: DbTrade[], scope: ReportScope): Report {
   })();
 
   // Mistake-tag breakdown
+  const completeIds = new Set(resultCompleteTrades.map((t) => t.id));
   const mistakeMap = new Map<string, { count: number; netR: number }>();
   for (const t of trades) {
     const tags = (t.mistake_tags ?? []) as string[];
-    const closed = t.result === "win" || t.result === "loss" || t.result === "breakeven";
-    const r = closed ? rrNum(t.achieved_rr) : 0;
+    const r = completeIds.has(t.id) ? rrNum(t.achieved_rr) : 0;
     for (const tag of tags) {
       if (!tag) continue;
       const cur = mistakeMap.get(tag) ?? { count: 0, netR: 0 };
@@ -581,7 +624,7 @@ function buildReport(trades: DbTrade[], scope: ReportScope): Report {
       netR: netR == null ? null : Number(netR.toFixed(2)),
     };
   });
-  const eligibleDays = weekdays.filter((d) => d.count >= 1 && d.winRate != null);
+  const eligibleDays = weekdays.filter((d) => d.count >= MIN_BREAKDOWN_SAMPLE && d.winRate != null);
   const sortedByWR = [...eligibleDays].sort((a, b) => (b.winRate ?? 0) - (a.winRate ?? 0));
   const bestDay = sortedByWR[0]?.name ?? null;
   const worstDay = sortedByWR.length > 1 ? sortedByWR[sortedByWR.length - 1].name : null;
@@ -630,7 +673,7 @@ function buildReport(trades: DbTrade[], scope: ReportScope): Report {
   for (const t of trades) {
     const tags = (t.emotion_tags ?? []) as string[];
     const r = rrNum(t.achieved_rr);
-    const hasR = t.achieved_rr != null;
+    const hasR = completeIds.has(t.id);
     for (const tag of tags) {
       if (!tag) continue;
       const cur = emoMap.get(tag) ?? { count: 0, wins: 0, losses: 0, rSum: 0, rCount: 0, netR: 0 };
@@ -661,7 +704,9 @@ function buildReport(trades: DbTrade[], scope: ReportScope): Report {
     })
     .sort((a, b) => b.count - a.count);
   const mostUsedEmo = emotionItems[0] ?? null;
-  const eligibleEmo = emotionItems.filter((e) => e.winRate != null && e.count >= 2) as {
+  const eligibleEmo = emotionItems.filter(
+    (e) => e.winRate != null && e.count >= MIN_EMOTION_HIGHLIGHT_SAMPLE,
+  ) as {
     key: string;
     emoji: string;
     label: string;
@@ -676,6 +721,7 @@ function buildReport(trades: DbTrade[], scope: ReportScope): Report {
 
   return {
     totalTrades: total,
+    resultCompleteCount,
     winRate,
     avgRR,
     totalR: Number(totalR.toFixed(2)),
@@ -795,7 +841,7 @@ function LowDataState({
   description?: string;
 }) {
   return (
-    <div className="grid min-h-[160px] place-items-center rounded-xl bg-white/[0.02] px-5 py-8 text-center ring-1 ring-white/[0.04]">
+    <div className="flex h-full min-h-[160px] items-center justify-center rounded-xl bg-white/[0.02] px-5 text-center ring-1 ring-white/[0.04]">
       <div>
         <div className="text-sm font-semibold text-foreground">{title}</div>
         <p className="mt-1 text-sm leading-5 text-muted-foreground">{description}</p>
@@ -806,15 +852,33 @@ function LowDataState({
 
 function SimpleSectionState({ children }: { children: ReactNode }) {
   return (
-    <p className="mt-4 rounded-xl bg-white/[0.02] px-4 py-3 text-sm text-muted-foreground ring-1 ring-white/[0.04]">
+    <div className="mt-4 flex min-h-[80px] items-center justify-center rounded-xl bg-white/[0.02] px-4 py-3 text-center text-sm text-muted-foreground ring-1 ring-white/[0.04]">
       {children}
-    </p>
+    </div>
   );
+}
+
+function SmallSampleNote({ children }: { children: ReactNode }) {
+  return <p className="mt-3 text-xs leading-5 text-muted-foreground">{children}</p>;
 }
 
 function signedR(value: number | null | undefined, decimals = 2): string {
   if (value == null) return "—";
-  return `${value >= 0 ? "+" : ""}${value.toFixed(decimals)}R`;
+  return `${value > 0 ? "+" : ""}${value.toFixed(decimals)}R`;
+}
+
+function rColor(value: number | null | undefined): string {
+  if (value == null) return "text-muted-foreground";
+  if (value > 0) return "text-success";
+  if (value < 0) return "text-destructive";
+  return "text-muted-foreground";
+}
+
+function kpiToneForNumber(value: number | null | undefined): "success" | "destructive" | "info" {
+  if (value == null) return "info";
+  if (value > 0) return "success";
+  if (value < 0) return "destructive";
+  return "info";
 }
 
 type LifetimeWeekday = {
@@ -866,24 +930,10 @@ function SessionTooltip({
           </span>
         </div>
         <div>
-          Net R:{" "}
-          <span className={data.netR >= 0 ? "text-success" : "text-destructive"}>
-            {signedR(data.netR)}
-          </span>
+          Net R: <span className={rColor(data.netR)}>{signedR(data.netR)}</span>
         </div>
         <div>
-          Avg R:{" "}
-          <span
-            className={
-              data.avgRR == null
-                ? "text-muted-foreground"
-                : data.avgRR >= 0
-                  ? "text-success"
-                  : "text-destructive"
-            }
-          >
-            {signedR(data.avgRR)}
-          </span>
+          Avg R: <span className={rColor(data.avgRR)}>{signedR(data.avgRR)}</span>
         </div>
       </div>
     </div>
@@ -902,6 +952,24 @@ function ReportView({
     "overview" | "categories" | "mistakes" | "emotions" | "instruments" | "sessions"
   >("overview");
   const [selectedSession, setSelectedSession] = useState<any>(null);
+  const [highlightedSection, setHighlightedSection] = useState<string | null>(null);
+  const [pendingScrollSection, setPendingScrollSection] = useState<string | null>(null);
+  const [showAllDays, setShowAllDays] = useState(false);
+
+  useEffect(() => {
+    if (activeDetailView !== "overview" || !pendingScrollSection) return;
+    const section = pendingScrollSection;
+    const timer = window.setTimeout(() => {
+      const el = document.getElementById(`analytics-section-${section}`);
+      if (el) {
+        el.scrollIntoView({ behavior: "instant", block: "center" });
+        setHighlightedSection(section);
+        window.setTimeout(() => setHighlightedSection(null), 400);
+      }
+      setPendingScrollSection(null);
+    }, 230);
+    return () => window.clearTimeout(timer);
+  }, [activeDetailView, pendingScrollSection]);
 
   if (r.totalTrades === 0) {
     return (
@@ -920,15 +988,30 @@ function ReportView({
     );
   }
 
-  const hasUsefulEquity = r.totalTrades >= 3;
+  const hasUsefulEquity = r.resultCompleteCount >= 3;
   const hasSessionSample = r.totalTrades >= 3;
+  const hasThinSessionSample = r.sessions.some(
+    (session) => session.count > 0 && session.count < MIN_BREAKDOWN_SAMPLE,
+  );
+  const hasThinCategorySample = r.categories.some(
+    (category) => category.trades > 0 && category.trades < MIN_BREAKDOWN_SAMPLE,
+  );
+  const hasThinEmotionSample = r.emotions.items.some(
+    (emotion) => emotion.count > 0 && emotion.count < MIN_BREAKDOWN_SAMPLE,
+  );
+  const hasThinDaySample = r.weekdays.some(
+    (day) => day.count > 0 && day.count < MIN_BREAKDOWN_SAMPLE,
+  );
+  const hasThinInstrumentSample = r.instruments.some(
+    (instrument) => instrument.count > 0 && instrument.count < MIN_BREAKDOWN_SAMPLE,
+  );
   const reviewGap = Math.max(0, r.totalTrades - r.reviewedTrades);
   const executionGap =
     r.plannedVsAchieved.plannedAvg != null && r.plannedVsAchieved.achievedAvg != null
       ? Number((r.plannedVsAchieved.achievedAvg - r.plannedVsAchieved.plannedAvg).toFixed(2))
       : null;
   const repeatedCostlyMistake = r.mistakes.find(
-    (mistake) => mistake.count >= 2 && mistake.netR < 0,
+    (mistake) => mistake.count >= MIN_BREAKDOWN_SAMPLE && mistake.netR < 0,
   );
   const highlightCards =
     r.reviewedTrades < 10
@@ -975,147 +1058,898 @@ function ReportView({
 
   if (activeDetailView !== "overview") {
     return (
-      <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -8 }}
-        transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-        className="mt-6 flex flex-col gap-4"
-      >
-        <div>
-          <button
-            onClick={() => setActiveDetailView("overview")}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground transition duration-200"
-          >
-            &larr; Back to Analytics
-          </button>
-        </div>
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.div
+          key={`detail-${activeDetailView}`}
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 4 }}
+          transition={CALM_TRANSITION}
+          className="mt-6 flex flex-col gap-4"
+        >
+          <div>
+            <button
+              onClick={() => {
+                const section = activeDetailView;
+                setActiveDetailView("overview");
+                setHighlightedSection(null);
+                setPendingScrollSection(section);
+              }}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground transition duration-200"
+            >
+              &larr; Back to Analytics
+            </button>
+          </div>
 
-        {activeDetailView === "categories" && (
-          <div className="section-card rounded-2xl p-5">
-            <div className="border-b border-white/[0.06] pb-4 mb-4">
-              <h2 className="flex items-center gap-2 text-lg font-bold text-foreground">
-                <Grid3x3 className="h-5 w-5 text-primary" /> Category performance breakdown
-              </h2>
-              <p className="text-xs text-muted-foreground mt-1">
-                Full breakdown of your setup performance. Logged setups and categories.
-              </p>
+          {activeDetailView === "categories" && (
+            <div className="section-card rounded-2xl p-5">
+              <div className="border-b border-white/[0.06] pb-4 mb-4">
+                <h2 className="flex items-center gap-2 text-lg font-bold text-foreground">
+                  <Tags className="h-5 w-5 text-primary" /> Category performance breakdown
+                </h2>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Full breakdown of your setup performance. Logged setups and categories.
+                </p>
+              </div>
+              {hasThinCategorySample && (
+                <SmallSampleNote>
+                  Categories with fewer than {MIN_BREAKDOWN_SAMPLE} trades are directional only.
+                </SmallSampleNote>
+              )}
+              {r.categories.length === 0 ? (
+                <SimpleSectionState>No categories tagged yet.</SimpleSectionState>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[720px] text-sm">
+                    <thead>
+                      <tr className="border-b border-white/[0.06] text-left text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                        <th className="py-2.5 pr-4">Category</th>
+                        <th className="py-2.5 pr-4 text-right">Trades</th>
+                        <th className="py-2.5 pr-4 text-right">Win rate</th>
+                        <th className="py-2.5 pr-4 text-right">Net R</th>
+                        <th className="py-2.5 pr-4 text-right">Avg R:R</th>
+                        <th className="py-2.5 pr-4 text-right">Avg win</th>
+                        <th className="py-2.5 text-right">Avg loss</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {r.categories
+                        .slice()
+                        .sort((a, b) => b.trades - a.trades)
+                        .map((c) => (
+                          <tr
+                            key={c.name}
+                            className="border-b border-white/[0.04] last:border-0 transition-colors duration-150 hover:bg-white/[0.02]"
+                          >
+                            <td className="py-3 pr-4 font-medium">{c.name}</td>
+                            <td className="py-3 pr-4 text-right tabular-nums">{c.trades}</td>
+                            <td className="py-3 pr-4 text-right tabular-nums">
+                              {c.winRate == null ? "—" : `${c.winRate.toFixed(1)}%`}
+                            </td>
+                            <td
+                              className={cn(
+                                "py-3 pr-4 text-right font-semibold tabular-nums",
+                                rColor(c.netR),
+                              )}
+                            >
+                              {signedR(c.netR)}
+                            </td>
+                            <td
+                              className={cn(
+                                "py-3 pr-4 text-right tabular-nums",
+                                c.avgRR == null ? "text-muted-foreground" : rColor(c.avgRR),
+                              )}
+                            >
+                              {c.avgRR == null ? "—" : `${c.avgRR.toFixed(2)}R`}
+                            </td>
+                            <td
+                              className={cn(
+                                "py-3 pr-4 text-right tabular-nums",
+                                rColor(c.avgProfit),
+                              )}
+                            >
+                              {c.avgProfit > 0 ? "+" : ""}
+                              {c.avgProfit.toFixed(2)}R
+                            </td>
+                            <td className={cn("py-3 text-right tabular-nums", rColor(c.avgLoss))}>
+                              {c.avgLoss.toFixed(2)}R
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
-            {r.categories.length === 0 ? (
-              <SimpleSectionState>No categories tagged yet.</SimpleSectionState>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[720px] text-sm">
-                  <thead>
-                    <tr className="border-b border-white/[0.06] text-left text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                      <th className="py-2.5 pr-4">Category</th>
-                      <th className="py-2.5 pr-4 text-right">Trades</th>
-                      <th className="py-2.5 pr-4 text-right">Win rate</th>
-                      <th className="py-2.5 pr-4 text-right">Net R</th>
-                      <th className="py-2.5 pr-4 text-right">Avg R:R</th>
-                      <th className="py-2.5 pr-4 text-right">Avg win</th>
-                      <th className="py-2.5 text-right">Avg loss</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {r.categories
-                      .slice()
-                      .sort((a, b) => b.trades - a.trades)
-                      .map((c) => (
+          )}
+
+          {activeDetailView === "mistakes" && (
+            <div className="section-card rounded-2xl p-5">
+              <div className="border-b border-white/[0.06] pb-4 mb-4">
+                <h2 className="flex items-center gap-2 text-lg font-bold text-foreground">
+                  <AlertTriangle className="h-5 w-5 text-warning" /> Mistake analysis
+                </h2>
+                <p className="text-xs text-muted-foreground mt-1">
+                  All reviewed trade mistakes and rule-breaks found in your journal, ranked by
+                  costliness.
+                </p>
+              </div>
+              {r.mistakes.length === 0 ? (
+                <SimpleSectionState>No mistakes tagged yet.</SimpleSectionState>
+              ) : (
+                <div className="space-y-2">
+                  {r.mistakes.map((m) => (
+                    <div
+                      key={m.name}
+                      className="flex items-center justify-between rounded-xl bg-white/[0.03] px-4 py-2.5 ring-1 ring-white/[0.04]"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="rounded-md bg-warning/[0.12] px-2 py-0.5 text-[11px] font-semibold text-warning ring-1 ring-warning/[0.18]">
+                          {m.name}
+                        </span>
+                        <span className="text-xs text-muted-foreground">{m.count} occurrences</span>
+                      </div>
+                      <span className={cn("text-sm font-bold tabular-nums", rColor(m.netR))}>
+                        {signedR(m.netR)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeDetailView === "emotions" && (
+            <div className="section-card rounded-2xl p-5">
+              <div className="border-b border-white/[0.06] pb-4 mb-4">
+                <h2 className="flex items-center gap-2 text-lg font-bold text-foreground">
+                  <Brain className="h-5 w-5 text-primary" /> Emotion Insights
+                </h2>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Full breakdown of performance correlated with tagged psychological states and
+                  emotions.
+                </p>
+              </div>
+              {hasThinEmotionSample && (
+                <SmallSampleNote>
+                  Emotions with fewer than {MIN_BREAKDOWN_SAMPLE} trades are directional only.
+                </SmallSampleNote>
+              )}
+              {r.emotions.total === 0 ? (
+                <SimpleSectionState>No emotions tagged yet.</SimpleSectionState>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[620px] text-sm">
+                    <thead className="border-b border-white/[0.06] text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                      <tr>
+                        <th scope="col" className="py-3 pr-4 text-left">
+                          Emotion
+                        </th>
+                        <th scope="col" className="py-3 pr-4 text-right">
+                          Count
+                        </th>
+                        <th scope="col" className="py-3 pr-4 text-right">
+                          Win rate
+                        </th>
+                        <th scope="col" className="py-3 pr-4 text-right">
+                          Avg R
+                        </th>
+                        <th scope="col" className="py-3 text-right">
+                          Net R
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/[0.04]">
+                      {r.emotions.items
+                        .filter((e) => e.count > 0)
+                        .map((e) => (
+                          <tr key={e.key}>
+                            <td className="py-3 pr-4">
+                              <div className="flex min-w-0 items-center gap-2">
+                                <span className="text-base leading-none">{e.emoji}</span>
+                                <span className="truncate font-medium">{e.label}</span>
+                              </div>
+                            </td>
+                            <td className="py-3 pr-4 text-right tabular-nums text-muted-foreground">
+                              {e.count}
+                            </td>
+                            <td
+                              className={cn(
+                                "py-3 pr-4 text-right font-semibold tabular-nums",
+                                e.winRate == null
+                                  ? "text-muted-foreground"
+                                  : e.winRate >= 50
+                                    ? "text-success"
+                                    : "text-destructive",
+                              )}
+                            >
+                              {e.winRate == null ? "—" : `${e.winRate.toFixed(0)}%`}
+                            </td>
+                            <td
+                              className={cn(
+                                "py-3 pr-4 text-right font-semibold tabular-nums",
+                                rColor(e.avgR),
+                              )}
+                            >
+                              {signedR(e.avgR)}
+                            </td>
+                            <td
+                              className={cn(
+                                "py-3 text-right font-semibold tabular-nums",
+                                rColor(e.netR),
+                              )}
+                            >
+                              {signedR(e.netR)}
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeDetailView === "instruments" && (
+            <div className="section-card rounded-2xl p-5">
+              <div className="border-b border-white/[0.06] pb-4 mb-4">
+                <h2 className="flex items-center gap-2 text-lg font-bold text-foreground">
+                  <CandlestickChart className="h-5 w-5 text-primary" /> Instrument performance
+                </h2>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Full performance breakdown by asset, ticker, or logged trading instrument.
+                </p>
+              </div>
+              {hasThinInstrumentSample && (
+                <SmallSampleNote>
+                  Instruments with fewer than {MIN_BREAKDOWN_SAMPLE} trades are directional only.
+                </SmallSampleNote>
+              )}
+              {r.instruments.length === 0 ? (
+                <SimpleSectionState>No instruments logged yet.</SimpleSectionState>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[560px] text-sm">
+                    <thead>
+                      <tr className="border-b border-white/[0.06] text-left text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                        <th className="py-2.5 pr-4">Instrument</th>
+                        <th className="py-2.5 pr-4 text-right">Trades</th>
+                        <th className="py-2.5 pr-4 text-right">Win rate</th>
+                        <th className="py-2.5 pr-4 text-right">Net R</th>
+                        <th className="py-2.5 text-right">Avg R</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {r.instruments
+                        .slice()
+                        .sort((a, b) => b.count - a.count)
+                        .map((i) => (
+                          <tr
+                            key={i.name}
+                            className="border-b border-white/[0.04] last:border-0 transition hover:bg-white/[0.03]"
+                          >
+                            <td className="py-3.5 pr-4 font-semibold">{i.name}</td>
+                            <td className="py-3.5 pr-4 text-right tabular-nums">{i.count}</td>
+                            <td className="py-3.5 pr-4 text-right tabular-nums">
+                              {i.winRate == null ? "—" : `${i.winRate.toFixed(1)}%`}
+                            </td>
+                            <td
+                              className={cn(
+                                "py-3.5 pr-4 text-right font-semibold tabular-nums",
+                                rColor(i.netR),
+                              )}
+                            >
+                              {signedR(i.netR)}
+                            </td>
+                            <td
+                              className={cn(
+                                "py-3.5 text-right tabular-nums font-semibold",
+                                rColor(i.avgRR),
+                              )}
+                            >
+                              {signedR(i.avgRR)}
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeDetailView === "sessions" && (
+            <div className="section-card rounded-2xl p-5">
+              <div className="border-b border-white/[0.06] pb-4 mb-4">
+                <h2 className="flex items-center gap-2 text-lg font-bold text-foreground">
+                  <Clock className="h-5 w-5 text-primary" /> Session performance breakdown
+                </h2>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Full performance metrics categorized by your trading sessions.
+                </p>
+              </div>
+              {hasThinSessionSample && (
+                <SmallSampleNote>
+                  Sessions with fewer than {MIN_BREAKDOWN_SAMPLE} trades are directional only.
+                </SmallSampleNote>
+              )}
+              {r.sessions.length === 0 ? (
+                <SimpleSectionState>No session data logged yet.</SimpleSectionState>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[620px] text-sm">
+                    <thead>
+                      <tr className="border-b border-white/[0.06] text-left text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                        <th className="py-2.5 pr-4">Session</th>
+                        <th className="py-2.5 pr-4 text-right">Trades</th>
+                        <th className="py-2.5 pr-4 text-right">Wins</th>
+                        <th className="py-2.5 pr-4 text-right">Losses</th>
+                        <th className="py-2.5 pr-4 text-right">Win rate</th>
+                        <th className="py-2.5 pr-4 text-right">Net R</th>
+                        <th className="py-2.5 text-right">Avg R</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {r.sessions.map((s) => (
                         <tr
-                          key={c.name}
-                          className="border-b border-white/[0.04] last:border-0 transition-colors duration-150 hover:bg-white/[0.02]"
+                          key={s.name}
+                          className="border-b border-white/[0.04] last:border-0 hover:bg-white/[0.02]"
                         >
-                          <td className="py-3 pr-4 font-medium">{c.name}</td>
-                          <td className="py-3 pr-4 text-right tabular-nums">{c.trades}</td>
-                          <td className="py-3 pr-4 text-right tabular-nums">
-                            {c.winRate == null ? "—" : `${c.winRate.toFixed(1)}%`}
+                          <td className="py-3 pr-4 font-medium">{s.name}</td>
+                          <td className="py-3 pr-4 text-right tabular-nums">{s.count}</td>
+                          <td className="py-3 pr-4 text-right tabular-nums text-success/90">
+                            {s.wins}
+                          </td>
+                          <td className="py-3 pr-4 text-right tabular-nums text-destructive/80">
+                            {s.losses}
+                          </td>
+                          <td className="py-3 pr-4 text-right tabular-nums font-semibold">
+                            {s.winRate == null ? "—" : `${s.winRate.toFixed(1)}%`}
                           </td>
                           <td
                             className={cn(
-                              "py-3 pr-4 text-right font-semibold tabular-nums",
-                              c.netR >= 0 ? "text-success" : "text-destructive",
+                              "py-3 pr-4 text-right font-bold tabular-nums",
+                              rColor(s.netR),
                             )}
                           >
-                            {c.netR >= 0 ? "+" : ""}
-                            {c.netR.toFixed(2)}R
+                            {signedR(s.netR)}
                           </td>
-                          <td className="py-3 pr-4 text-right tabular-nums">
-                            {c.avgRR == null ? "—" : `${c.avgRR.toFixed(2)}R`}
-                          </td>
-                          <td className="py-3 pr-4 text-right tabular-nums text-success">
-                            {c.avgProfit > 0 ? "+" : ""}
-                            {c.avgProfit.toFixed(2)}R
-                          </td>
-                          <td className="py-3 text-right tabular-nums text-destructive">
-                            {c.avgLoss.toFixed(2)}R
+                          <td
+                            className={cn(
+                              "py-3 text-right font-semibold tabular-nums",
+                              rColor(s.avgRR),
+                            )}
+                          >
+                            {signedR(s.avgRR)}
                           </td>
                         </tr>
                       ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
-
-        {activeDetailView === "mistakes" && (
-          <div className="section-card rounded-2xl p-5">
-            <div className="border-b border-white/[0.06] pb-4 mb-4">
-              <h2 className="flex items-center gap-2 text-lg font-bold text-foreground">
-                <Flame className="h-5 w-5 text-warning" /> Mistake analysis
-              </h2>
-              <p className="text-xs text-muted-foreground mt-1">
-                All reviewed trade mistakes and rule-breaks found in your journal, ranked by
-                costliness.
-              </p>
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
-            {r.mistakes.length === 0 ? (
-              <SimpleSectionState>No mistakes tagged yet.</SimpleSectionState>
-            ) : (
-              <div className="space-y-2">
-                {r.mistakes.map((m) => (
+          )}
+        </motion.div>
+      </AnimatePresence>
+    );
+  }
+
+  return (
+    <AnimatePresence mode="wait" initial={false}>
+      <motion.div
+        key="overview"
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 4 }}
+        transition={CALM_TRANSITION}
+        className="mt-6 flex flex-col gap-4"
+      >
+        {/* Summary stats (first) */}
+        <div className="order-1 grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
+          <Kpi icon={BarChart3} label="TOTAL TRADES" value={r.totalTrades} tone="info" />
+          <Kpi
+            icon={Target}
+            label="WIN RATE"
+            value={r.winRate ?? 0}
+            displayValue={r.winRate == null ? "—" : undefined}
+            decimals={1}
+            suffix="%"
+            tone="primary"
+          />
+          <Kpi
+            icon={TrendingUp}
+            label="NET R"
+            value={r.totalR}
+            decimals={2}
+            suffix="R"
+            tone={kpiToneForNumber(r.totalR)}
+          />
+          <Kpi
+            icon={Scale}
+            label="AVG R:R"
+            value={r.avgRR}
+            decimals={2}
+            suffix="R"
+            tone={kpiToneForNumber(r.avgRR)}
+          />
+          <Kpi
+            icon={Calculator}
+            label="PROFIT FACTOR"
+            value={r.profitFactor ?? 0}
+            displayValue={r.profitFactor == null ? "—" : undefined}
+            decimals={2}
+            tone="info"
+            sub={r.profitFactor == null ? "Needs wins and losses" : undefined}
+          />
+          <Kpi
+            icon={Sigma}
+            label="EXPECTANCY"
+            value={r.expectancy ?? 0}
+            displayValue={r.expectancy == null ? "—" : undefined}
+            decimals={2}
+            suffix="R"
+            tone={kpiToneForNumber(r.expectancy)}
+          />
+          <Kpi
+            icon={ShieldAlert}
+            label="MAX DRAWDOWN"
+            value={r.maxDrawdown}
+            decimals={2}
+            suffix="R"
+            tone="warning"
+          />
+          <Kpi
+            icon={ClipboardCheck}
+            label="COMPLETED REVIEWS"
+            value={0}
+            displayValue={`${r.reviewedTrades} / ${r.totalTrades}`}
+            tone="success"
+          />
+        </div>
+
+        {/* Highlights */}
+        <div className="order-2 section-card rounded-2xl p-5">
+          <h3 className="flex items-center gap-2 text-sm font-semibold">
+            <Lightbulb className="h-4 w-4 text-primary" /> Highlights
+          </h3>
+          {r.reviewedTrades < 10 ? (
+            <div className="mt-4 rounded-xl bg-white/[0.025] p-4 ring-1 ring-white/[0.04]">
+              <div className="text-sm font-semibold">Not enough reviewed trades yet</div>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                Add more detailed reviews to show reliable highlights.
+              </p>
+              <div className="mt-4 grid gap-2 text-xs sm:grid-cols-3">
+                {highlightCards.map((item) => (
                   <div
-                    key={m.name}
-                    className="flex items-center justify-between rounded-xl bg-white/[0.03] px-4 py-2.5 ring-1 ring-white/[0.04]"
+                    key={item.title}
+                    className="rounded-lg bg-white/[0.025] px-3 py-2 text-muted-foreground ring-1 ring-white/[0.04]"
                   >
-                    <div className="flex items-center gap-3">
-                      <span className="rounded-md bg-warning/[0.12] px-2 py-0.5 text-[11px] font-semibold text-warning ring-1 ring-warning/[0.18]">
-                        {m.name}
-                      </span>
-                      <span className="text-xs text-muted-foreground">{m.count} occurrences</span>
-                    </div>
-                    <span
-                      className={cn(
-                        "text-sm font-bold tabular-nums",
-                        m.netR >= 0 ? "text-success" : "text-destructive",
-                      )}
-                    >
-                      {m.netR >= 0 ? "+" : ""}
-                      {m.netR}R
-                    </span>
+                    <div className="font-semibold text-foreground/85">{item.title}</div>
+                    <p className="mt-1 leading-5">{item.body}</p>
                   </div>
                 ))}
               </div>
+            </div>
+          ) : (
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {highlightCards.map((item) => (
+                <div
+                  key={item.title}
+                  className="rounded-xl bg-white/[0.025] p-4 ring-1 ring-white/[0.04]"
+                >
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                    {item.title}
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-foreground/86">{item.body}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        {/* Performance Charts — equity curve */}
+        <div className="order-3 section-card rounded-2xl p-5">
+          <h3 className="flex items-center gap-2 text-sm font-semibold">
+            <TrendingUp className="h-4 w-4 text-primary" /> Equity curve
+          </h3>
+          <div className="mt-4 h-[280px]">
+            {!hasUsefulEquity ? (
+              r.totalTrades >= 3 ? (
+                <LowDataState
+                  title="Add trade result details"
+                  description={`Add risk and profit/loss for ${Math.max(0, 3 - r.resultCompleteCount)} more trade${Math.max(0, 3 - r.resultCompleteCount) === 1 ? "" : "s"}.`}
+                />
+              ) : (
+                <LowDataState description="Log at least 3 trades to make the equity curve useful." />
+              )
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={r.equity} margin={{ top: 10, right: 8, left: -16, bottom: 8 }}>
+                  <defs>
+                    <linearGradient id="eq" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="oklch(0.68 0.23 295)" stopOpacity={0.45} />
+                      <stop offset="100%" stopColor="oklch(0.68 0.23 295)" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="oklch(1 0 0 / 0.04)"
+                    vertical={false}
+                  />
+                  <XAxis
+                    dataKey="d"
+                    tick={{ fontSize: 11, fill: "oklch(0.55 0 0)" }}
+                    axisLine={false}
+                    tickLine={false}
+                    tickMargin={8}
+                    interval={r.equityInterval ?? 0}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 10, fill: "oklch(0.5 0 0)" }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      background: "oklch(0.13 0.018 270)",
+                      border: "1px solid oklch(1 0 0 / 0.08)",
+                      borderRadius: 12,
+                      fontSize: 12,
+                      boxShadow: "0 8px 32px -8px oklch(0 0 0 / 0.5)",
+                    }}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="v"
+                    stroke="oklch(0.78 0.19 295)"
+                    strokeWidth={2}
+                    fill="url(#eq)"
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
             )}
           </div>
-        )}
+        </div>
 
-        {activeDetailView === "emotions" && (
-          <div className="section-card rounded-2xl p-5">
-            <div className="border-b border-white/[0.06] pb-4 mb-4">
-              <h2 className="flex items-center gap-2 text-lg font-bold text-foreground">
-                <Smile className="h-5 w-5 text-primary" /> Emotion Insights
-              </h2>
-              <p className="text-xs text-muted-foreground mt-1">
-                Full breakdown of performance correlated with tagged psychological states and
-                emotions.
-              </p>
-            </div>
-            {r.emotions.total === 0 ? (
-              <SimpleSectionState>No emotions tagged yet.</SimpleSectionState>
+        {/* Session performance breakdown */}
+        <div
+          id="analytics-section-sessions"
+          className={cn(
+            "order-6 section-card rounded-2xl p-5 scroll-mt-28",
+            highlightedSection === "sessions" && "ring-1 ring-white/[0.05]",
+          )}
+        >
+          <div className="flex items-center justify-between">
+            <h3 className="flex items-center gap-2 text-sm font-semibold">
+              <Clock className="h-4 w-4 text-primary" /> Session performance breakdown
+            </h3>
+            {r.sessions.length > 4 && (
+              <button
+                onClick={() => setActiveDetailView("sessions")}
+                className="text-xs font-semibold text-primary transition hover:text-primary-glow"
+              >
+                View all &rarr;
+              </button>
+            )}
+          </div>
+          {hasThinSessionSample && (
+            <SmallSampleNote>
+              Sessions with fewer than {MIN_BREAKDOWN_SAMPLE} trades are directional only.
+            </SmallSampleNote>
+          )}
+          <div className="mt-4">
+            {!hasSessionSample ? (
+              <div className="h-[260px]">
+                <LowDataState description="Log at least 3 trades to compare session performance." />
+              </div>
             ) : (
-              <div className="overflow-x-auto">
+              <>
+                {/* Desktop Chart View */}
+                <div className="hidden h-[260px] sm:block">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={r.sessions}
+                      margin={{ top: 10, right: 8, left: -20, bottom: 0 }}
+                      onClick={(state) => {
+                        if (state && state.activePayload && state.activePayload.length > 0) {
+                          const sessionData = state.activePayload[0].payload;
+                          setSelectedSession(sessionData);
+                        }
+                      }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="oklch(1 0 0 / 0.04)" />
+                      <XAxis
+                        dataKey="name"
+                        tick={{ fontSize: 11, fill: "oklch(0.55 0 0)" }}
+                        axisLine={false}
+                        tickLine={false}
+                      />
+                      <YAxis
+                        tick={{ fontSize: 10, fill: "oklch(0.5 0 0)" }}
+                        axisLine={false}
+                        tickLine={false}
+                      />
+                      <Tooltip
+                        cursor={{ fill: "oklch(1 0 0 / 0.03)" }}
+                        content={<SessionTooltip />}
+                      />
+                      <Bar
+                        dataKey="wins"
+                        stackId="a"
+                        fill="oklch(0.62 0.13 152)"
+                        radius={[4, 4, 0, 0]}
+                      />
+                      <Bar
+                        dataKey="losses"
+                        stackId="a"
+                        fill="oklch(0.64 0.22 22)"
+                        radius={[4, 4, 0, 0]}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/* Mobile List Fallback */}
+                <div className="space-y-2 sm:hidden">
+                  {r.sessions.map((s) => (
+                    <button
+                      key={s.name}
+                      type="button"
+                      onClick={() => setSelectedSession(s)}
+                      className={cn(
+                        "flex w-full items-center justify-between rounded-xl p-3 text-left ring-1 transition",
+                        selectedSession?.name === s.name
+                          ? "bg-primary/12 ring-primary/35"
+                          : "bg-white/[0.025] ring-white/[0.04] hover:bg-white/[0.045]",
+                      )}
+                    >
+                      <div>
+                        <div className="text-xs font-semibold text-foreground">{s.name}</div>
+                        <div className="mt-0.5 text-[10px] text-muted-foreground">
+                          {s.count} trade{s.count === 1 ? "" : "s"} · {s.wins}W - {s.losses}L
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className={cn("text-xs font-bold tabular-nums", rColor(s.netR))}>
+                          {signedR(s.netR)}
+                        </div>
+                        <div className="text-[10px] text-muted-foreground">
+                          {s.winRate == null ? "—" : `${s.winRate.toFixed(0)}% WR`}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+
+                <AnimatePresence initial={false}>
+                  {selectedSession && (
+                    <motion.div
+                      key={selectedSession.name}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -6 }}
+                      transition={CALM_TRANSITION}
+                      className="mt-4 rounded-xl bg-white/[0.025] p-3.5 ring-1 ring-white/[0.04]"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/80">
+                          Session Detail: {selectedSession.name}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedSession(null)}
+                          className="text-[10px] font-semibold text-primary transition hover:text-primary-glow"
+                        >
+                          Clear selection
+                        </button>
+                      </div>
+                      <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2.5 sm:grid-cols-4 text-xs">
+                        <div>
+                          <div className="text-muted-foreground/70">Trades</div>
+                          <div className="mt-0.5 font-bold text-foreground/90">
+                            {selectedSession.count}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-muted-foreground/70">Win rate</div>
+                          <div className="mt-0.5 font-bold text-foreground/90">
+                            {selectedSession.winRate == null
+                              ? "—"
+                              : `${selectedSession.winRate.toFixed(1)}%`}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-muted-foreground/70">Net R</div>
+                          <div className={cn("mt-0.5 font-bold", rColor(selectedSession.netR))}>
+                            {signedR(selectedSession.netR)}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-muted-foreground/70">Avg R</div>
+                          <div className={cn("mt-0.5 font-bold", rColor(selectedSession.avgRR))}>
+                            {signedR(selectedSession.avgRR)}
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Category performance breakdown */}
+        <div
+          id="analytics-section-categories"
+          className={cn(
+            "order-8 section-card rounded-2xl p-5 scroll-mt-28",
+            highlightedSection === "categories" && "ring-1 ring-white/[0.05]",
+          )}
+        >
+          <div className="flex items-center justify-between">
+            <h3 className="flex items-center gap-2 text-sm font-semibold">
+              <Tags className="h-4 w-4 text-primary" /> Category performance breakdown
+            </h3>
+            {r.categories.length > 4 && (
+              <button
+                onClick={() => setActiveDetailView("categories")}
+                className="text-xs font-semibold text-primary transition hover:text-primary-glow"
+              >
+                View all &rarr;
+              </button>
+            )}
+          </div>
+          {hasThinCategorySample && (
+            <SmallSampleNote>
+              Categories with fewer than {MIN_BREAKDOWN_SAMPLE} trades are directional only.
+            </SmallSampleNote>
+          )}
+          {r.categories.length === 0 ? (
+            <SimpleSectionState>No categories tagged yet.</SimpleSectionState>
+          ) : (
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full min-w-[720px] text-sm">
+                <thead>
+                  <tr className="border-b border-white/[0.06] text-left text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                    <th className="py-2.5 pr-4">Category</th>
+                    <th className="py-2.5 pr-4 text-right">Trades</th>
+                    <th className="py-2.5 pr-4 text-right">Win rate</th>
+                    <th className="py-2.5 pr-4 text-right">Net R</th>
+                    <th className="py-2.5 pr-4 text-right">Avg R:R</th>
+                    <th className="py-2.5 pr-4 text-right">Avg win</th>
+                    <th className="py-2.5 text-right">Avg loss</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {r.categories
+                    .slice()
+                    .sort((a, b) => b.trades - a.trades)
+                    .slice(0, 4)
+                    .map((c) => (
+                      <tr
+                        key={c.name}
+                        className="border-b border-white/[0.04] last:border-0 transition-colors duration-150 hover:bg-white/[0.02]"
+                      >
+                        <td className="py-3 pr-4 font-medium">{c.name}</td>
+                        <td className="py-3 pr-4 text-right tabular-nums">{c.trades}</td>
+                        <td className="py-3 pr-4 text-right tabular-nums">
+                          {c.winRate == null ? "—" : `${c.winRate.toFixed(1)}%`}
+                        </td>
+                        <td
+                          className={cn(
+                            "py-3 pr-4 text-right font-semibold tabular-nums",
+                            rColor(c.netR),
+                          )}
+                        >
+                          {signedR(c.netR)}
+                        </td>
+                        <td
+                          className={cn(
+                            "py-3 pr-4 text-right tabular-nums",
+                            c.avgRR == null ? "text-muted-foreground" : rColor(c.avgRR),
+                          )}
+                        >
+                          {c.avgRR == null ? "—" : `${c.avgRR.toFixed(2)}R`}
+                        </td>
+                        <td
+                          className={cn("py-3 pr-4 text-right tabular-nums", rColor(c.avgProfit))}
+                        >
+                          {c.avgProfit > 0 ? "+" : ""}
+                          {c.avgProfit.toFixed(2)}R
+                        </td>
+                        <td className={cn("py-3 text-right tabular-nums", rColor(c.avgLoss))}>
+                          {c.avgLoss.toFixed(2)}R
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Mistake analysis */}
+        <div
+          id="analytics-section-mistakes"
+          className={cn(
+            "order-9 section-card rounded-2xl p-5 scroll-mt-28",
+            highlightedSection === "mistakes" && "ring-1 ring-white/[0.05]",
+          )}
+        >
+          <div className="flex items-center justify-between">
+            <h3 className="flex items-center gap-2 text-sm font-semibold">
+              <AlertTriangle className="h-4 w-4 text-warning" /> Mistake analysis
+            </h3>
+            {r.mistakes.length > 4 && (
+              <button
+                onClick={() => setActiveDetailView("mistakes")}
+                className="text-xs font-semibold text-primary transition hover:text-primary-glow"
+              >
+                View all &rarr;
+              </button>
+            )}
+          </div>
+          {r.mistakes.length === 0 ? (
+            <p className="mt-4 text-sm text-muted-foreground">No mistakes tagged yet.</p>
+          ) : (
+            <div className="mt-4 space-y-2">
+              {r.mistakes.slice(0, 4).map((m) => (
+                <div
+                  key={m.name}
+                  className="flex items-center justify-between rounded-xl bg-white/[0.03] px-4 py-2.5 ring-1 ring-white/[0.04]"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="rounded-md bg-warning/[0.12] px-2 py-0.5 text-[11px] font-semibold text-warning ring-1 ring-warning/[0.18]">
+                      {m.name}
+                    </span>
+                    <span className="text-xs text-muted-foreground">{m.count} occurrences</span>
+                  </div>
+                  <span className={cn("text-sm font-bold tabular-nums", rColor(m.netR))}>
+                    {signedR(m.netR)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Emotion insights */}
+        <div
+          id="analytics-section-emotions"
+          className={cn(
+            "order-10 section-card rounded-2xl p-5 scroll-mt-28",
+            highlightedSection === "emotions" && "ring-1 ring-white/[0.05]",
+          )}
+        >
+          <div className="flex items-center justify-between">
+            <h3 className="flex items-center gap-2 text-sm font-semibold">
+              <Brain className="h-4 w-4 text-primary" /> Emotion Insights
+            </h3>
+            {(() => {
+              const activeCount = r.emotions.items.filter((e) => e.count > 0).length;
+              return (
+                activeCount > 4 && (
+                  <button
+                    onClick={() => setActiveDetailView("emotions")}
+                    className="text-xs font-semibold text-primary transition hover:text-primary-glow"
+                  >
+                    View all &rarr;
+                  </button>
+                )
+              );
+            })()}
+          </div>
+          {hasThinEmotionSample && (
+            <SmallSampleNote>
+              Emotions with fewer than {MIN_BREAKDOWN_SAMPLE} trades are directional only.
+            </SmallSampleNote>
+          )}
+          {r.emotions.total === 0 ? (
+            <SimpleSectionState>No emotions tagged yet.</SimpleSectionState>
+          ) : (
+            <>
+              <div className="mt-4 overflow-x-auto">
                 <table className="w-full min-w-[620px] text-sm">
                   <thead className="border-b border-white/[0.06] text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                     <tr>
@@ -1137,9 +1971,9 @@ function ReportView({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/[0.04]">
-                    {r.emotions.items
-                      .filter((e) => e.count > 0)
-                      .map((e) => (
+                    {(() => {
+                      const activeEmotions = r.emotions.items.filter((e) => e.count > 0);
+                      return activeEmotions.slice(0, 4).map((e) => (
                         <tr key={e.key}>
                           <td className="py-3 pr-4">
                             <div className="flex min-w-0 items-center gap-2">
@@ -1165,1068 +1999,461 @@ function ReportView({
                           <td
                             className={cn(
                               "py-3 pr-4 text-right font-semibold tabular-nums",
-                              e.avgR == null
-                                ? "text-muted-foreground"
-                                : e.avgR >= 0
-                                  ? "text-success"
-                                  : "text-destructive",
+                              rColor(e.avgR),
                             )}
                           >
-                            {e.avgR == null
-                              ? "—"
-                              : `${e.avgR >= 0 ? "+" : ""}${e.avgR.toFixed(2)}R`}
+                            {signedR(e.avgR)}
                           </td>
                           <td
                             className={cn(
                               "py-3 text-right font-semibold tabular-nums",
-                              e.netR >= 0 ? "text-success" : "text-destructive",
+                              rColor(e.netR),
                             )}
                           >
-                            {e.netR >= 0 ? "+" : ""}
-                            {e.netR.toFixed(2)}R
+                            {signedR(e.netR)}
                           </td>
                         </tr>
-                      ))}
+                      ));
+                    })()}
                   </tbody>
                 </table>
-              </div>
-            )}
-          </div>
-        )}
-
-        {activeDetailView === "instruments" && (
-          <div className="section-card rounded-2xl p-5">
-            <div className="border-b border-white/[0.06] pb-4 mb-4">
-              <h2 className="flex items-center gap-2 text-lg font-bold text-foreground">
-                <DollarSign className="h-5 w-5 text-primary" /> Instrument performance
-              </h2>
-              <p className="text-xs text-muted-foreground mt-1">
-                Full performance breakdown by asset, ticker, or logged trading instrument.
-              </p>
-            </div>
-            {r.instruments.length === 0 ? (
-              <SimpleSectionState>No instruments logged yet.</SimpleSectionState>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[560px] text-sm">
-                  <thead>
-                    <tr className="border-b border-white/[0.06] text-left text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                      <th className="py-2.5 pr-4">Instrument</th>
-                      <th className="py-2.5 pr-4 text-right">Trades</th>
-                      <th className="py-2.5 pr-4 text-right">Win rate</th>
-                      <th className="py-2.5 pr-4 text-right">Net R</th>
-                      <th className="py-2.5 text-right">Avg R</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {r.instruments
-                      .slice()
-                      .sort((a, b) => b.count - a.count)
-                      .map((i) => (
-                        <tr
-                          key={i.name}
-                          className="border-b border-white/[0.04] last:border-0 hover:bg-white/[0.02]"
-                        >
-                          <td className="py-3 pr-4 font-medium">{i.name}</td>
-                          <td className="py-3 pr-4 text-right tabular-nums">{i.count}</td>
-                          <td className="py-3 pr-4 text-right tabular-nums">
-                            {i.winRate == null ? "—" : `${i.winRate.toFixed(1)}%`}
-                          </td>
-                          <td
-                            className={cn(
-                              "py-3 pr-4 text-right font-semibold tabular-nums",
-                              i.netR >= 0 ? "text-success" : "text-destructive",
-                            )}
-                          >
-                            {i.netR >= 0 ? "+" : ""}
-                            {i.netR}R
-                          </td>
-                          <td className="py-3 text-right tabular-nums">
-                            {i.avgRR == null ? "—" : `${i.avgRR.toFixed(2)}R`}
-                          </td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
-
-        {activeDetailView === "sessions" && (
-          <div className="section-card rounded-2xl p-5">
-            <div className="border-b border-white/[0.06] pb-4 mb-4">
-              <h2 className="flex items-center gap-2 text-lg font-bold text-foreground">
-                <Layers className="h-5 w-5 text-primary" /> Session performance breakdown
-              </h2>
-              <p className="text-xs text-muted-foreground mt-1">
-                Full performance metrics categorized by your trading sessions.
-              </p>
-            </div>
-            {r.sessions.length === 0 ? (
-              <SimpleSectionState>No session data logged yet.</SimpleSectionState>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[620px] text-sm">
-                  <thead>
-                    <tr className="border-b border-white/[0.06] text-left text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                      <th className="py-2.5 pr-4">Session</th>
-                      <th className="py-2.5 pr-4 text-right">Trades</th>
-                      <th className="py-2.5 pr-4 text-right">Wins</th>
-                      <th className="py-2.5 pr-4 text-right">Losses</th>
-                      <th className="py-2.5 pr-4 text-right">Win rate</th>
-                      <th className="py-2.5 pr-4 text-right">Net R</th>
-                      <th className="py-2.5 text-right">Avg R</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {r.sessions.map((s) => (
-                      <tr
-                        key={s.name}
-                        className="border-b border-white/[0.04] last:border-0 hover:bg-white/[0.02]"
-                      >
-                        <td className="py-3 pr-4 font-medium">{s.name}</td>
-                        <td className="py-3 pr-4 text-right tabular-nums">{s.count}</td>
-                        <td className="py-3 pr-4 text-right tabular-nums text-success/90">
-                          {s.wins}
-                        </td>
-                        <td className="py-3 pr-4 text-right tabular-nums text-destructive/80">
-                          {s.losses}
-                        </td>
-                        <td className="py-3 pr-4 text-right tabular-nums font-semibold">
-                          {s.winRate == null ? "—" : `${s.winRate.toFixed(1)}%`}
-                        </td>
-                        <td
-                          className={cn(
-                            "py-3 pr-4 text-right font-bold tabular-nums",
-                            s.netR >= 0 ? "text-success" : "text-destructive",
-                          )}
-                        >
-                          {s.netR >= 0 ? "+" : ""}
-                          {s.netR.toFixed(2)}R
-                        </td>
-                        <td
-                          className={cn(
-                            "py-3 text-right font-semibold tabular-nums",
-                            s.avgRR == null
-                              ? "text-muted-foreground"
-                              : s.avgRR >= 0
-                                ? "text-success"
-                                : "text-destructive",
-                          )}
-                        >
-                          {s.avgRR == null
-                            ? "—"
-                            : `${s.avgRR >= 0 ? "+" : ""}${s.avgRR.toFixed(2)}R`}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
-      </motion.div>
-    );
-  }
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -8 }}
-      transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-      className="mt-6 flex flex-col gap-4"
-    >
-      {/* Summary stats (first) */}
-      <div className="order-1 grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
-        <Kpi icon={BarChart3} label="TOTAL TRADES" value={r.totalTrades} tone="info" />
-        <Kpi
-          icon={Target}
-          label="WIN RATE"
-          value={r.winRate ?? 0}
-          displayValue={r.winRate == null ? "—" : undefined}
-          decimals={1}
-          suffix="%"
-          tone="primary"
-        />
-        <Kpi
-          icon={DollarSign}
-          label="NET R"
-          value={r.totalR}
-          decimals={2}
-          suffix="R"
-          tone={r.totalR >= 0 ? "success" : "destructive"}
-        />
-        <Kpi
-          icon={Activity}
-          label="AVG R:R"
-          value={r.avgRR}
-          decimals={2}
-          suffix="R"
-          tone="success"
-        />
-        <Kpi
-          icon={BarChart3}
-          label="PROFIT FACTOR"
-          value={r.profitFactor ?? 0}
-          displayValue={r.profitFactor == null ? "—" : undefined}
-          decimals={2}
-          tone="info"
-          sub={r.profitFactor == null ? "Needs wins and losses" : undefined}
-        />
-        <Kpi
-          icon={Target}
-          label="EXPECTANCY"
-          value={r.expectancy ?? 0}
-          displayValue={r.expectancy == null ? "—" : undefined}
-          decimals={2}
-          suffix="R"
-          tone="primary"
-        />
-        <Kpi
-          icon={Flame}
-          label="MAX DRAWDOWN"
-          value={r.maxDrawdown}
-          decimals={2}
-          suffix="R"
-          tone="warning"
-        />
-        <Kpi
-          icon={Trophy}
-          label="COMPLETED REVIEWS"
-          value={0}
-          displayValue={`${r.reviewedTrades} / ${r.totalTrades}`}
-          tone="success"
-        />
-      </div>
-
-      {/* Highlights */}
-      <div className="order-2 section-card rounded-2xl p-5">
-        <h3 className="flex items-center gap-2 text-sm font-semibold">
-          <CalendarDays className="h-4 w-4 text-primary" /> Highlights
-        </h3>
-        {r.reviewedTrades < 10 ? (
-          <div className="mt-4 rounded-xl bg-white/[0.025] p-4 ring-1 ring-white/[0.04]">
-            <div className="text-sm font-semibold">Not enough reviewed trades yet</div>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">
-              Complete more detailed reviews to unlock reliable highlights.
-            </p>
-            <div className="mt-4 grid gap-2 text-xs sm:grid-cols-3">
-              {highlightCards.map((item) => (
-                <div
-                  key={item.title}
-                  className="rounded-lg bg-white/[0.025] px-3 py-2 text-muted-foreground ring-1 ring-white/[0.04]"
-                >
-                  <div className="font-semibold text-foreground/85">{item.title}</div>
-                  <p className="mt-1 leading-5">{item.body}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-            {highlightCards.map((item) => (
-              <div
-                key={item.title}
-                className="rounded-xl bg-white/[0.025] p-4 ring-1 ring-white/[0.04]"
-              >
-                <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                  {item.title}
-                </div>
-                <p className="mt-2 text-sm leading-6 text-foreground/86">{item.body}</p>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-      {/* Performance Charts — equity curve */}
-      <div className="order-3 section-card rounded-2xl p-5">
-        <h3 className="text-sm font-semibold">Equity curve</h3>
-        <div className="mt-4 h-[280px]">
-          {!hasUsefulEquity ? (
-            <LowDataState description="Log at least 3 trades to make the equity curve useful." />
-          ) : (
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={r.equity} margin={{ top: 10, right: 8, left: -16, bottom: 8 }}>
-                <defs>
-                  <linearGradient id="eq" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="oklch(0.68 0.23 295)" stopOpacity={0.45} />
-                    <stop offset="100%" stopColor="oklch(0.68 0.23 295)" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke="oklch(1 0 0 / 0.04)"
-                  vertical={false}
-                />
-                <XAxis
-                  dataKey="d"
-                  tick={{ fontSize: 11, fill: "oklch(0.55 0 0)" }}
-                  axisLine={false}
-                  tickLine={false}
-                  tickMargin={8}
-                  interval={r.equityInterval ?? 0}
-                />
-                <YAxis
-                  tick={{ fontSize: 10, fill: "oklch(0.5 0 0)" }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <Tooltip
-                  contentStyle={{
-                    background: "oklch(0.13 0.018 270)",
-                    border: "1px solid oklch(1 0 0 / 0.08)",
-                    borderRadius: 12,
-                    fontSize: 12,
-                    boxShadow: "0 8px 32px -8px oklch(0 0 0 / 0.5)",
-                  }}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="v"
-                  stroke="oklch(0.78 0.19 295)"
-                  strokeWidth={2}
-                  fill="url(#eq)"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-      </div>
-
-      {/* Session performance breakdown */}
-      <div className="order-6 section-card rounded-2xl p-5">
-        <h3 className="flex items-center gap-2 text-sm font-semibold">
-          <Layers className="h-4 w-4 text-primary" /> Session performance breakdown
-        </h3>
-        <div className="mt-4">
-          {!hasSessionSample ? (
-            <div className="h-[260px]">
-              <LowDataState description="Log at least 3 trades to compare session performance." />
-            </div>
-          ) : (
-            <>
-              {/* Desktop Chart View */}
-              <div className="hidden h-[260px] sm:block">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
-                    data={r.sessions}
-                    margin={{ top: 10, right: 8, left: -20, bottom: 0 }}
-                    onClick={(state) => {
-                      if (state && state.activePayload && state.activePayload.length > 0) {
-                        const sessionData = state.activePayload[0].payload;
-                        setSelectedSession(sessionData);
-                      }
-                    }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="oklch(1 0 0 / 0.04)" />
-                    <XAxis
-                      dataKey="name"
-                      tick={{ fontSize: 11, fill: "oklch(0.55 0 0)" }}
-                      axisLine={false}
-                      tickLine={false}
-                    />
-                    <YAxis
-                      tick={{ fontSize: 10, fill: "oklch(0.5 0 0)" }}
-                      axisLine={false}
-                      tickLine={false}
-                    />
-                    <Tooltip
-                      cursor={{ fill: "oklch(1 0 0 / 0.03)" }}
-                      content={<SessionTooltip />}
-                    />
-                    <Bar
-                      dataKey="wins"
-                      stackId="a"
-                      fill="oklch(0.62 0.13 152)"
-                      radius={[4, 4, 0, 0]}
-                    />
-                    <Bar
-                      dataKey="losses"
-                      stackId="a"
-                      fill="oklch(0.64 0.22 22)"
-                      radius={[4, 4, 0, 0]}
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-
-              {/* Mobile List Fallback */}
-              <div className="space-y-2 sm:hidden">
-                {r.sessions.map((s) => (
-                  <button
-                    key={s.name}
-                    type="button"
-                    onClick={() => setSelectedSession(s)}
-                    className={cn(
-                      "flex w-full items-center justify-between rounded-xl p-3 text-left ring-1 transition",
-                      selectedSession?.name === s.name
-                        ? "bg-primary/12 ring-primary/35"
-                        : "bg-white/[0.025] ring-white/[0.04] hover:bg-white/[0.045]",
-                    )}
-                  >
-                    <div>
-                      <div className="text-xs font-semibold text-foreground">{s.name}</div>
-                      <div className="mt-0.5 text-[10px] text-muted-foreground">
-                        {s.count} trade{s.count === 1 ? "" : "s"} · {s.wins}W - {s.losses}L
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div
-                        className={cn(
-                          "text-xs font-bold tabular-nums",
-                          s.netR >= 0 ? "text-success" : "text-destructive",
-                        )}
-                      >
-                        {s.netR >= 0 ? "+" : ""}
-                        {s.netR.toFixed(2)}R
-                      </div>
-                      <div className="text-[10px] text-muted-foreground">
-                        {s.winRate == null ? "—" : `${s.winRate.toFixed(0)}% WR`}
-                      </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-
-              {/* Detail Panel */}
-              <div className="mt-4 rounded-xl bg-white/[0.025] p-3.5 ring-1 ring-white/[0.04]">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/80">
-                    {selectedSession
-                      ? `Session Detail: ${selectedSession.name}`
-                      : "Select a session to view details"}
-                  </span>
-                  {selectedSession && (
-                    <button
-                      type="button"
-                      onClick={() => setSelectedSession(null)}
-                      className="text-[10px] font-semibold text-primary transition hover:text-primary-glow"
-                    >
-                      Clear selection
-                    </button>
-                  )}
-                </div>
-                {selectedSession ? (
-                  <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2.5 sm:grid-cols-4 text-xs">
-                    <div>
-                      <div className="text-muted-foreground/70">Trades</div>
-                      <div className="mt-0.5 font-bold text-foreground/90">
-                        {selectedSession.count}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-muted-foreground/70">Win rate</div>
-                      <div className="mt-0.5 font-bold text-foreground/90">
-                        {selectedSession.winRate == null
-                          ? "—"
-                          : `${selectedSession.winRate.toFixed(1)}%`}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-muted-foreground/70">Net R</div>
-                      <div
-                        className={cn(
-                          "mt-0.5 font-bold",
-                          selectedSession.netR >= 0 ? "text-success" : "text-destructive",
-                        )}
-                      >
-                        {selectedSession.netR >= 0 ? "+" : ""}
-                        {selectedSession.netR.toFixed(2)}R
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-muted-foreground/70">Avg R</div>
-                      <div
-                        className={cn(
-                          "mt-0.5 font-bold",
-                          selectedSession.avgRR == null
-                            ? "text-muted-foreground/70"
-                            : selectedSession.avgRR >= 0
-                              ? "text-success"
-                              : "text-destructive",
-                        )}
-                      >
-                        {selectedSession.avgRR == null
-                          ? "—"
-                          : `${selectedSession.avgRR >= 0 ? "+" : ""}${selectedSession.avgRR.toFixed(2)}R`}
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="mt-2 text-xs text-muted-foreground/60 italic">
-                    Tap a session bar or list card above to view detailed metrics here.
-                  </div>
-                )}
               </div>
             </>
           )}
         </div>
-      </div>
 
-      {/* Category performance breakdown */}
-      <div className="order-8 section-card rounded-2xl p-5">
-        <div className="flex items-center justify-between">
-          <h3 className="flex items-center gap-2 text-sm font-semibold">
-            <Grid3x3 className="h-4 w-4 text-primary" /> Category performance breakdown
-          </h3>
-          {r.categories.length > 4 && (
-            <button
-              onClick={() => setActiveDetailView("categories")}
-              className="text-xs font-semibold text-primary transition hover:text-primary-glow"
-            >
-              View all &rarr;
-            </button>
-          )}
-        </div>
-        {r.categories.length === 0 ? (
-          <SimpleSectionState>No categories tagged yet.</SimpleSectionState>
-        ) : (
-          <div className="mt-4 overflow-x-auto">
-            <table className="w-full min-w-[720px] text-sm">
-              <thead>
-                <tr className="border-b border-white/[0.06] text-left text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                  <th className="py-2.5 pr-4">Category</th>
-                  <th className="py-2.5 pr-4 text-right">Trades</th>
-                  <th className="py-2.5 pr-4 text-right">Win rate</th>
-                  <th className="py-2.5 pr-4 text-right">Net R</th>
-                  <th className="py-2.5 pr-4 text-right">Avg R:R</th>
-                  <th className="py-2.5 pr-4 text-right">Avg win</th>
-                  <th className="py-2.5 text-right">Avg loss</th>
-                </tr>
-              </thead>
-              <tbody>
-                {r.categories
-                  .slice()
-                  .sort((a, b) => b.trades - a.trades)
-                  .slice(0, 4)
-                  .map((c) => (
-                    <tr
-                      key={c.name}
-                      className="border-b border-white/[0.04] last:border-0 transition-colors duration-150 hover:bg-white/[0.02]"
+        {/* Day Performance — lifetime */}
+        <div className="order-11 section-card rounded-2xl p-5">
+          {(() => {
+            const allDayCards = [
+              ...lifetimeWeekdays.filter((d) => d.count > 0),
+              ...lifetimeWeekdays.filter((d) => d.count === 0),
+            ];
+            const staticCards = allDayCards.slice(0, 3);
+            const extraCards = allDayCards.slice(3);
+            return (
+              <>
+                <div className="flex items-center justify-between">
+                  <h3 className="flex items-center gap-2 text-sm font-semibold">
+                    <CalendarDays className="h-4 w-4 text-primary" /> Day Performance
+                  </h3>
+                  {lifetimeWeekdays.length > 3 && (
+                    <button
+                      onClick={() => setShowAllDays(!showAllDays)}
+                      className="text-xs font-semibold text-primary transition hover:text-primary-glow"
                     >
-                      <td className="py-3 pr-4 font-medium">{c.name}</td>
-                      <td className="py-3 pr-4 text-right tabular-nums">{c.trades}</td>
-                      <td className="py-3 pr-4 text-right tabular-nums">
-                        {c.winRate == null ? "—" : `${c.winRate.toFixed(1)}%`}
-                      </td>
-                      <td
+                      {showAllDays ? "Show less" : "View all"} &rarr;
+                    </button>
+                  )}
+                </div>
+                {hasThinDaySample && (
+                  <SmallSampleNote>
+                    Days with fewer than {MIN_BREAKDOWN_SAMPLE} trades are directional only.
+                  </SmallSampleNote>
+                )}
+                <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+                  {staticCards.map((d) => (
+                    <div
+                      key={d.name}
+                      className="rounded-xl bg-white/[0.025] p-3.5 ring-1 ring-white/[0.04]"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="text-[11px] font-semibold tracking-[0.16em] text-foreground/80">
+                          {d.name.slice(0, 3).toUpperCase()}
+                        </div>
+                        <div className="text-[10px] text-muted-foreground">
+                          {d.count > 0 ? `${d.count} trade${d.count === 1 ? "" : "s"}` : ""}
+                        </div>
+                      </div>
+                      <div className="mt-2 text-2xl font-bold tabular-nums text-foreground/85">
+                        {d.winRate == null ? "—" : `${d.winRate.toFixed(0)}%`}
+                      </div>
+                      <div
                         className={cn(
-                          "py-3 pr-4 text-right font-semibold tabular-nums",
-                          c.netR >= 0 ? "text-success" : "text-destructive",
+                          "mt-1.5 text-xs font-semibold tabular-nums",
+                          d.netR == null || d.count === 0
+                            ? "text-muted-foreground"
+                            : rColor(d.netR),
                         )}
                       >
-                        {c.netR >= 0 ? "+" : ""}
-                        {c.netR.toFixed(2)}R
-                      </td>
-                      <td className="py-3 pr-4 text-right tabular-nums">
-                        {c.avgRR == null ? "—" : `${c.avgRR.toFixed(2)}R`}
-                      </td>
-                      <td className="py-3 pr-4 text-right tabular-nums text-success">
-                        {c.avgProfit > 0 ? "+" : ""}
-                        {c.avgProfit.toFixed(2)}R
-                      </td>
-                      <td className="py-3 text-right tabular-nums text-destructive">
-                        {c.avgLoss.toFixed(2)}R
-                      </td>
-                    </tr>
+                        {d.count === 0
+                          ? "No data"
+                          : d.netR == null
+                            ? "—"
+                            : `${signedR(d.netR)} net`}
+                      </div>
+                    </div>
                   ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* Mistake analysis */}
-      <div className="order-9 section-card rounded-2xl p-5">
-        <div className="flex items-center justify-between">
-          <h3 className="flex items-center gap-2 text-sm font-semibold">
-            <Flame className="h-4 w-4 text-warning" /> Mistake analysis
-          </h3>
-          {r.mistakes.length > 4 && (
-            <button
-              onClick={() => setActiveDetailView("mistakes")}
-              className="text-xs font-semibold text-primary transition hover:text-primary-glow"
-            >
-              View all &rarr;
-            </button>
-          )}
-        </div>
-        {r.mistakes.length === 0 ? (
-          <p className="mt-4 text-sm text-muted-foreground">No mistakes tagged yet.</p>
-        ) : (
-          <div className="mt-4 space-y-2">
-            {r.mistakes.slice(0, 4).map((m) => (
-              <div
-                key={m.name}
-                className="flex items-center justify-between rounded-xl bg-white/[0.03] px-4 py-2.5 ring-1 ring-white/[0.04]"
-              >
-                <div className="flex items-center gap-3">
-                  <span className="rounded-md bg-warning/[0.12] px-2 py-0.5 text-[11px] font-semibold text-warning ring-1 ring-warning/[0.18]">
-                    {m.name}
-                  </span>
-                  <span className="text-xs text-muted-foreground">{m.count} occurrences</span>
+                  <AnimatePresence initial={false}>
+                    {showAllDays &&
+                      extraCards.map((d, index) => (
+                        <motion.div
+                          key={d.name}
+                          initial={{ opacity: 0, x: 12 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          exit={{
+                            opacity: 0,
+                            x: 12,
+                            transition: { delay: (extraCards.length - 1 - index) * 0.04 },
+                          }}
+                          transition={{
+                            duration: 0.2,
+                            ease: [0.16, 1, 0.3, 1],
+                            delay: index * 0.04,
+                          }}
+                          className="rounded-xl bg-white/[0.025] p-3.5 ring-1 ring-white/[0.04]"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="text-[11px] font-semibold tracking-[0.16em] text-foreground/80">
+                              {d.name.slice(0, 3).toUpperCase()}
+                            </div>
+                            <div className="text-[10px] text-muted-foreground">
+                              {d.count > 0 ? `${d.count} trade${d.count === 1 ? "" : "s"}` : ""}
+                            </div>
+                          </div>
+                          <div className="mt-2 text-2xl font-bold tabular-nums text-foreground/85">
+                            {d.winRate == null ? "—" : `${d.winRate.toFixed(0)}%`}
+                          </div>
+                          <div
+                            className={cn(
+                              "mt-1.5 text-xs font-semibold tabular-nums",
+                              d.netR == null || d.count === 0
+                                ? "text-muted-foreground"
+                                : rColor(d.netR),
+                            )}
+                          >
+                            {d.count === 0
+                              ? "No data"
+                              : d.netR == null
+                                ? "—"
+                                : `${signedR(d.netR)} net`}
+                          </div>
+                        </motion.div>
+                      ))}
+                  </AnimatePresence>
                 </div>
-                <span
-                  className={cn(
-                    "text-sm font-bold tabular-nums",
-                    m.netR >= 0 ? "text-success" : "text-destructive",
-                  )}
-                >
-                  {m.netR >= 0 ? "+" : ""}
-                  {m.netR}R
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Emotion insights */}
-      <div className="order-10 section-card rounded-2xl p-5">
-        <div className="flex items-center justify-between">
-          <h3 className="flex items-center gap-2 text-sm font-semibold">
-            <Smile className="h-4 w-4 text-primary" /> Emotion Insights
-          </h3>
-          {(() => {
-            const activeCount = r.emotions.items.filter((e) => e.count > 0).length;
-            return (
-              activeCount > 4 && (
-                <button
-                  onClick={() => setActiveDetailView("emotions")}
-                  className="text-xs font-semibold text-primary transition hover:text-primary-glow"
-                >
-                  View all &rarr;
-                </button>
-              )
+              </>
             );
           })()}
         </div>
-        {r.emotions.total === 0 ? (
-          <SimpleSectionState>No emotions tagged yet.</SimpleSectionState>
-        ) : (
-          <>
-            <div className="mt-4 overflow-x-auto">
-              <table className="w-full min-w-[620px] text-sm">
-                <thead className="border-b border-white/[0.06] text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                  <tr>
-                    <th scope="col" className="py-3 pr-4 text-left">
-                      Emotion
-                    </th>
-                    <th scope="col" className="py-3 pr-4 text-right">
-                      Count
-                    </th>
-                    <th scope="col" className="py-3 pr-4 text-right">
-                      Win rate
-                    </th>
-                    <th scope="col" className="py-3 pr-4 text-right">
-                      Avg R
-                    </th>
-                    <th scope="col" className="py-3 text-right">
-                      Net R
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/[0.04]">
-                  {(() => {
-                    const activeEmotions = r.emotions.items.filter((e) => e.count > 0);
-                    return activeEmotions.slice(0, 4).map((e) => (
-                      <tr key={e.key}>
-                        <td className="py-3 pr-4">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <span className="text-base leading-none">{e.emoji}</span>
-                            <span className="truncate font-medium">{e.label}</span>
-                          </div>
-                        </td>
-                        <td className="py-3 pr-4 text-right tabular-nums text-muted-foreground">
-                          {e.count}
-                        </td>
-                        <td
-                          className={cn(
-                            "py-3 pr-4 text-right font-semibold tabular-nums",
-                            e.winRate == null
-                              ? "text-muted-foreground"
-                              : e.winRate >= 50
-                                ? "text-success"
-                                : "text-destructive",
-                          )}
-                        >
-                          {e.winRate == null ? "—" : `${e.winRate.toFixed(0)}%`}
-                        </td>
-                        <td
-                          className={cn(
-                            "py-3 pr-4 text-right font-semibold tabular-nums",
-                            e.avgR == null
-                              ? "text-muted-foreground"
-                              : e.avgR >= 0
-                                ? "text-success"
-                                : "text-destructive",
-                          )}
-                        >
-                          {e.avgR == null ? "—" : `${e.avgR >= 0 ? "+" : ""}${e.avgR.toFixed(2)}R`}
-                        </td>
-                        <td
-                          className={cn(
-                            "py-3 text-right font-semibold tabular-nums",
-                            e.netR >= 0 ? "text-success" : "text-destructive",
-                          )}
-                        >
-                          {e.netR >= 0 ? "+" : ""}
-                          {e.netR.toFixed(2)}R
-                        </td>
-                      </tr>
-                    ));
-                  })()}
-                </tbody>
-              </table>
-            </div>
-          </>
-        )}
-      </div>
 
-      {/* Day Performance — lifetime */}
-      <div className="order-11 section-card rounded-2xl p-5">
-        <h3 className="flex items-center gap-2 text-sm font-semibold">
-          <CalendarDays className="h-4 w-4 text-primary" /> Day Performance
-        </h3>
-        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
-          {lifetimeWeekdays.map((d) => {
-            const wr = d.winRate;
-            const tone =
-              wr == null ? "muted" : wr >= 60 ? "success" : wr >= 40 ? "primary" : "destructive";
-            return (
+        {/* Planned vs Achieved R */}
+        <div className="order-4 section-card rounded-2xl p-5">
+          <h3 className="flex items-center gap-2 text-sm font-semibold">
+            <ArrowLeftRight className="h-4 w-4 text-primary" /> Planned vs Achieved R
+          </h3>
+          {r.plannedVsAchieved.sampleSize === 0 ? (
+            <p className="mt-4 text-sm text-muted-foreground/82">
+              Not enough data — log trades with entry/SL/TP prices to enable this view.
+            </p>
+          ) : (
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div className="rounded-xl bg-white/[0.03] p-4 ring-1 ring-white/[0.05]">
+                <div className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground">
+                  PLANNED AVG
+                </div>
+                <div className="mt-1 text-2xl font-bold tabular-nums">
+                  {r.plannedVsAchieved.plannedAvg?.toFixed(2)}R
+                </div>
+              </div>
+              <div className="rounded-xl bg-white/[0.03] p-4 ring-1 ring-white/[0.05]">
+                <div className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground">
+                  ACHIEVED AVG
+                </div>
+                <div
+                  className={cn(
+                    "mt-1 text-2xl font-bold tabular-nums",
+                    rColor(r.plannedVsAchieved.achievedAvg),
+                  )}
+                >
+                  {signedR(r.plannedVsAchieved.achievedAvg)}
+                </div>
+              </div>
+              <div className="rounded-xl bg-white/[0.03] p-4 ring-1 ring-white/[0.05]">
+                <div className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground">
+                  R CAPTURE
+                </div>
+                <div className="mt-1 text-2xl font-bold tabular-nums">
+                  {r.plannedVsAchieved.capturePct == null
+                    ? "—"
+                    : `${r.plannedVsAchieved.capturePct}%`}
+                </div>
+                <div className="text-[11px] text-muted-foreground">
+                  {r.plannedVsAchieved.sampleSize} trades
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Direction breakdown */}
+        <div className="order-5 section-card rounded-2xl p-5">
+          <h3 className="flex items-center gap-2 text-sm font-semibold">
+            <ArrowLeftRight className="h-4 w-4 text-primary" /> Direction performance
+          </h3>
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {r.directions.map((d) => (
               <div
                 key={d.name}
-                className="rounded-xl bg-white/[0.025] p-3 ring-1 ring-white/[0.04]"
-              >
-                <div className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground">
-                  {d.name.slice(0, 3).toUpperCase()}
-                </div>
-                <div
-                  className={cn(
-                    "mt-1 text-xl font-bold tabular-nums",
-                    tone === "success" && "text-success",
-                    tone === "destructive" && "text-destructive",
-                    tone === "primary" && "text-primary",
-                    tone === "muted" && "text-muted-foreground",
-                  )}
-                >
-                  {wr == null ? "—" : `${wr.toFixed(0)}%`}
-                </div>
-                <div className="mt-0.5 text-[11px] text-muted-foreground">
-                  {d.count} trade{d.count === 1 ? "" : "s"}
-                </div>
-                <div
-                  className={cn(
-                    "mt-1 text-[11px] font-semibold tabular-nums",
-                    d.netR == null
-                      ? "text-muted-foreground"
-                      : d.netR >= 0
-                        ? "text-success"
-                        : "text-destructive",
-                  )}
-                >
-                  {d.netR == null ? "—" : `${signedR(d.netR)} net`}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Planned vs Achieved R */}
-      <div className="order-4 section-card rounded-2xl p-5">
-        <h3 className="flex items-center gap-2 text-sm font-semibold">
-          <Target className="h-4 w-4 text-primary" /> Planned vs Achieved R
-        </h3>
-        {r.plannedVsAchieved.sampleSize === 0 ? (
-          <p className="mt-4 text-sm text-muted-foreground/82">
-            Not enough data — log trades with entry/SL/TP prices to enable this view.
-          </p>
-        ) : (
-          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div className="rounded-xl bg-white/[0.03] p-4 ring-1 ring-white/[0.05]">
-              <div className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground">
-                PLANNED AVG
-              </div>
-              <div className="mt-1 text-2xl font-bold tabular-nums">
-                {r.plannedVsAchieved.plannedAvg?.toFixed(2)}R
-              </div>
-            </div>
-            <div className="rounded-xl bg-white/[0.03] p-4 ring-1 ring-white/[0.05]">
-              <div className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground">
-                ACHIEVED AVG
-              </div>
-              <div
                 className={cn(
-                  "mt-1 text-2xl font-bold tabular-nums",
-                  (r.plannedVsAchieved.achievedAvg ?? 0) >= 0 ? "text-success" : "text-destructive",
+                  "rounded-xl bg-white/[0.025] p-4 ring-1",
+                  d.name === "Long" ? "ring-success/12" : "ring-info/12",
                 )}
               >
-                {(r.plannedVsAchieved.achievedAvg ?? 0) >= 0 ? "+" : ""}
-                {r.plannedVsAchieved.achievedAvg?.toFixed(2)}R
-              </div>
-            </div>
-            <div className="rounded-xl bg-white/[0.03] p-4 ring-1 ring-white/[0.05]">
-              <div className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground">
-                CAPTURE %
-              </div>
-              <div className="mt-1 text-2xl font-bold tabular-nums">
-                {r.plannedVsAchieved.capturePct == null
-                  ? "—"
-                  : `${r.plannedVsAchieved.capturePct}%`}
-              </div>
-              <div className="text-[11px] text-muted-foreground">
-                {r.plannedVsAchieved.sampleSize} trades
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Direction breakdown */}
-      <div className="order-5 section-card rounded-2xl p-5">
-        <h3 className="flex items-center gap-2 text-sm font-semibold">
-          <Activity className="h-4 w-4 text-primary" /> Direction performance
-        </h3>
-        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {r.directions.map((d) => (
-            <div
-              key={d.name}
-              className={cn(
-                "rounded-xl bg-white/[0.025] p-4 ring-1",
-                d.name === "Long" ? "ring-success/12" : "ring-info/12",
-              )}
-            >
-              <div className="flex items-center justify-between">
-                <div
-                  className={cn(
-                    "text-sm font-bold",
-                    d.name === "Long" ? "text-success/90" : "text-info/90",
-                  )}
-                >
-                  {d.name}
+                <div className="flex items-center justify-between">
+                  <div
+                    className={cn(
+                      "text-base font-bold",
+                      d.name === "Long" ? "text-success/90" : "text-info/90",
+                    )}
+                  >
+                    {d.name}
+                  </div>
+                  <div className="text-xs text-muted-foreground">{d.count} trades</div>
                 </div>
-                <div className="text-[11px] text-muted-foreground">{d.count} trades</div>
-              </div>
-              <div className="mt-3 grid grid-cols-3 gap-3 text-xs">
-                <div>
-                  <div className="text-muted-foreground">Win rate</div>
-                  <div className="mt-0.5 font-semibold tabular-nums">
-                    {d.winRate == null ? "—" : `${d.winRate.toFixed(1)}%`}
+                <div className="mt-4 grid grid-cols-3 gap-4 text-sm">
+                  <div>
+                    <div className="text-muted-foreground/80">Win rate</div>
+                    <div className="mt-1 font-semibold tabular-nums text-foreground">
+                      {d.winRate == null ? "—" : `${d.winRate.toFixed(1)}%`}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground/80">Net R</div>
+                    <div
+                      className={cn(
+                        "mt-1 font-semibold tabular-nums",
+                        d.count === 0 ? "text-muted-foreground" : rColor(d.netR),
+                      )}
+                    >
+                      {d.count === 0 ? "—" : signedR(d.netR)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground/80">Avg R</div>
+                    <div
+                      className={cn(
+                        "mt-1 font-semibold tabular-nums",
+                        d.avgRR == null ? "text-muted-foreground" : rColor(d.avgRR),
+                      )}
+                    >
+                      {d.avgRR == null ? "—" : signedR(d.avgRR)}
+                    </div>
                   </div>
                 </div>
-                <div>
-                  <div className="text-muted-foreground">Net R</div>
-                  <div className="mt-0.5 font-semibold tabular-nums text-foreground">
-                    {d.count === 0 ? "—" : signedR(d.netR)}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-muted-foreground">Avg R</div>
-                  <div className="mt-0.5 font-semibold tabular-nums">
-                    {d.avgRR == null ? "—" : signedR(d.avgRR)}
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Killzone performance */}
-      <div className="order-7 section-card rounded-2xl p-5">
-        <h3 className="flex items-center gap-2 text-sm font-semibold">
-          <Target className="h-4 w-4 text-primary" /> Killzone Performance
-        </h3>
-        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="rounded-xl bg-white/[0.025] p-4 ring-1 ring-primary/12">
-            <div className="text-[10px] font-semibold tracking-[0.16em] text-primary/85">
-              IN KILLZONE
-            </div>
-            <div className="mt-3 grid grid-cols-3 gap-3 text-xs">
-              <div>
-                <div className="text-muted-foreground">Win rate</div>
-                <div className="mt-0.5 font-semibold tabular-nums">
-                  {r.killzoneDiscipline.inWinRate == null
-                    ? "—"
-                    : r.killzoneDiscipline.inWinRate.toFixed(1) + "%"}
-                </div>
-              </div>
-              <div>
-                <div className="text-muted-foreground">Net R</div>
-                <div
-                  className={cn(
-                    "mt-0.5 font-semibold tabular-nums",
-                    (r.killzoneDiscipline.inNetR ?? 0) >= 0 ? "text-success" : "text-destructive",
-                  )}
-                >
-                  {r.killzoneDiscipline.inNetR == null
-                    ? "—"
-                    : (r.killzoneDiscipline.inNetR >= 0 ? "+" : "") +
-                      r.killzoneDiscipline.inNetR.toFixed(2) +
-                      "R"}
-                </div>
-              </div>
-              <div>
-                <div className="text-muted-foreground">Avg R</div>
-                <div className="mt-0.5 font-semibold tabular-nums">
-                  {r.killzoneDiscipline.inAvgR == null
-                    ? "—"
-                    : (r.killzoneDiscipline.inAvgR >= 0 ? "+" : "") +
-                      r.killzoneDiscipline.inAvgR.toFixed(2) +
-                      "R"}
-                </div>
-              </div>
-            </div>
-          </div>
-          <div className="rounded-xl bg-white/[0.03] p-4 ring-1 ring-white/[0.05]">
-            <div className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground">
-              OUTSIDE KILLZONE
-            </div>
-            <div className="mt-3 grid grid-cols-3 gap-3 text-xs">
-              <div>
-                <div className="text-muted-foreground">Win rate</div>
-                <div className="mt-0.5 font-semibold tabular-nums">
-                  {r.killzoneDiscipline.outWinRate == null
-                    ? "—"
-                    : r.killzoneDiscipline.outWinRate.toFixed(1) + "%"}
-                </div>
-              </div>
-              <div>
-                <div className="text-muted-foreground">Net R</div>
-                <div
-                  className={cn(
-                    "mt-0.5 font-semibold tabular-nums",
-                    (r.killzoneDiscipline.outNetR ?? 0) >= 0 ? "text-success" : "text-destructive",
-                  )}
-                >
-                  {r.killzoneDiscipline.outNetR == null
-                    ? "—"
-                    : (r.killzoneDiscipline.outNetR >= 0 ? "+" : "") +
-                      r.killzoneDiscipline.outNetR.toFixed(2) +
-                      "R"}
-                </div>
-              </div>
-              <div>
-                <div className="text-muted-foreground">Avg R</div>
-                <div className="mt-0.5 font-semibold tabular-nums">
-                  {r.killzoneDiscipline.outAvgR == null
-                    ? "—"
-                    : (r.killzoneDiscipline.outAvgR >= 0 ? "+" : "") +
-                      r.killzoneDiscipline.outAvgR.toFixed(2) +
-                      "R"}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Grade distribution */}
-      <div className="order-12 section-card rounded-2xl p-5">
-        <h3 className="flex items-center gap-2 text-sm font-semibold">
-          <Trophy className="h-4 w-4 text-warning" /> Grade distribution
-        </h3>
-        {r.grades.every((g) => g.count === 0) ? (
-          <SimpleSectionState>No grades assigned yet.</SimpleSectionState>
-        ) : (
-          <div className="mt-4 space-y-2">
-            {r.grades.map((g) => (
-              <div
-                key={g.name}
-                className="flex items-center justify-between rounded-xl bg-white/[0.025] px-4 py-3 ring-1 ring-white/[0.04]"
-              >
-                <div className="flex items-center gap-4">
-                  <span className="w-8 text-base font-extrabold text-warning">{g.name}</span>
-                  <span className="text-xs md:text-sm text-muted-foreground">
-                    {g.count} {g.count === 1 ? "trade" : "trades"}
-                  </span>
-                </div>
-                <span
-                  className={cn(
-                    "text-sm md:text-base font-bold tabular-nums",
-                    g.count > 0
-                      ? g.avgR >= 0
-                        ? "text-success"
-                        : "text-destructive"
-                      : "text-muted-foreground",
-                  )}
-                >
-                  {g.count > 0 ? `${g.avgR >= 0 ? "+" : ""}${g.avgR.toFixed(2)}R avg` : "—"}
-                </span>
               </div>
             ))}
           </div>
-        )}
-      </div>
+        </div>
 
-      {/* Instrument breakdown */}
-      <div className="order-13 section-card rounded-2xl p-5">
-        <div className="flex items-center justify-between">
+        {/* Killzone performance */}
+        <div className="order-7 section-card rounded-2xl p-5">
           <h3 className="flex items-center gap-2 text-sm font-semibold">
-            <DollarSign className="h-4 w-4 text-primary" /> Instrument performance
+            <Crosshair className="h-4 w-4 text-primary" /> Killzone Performance
           </h3>
-          {r.instruments.length > 4 && (
-            <button
-              onClick={() => setActiveDetailView("instruments")}
-              className="text-xs font-semibold text-primary transition hover:text-primary-glow"
-            >
-              View all &rarr;
-            </button>
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="rounded-xl bg-white/[0.025] p-4 ring-1 ring-primary/12">
+              <div className="text-[10px] font-semibold tracking-[0.16em] text-primary/85">
+                IN KILLZONE
+              </div>
+              <div className="mt-4 grid grid-cols-3 gap-4 text-sm">
+                <div>
+                  <div className="text-muted-foreground/80">Win rate</div>
+                  <div className="mt-1 font-semibold tabular-nums text-foreground">
+                    {r.killzoneDiscipline.inWinRate == null
+                      ? "—"
+                      : r.killzoneDiscipline.inWinRate.toFixed(1) + "%"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground/80">Net R</div>
+                  <div
+                    className={cn(
+                      "mt-1 font-semibold tabular-nums",
+                      rColor(r.killzoneDiscipline.inNetR),
+                    )}
+                  >
+                    {signedR(r.killzoneDiscipline.inNetR)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground/80">Avg R</div>
+                  <div
+                    className={cn(
+                      "mt-1 font-semibold tabular-nums",
+                      rColor(r.killzoneDiscipline.inAvgR),
+                    )}
+                  >
+                    {signedR(r.killzoneDiscipline.inAvgR)}
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="rounded-xl bg-white/[0.03] p-4 ring-1 ring-white/[0.05]">
+              <div className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground">
+                OUTSIDE KILLZONE
+              </div>
+              <div className="mt-4 grid grid-cols-3 gap-4 text-sm">
+                <div>
+                  <div className="text-muted-foreground/80">Win rate</div>
+                  <div className="mt-1 font-semibold tabular-nums text-foreground">
+                    {r.killzoneDiscipline.outWinRate == null
+                      ? "—"
+                      : r.killzoneDiscipline.outWinRate.toFixed(1) + "%"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground/80">Net R</div>
+                  <div
+                    className={cn(
+                      "mt-1 font-semibold tabular-nums",
+                      rColor(r.killzoneDiscipline.outNetR),
+                    )}
+                  >
+                    {signedR(r.killzoneDiscipline.outNetR)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground/80">Avg R</div>
+                  <div
+                    className={cn(
+                      "mt-1 font-semibold tabular-nums",
+                      rColor(r.killzoneDiscipline.outAvgR),
+                    )}
+                  >
+                    {signedR(r.killzoneDiscipline.outAvgR)}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Grade distribution */}
+        <div className="order-12 section-card rounded-2xl p-5">
+          <h3 className="flex items-center gap-2 text-sm font-semibold">
+            <Award className="h-4 w-4 text-warning" /> Grade distribution
+          </h3>
+          {r.grades.every((g) => g.count === 0) ? (
+            <SimpleSectionState>No grades assigned yet.</SimpleSectionState>
+          ) : (
+            <div className="mt-4 space-y-1.5">
+              {r.grades.map((g) => (
+                <div
+                  key={g.name}
+                  className="flex items-center justify-between rounded-xl bg-white/[0.025] px-3.5 py-2.5 ring-1 ring-white/[0.04]"
+                >
+                  <div className="flex items-center gap-3">
+                    <span
+                      className={cn(
+                        "w-7 text-sm font-bold",
+                        g.name === "A+" || g.name === "A"
+                          ? "text-warning"
+                          : g.name === "B+" || g.name === "B"
+                            ? "text-foreground"
+                            : "text-muted-foreground",
+                      )}
+                    >
+                      {g.name}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {g.count} {g.count === 1 ? "trade" : "trades"}
+                    </span>
+                  </div>
+                  <span
+                    className={cn(
+                      "text-xs font-semibold tabular-nums",
+                      g.count > 0 ? rColor(g.avgR) : "text-muted-foreground",
+                    )}
+                  >
+                    {g.count > 0 ? `${g.avgR > 0 ? "+" : ""}${g.avgR.toFixed(2)}R avg` : "—"}
+                  </span>
+                </div>
+              ))}
+            </div>
           )}
         </div>
-        {r.instruments.length === 0 ? (
-          <SimpleSectionState>No instruments logged yet.</SimpleSectionState>
-        ) : (
-          <div className="mt-4 overflow-x-auto">
-            <table className="w-full min-w-[560px] text-sm">
-              <thead>
-                <tr className="border-b border-white/[0.06] text-left text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                  <th className="py-2.5 pr-4">Instrument</th>
-                  <th className="py-2.5 pr-4 text-right">Trades</th>
-                  <th className="py-2.5 pr-4 text-right">Win rate</th>
-                  <th className="py-2.5 pr-4 text-right">Net R</th>
-                  <th className="py-2.5 text-right">Avg R</th>
-                </tr>
-              </thead>
-              <tbody>
-                {r.instruments
-                  .slice()
-                  .sort((a, b) => b.count - a.count)
-                  .slice(0, 4)
-                  .map((i) => (
-                    <tr
-                      key={i.name}
-                      className="border-b border-white/[0.04] last:border-0 hover:bg-white/[0.02]"
-                    >
-                      <td className="py-3 pr-4 font-medium">{i.name}</td>
-                      <td className="py-3 pr-4 text-right tabular-nums">{i.count}</td>
-                      <td className="py-3 pr-4 text-right tabular-nums">
-                        {i.winRate == null ? "—" : `${i.winRate.toFixed(1)}%`}
-                      </td>
-                      <td
-                        className={cn(
-                          "py-3 pr-4 text-right font-semibold tabular-nums",
-                          i.netR >= 0 ? "text-success" : "text-destructive",
-                        )}
-                      >
-                        {i.netR >= 0 ? "+" : ""}
-                        {i.netR}R
-                      </td>
-                      <td className="py-3 text-right tabular-nums">
-                        {i.avgRR == null ? "—" : `${i.avgRR.toFixed(2)}R`}
-                      </td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
+
+        {/* Instrument breakdown */}
+        <div
+          id="analytics-section-instruments"
+          className={cn(
+            "order-13 section-card rounded-2xl p-5 scroll-mt-28",
+            highlightedSection === "instruments" && "ring-1 ring-white/[0.05]",
+          )}
+        >
+          <div className="flex items-center justify-between">
+            <h3 className="flex items-center gap-2 text-sm font-semibold">
+              <CandlestickChart className="h-4 w-4 text-primary" /> Instrument performance
+            </h3>
+            {r.instruments.length > 4 && (
+              <button
+                onClick={() => setActiveDetailView("instruments")}
+                className="text-xs font-semibold text-primary transition hover:text-primary-glow"
+              >
+                View all &rarr;
+              </button>
+            )}
           </div>
-        )}
-      </div>
-    </motion.div>
+          {hasThinInstrumentSample && (
+            <SmallSampleNote>
+              Instruments with fewer than {MIN_BREAKDOWN_SAMPLE} trades are directional only.
+            </SmallSampleNote>
+          )}
+          {r.instruments.length === 0 ? (
+            <SimpleSectionState>No instruments logged yet.</SimpleSectionState>
+          ) : (
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full min-w-[560px] text-sm">
+                <thead>
+                  <tr className="border-b border-white/[0.06] text-left text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                    <th className="py-2.5 pr-4">Instrument</th>
+                    <th className="py-2.5 pr-4 text-right">Trades</th>
+                    <th className="py-2.5 pr-4 text-right">Win rate</th>
+                    <th className="py-2.5 pr-4 text-right">Net R</th>
+                    <th className="py-2.5 text-right">Avg R</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {r.instruments
+                    .slice()
+                    .sort((a, b) => b.count - a.count)
+                    .slice(0, 4)
+                    .map((i) => (
+                      <tr
+                        key={i.name}
+                        className="border-b border-white/[0.04] last:border-0 transition hover:bg-white/[0.03]"
+                      >
+                        <td className="py-3.5 pr-4 font-semibold">{i.name}</td>
+                        <td className="py-3.5 pr-4 text-right tabular-nums">{i.count}</td>
+                        <td className="py-3.5 pr-4 text-right tabular-nums">
+                          {i.winRate == null ? "—" : `${i.winRate.toFixed(1)}%`}
+                        </td>
+                        <td
+                          className={cn(
+                            "py-3.5 pr-4 text-right font-semibold tabular-nums",
+                            rColor(i.netR),
+                          )}
+                        >
+                          {signedR(i.netR)}
+                        </td>
+                        <td
+                          className={cn(
+                            "py-3.5 text-right tabular-nums font-semibold",
+                            rColor(i.avgRR),
+                          )}
+                        >
+                          {signedR(i.avgRR)}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </motion.div>
+    </AnimatePresence>
   );
 }
 
@@ -2263,10 +2490,10 @@ function PeriodPickerModal({
       className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-md"
     >
       <motion.div
-        initial={{ scale: 0.96, y: 10 }}
+        initial={{ scale: 0.98, y: 8 }}
         animate={{ scale: 1, y: 0 }}
-        exit={{ scale: 0.96, y: 10 }}
-        transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+        exit={{ scale: 0.98, y: 8 }}
+        transition={CALM_TRANSITION}
         onClick={(event) => event.stopPropagation()}
         className="glow-card w-full max-w-md rounded-2xl p-5"
       >
@@ -2309,11 +2536,15 @@ function PeriodPickerModal({
                 )}
               >
                 <span>{labelFor(key)}</span>
-                {isSelected && (
-                  <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-primary">
-                    Selected
-                  </span>
-                )}
+                <span
+                  className={cn(
+                    "text-[10px] font-bold uppercase tracking-[0.16em] text-primary transition-opacity duration-150",
+                    isSelected ? "opacity-100" : "opacity-0",
+                  )}
+                  aria-hidden={!isSelected}
+                >
+                  Selected
+                </span>
               </button>
             );
           })}
@@ -2338,11 +2569,18 @@ function PeriodPickerModal({
 }
 
 type MonthSelection = "current" | "previous" | "custom";
+type QuarterSelection = "current" | "previous" | "custom";
 
 function labelMonthKey(key: string): string {
   const [y, m] = key.split("-").map(Number);
   const d = new Date(y, m - 1, 1);
   return d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+}
+
+function labelQuarterKey(key: string): string {
+  const m = Number(key.split("-")[1].slice(1));
+  const y = key.split("-")[0];
+  return `Q${m} ${y}`;
 }
 
 function generateWeekKeysInRange(oldestTradeDateStr: string | null): string[] {
@@ -2394,6 +2632,35 @@ function generateMonthKeysInRange(oldestTradeDateStr: string | null): string[] {
   while (current >= startMonth && iterations < maxIterations) {
     keys.push(ymKey(current));
     current = new Date(current.getFullYear(), current.getMonth() - 1, 1);
+    iterations++;
+  }
+  return keys;
+}
+
+function generateQuarterKeysInRange(oldestTradeDateStr: string | null): string[] {
+  if (!oldestTradeDateStr) return [];
+
+  const now = new Date();
+  const currentQ = Math.floor(now.getMonth() / 3);
+  const endQuarter = new Date(now.getFullYear(), currentQ * 3, 1);
+  const parsedStart = new Date(oldestTradeDateStr + "T00:00:00");
+  let startQuarter = endQuarter;
+  if (!isNaN(parsedStart.getTime())) {
+    const sq = Math.floor(parsedStart.getMonth() / 3);
+    startQuarter = new Date(parsedStart.getFullYear(), sq * 3, 1);
+  }
+
+  if (startQuarter > endQuarter) {
+    startQuarter = endQuarter;
+  }
+
+  const keys: string[] = [];
+  let current = new Date(endQuarter);
+  const maxIterations = 200;
+  let iterations = 0;
+  while (current >= startQuarter && iterations < maxIterations) {
+    keys.push(quarterKey(current));
+    current = new Date(current.getFullYear(), current.getMonth() - 3, 1);
     iterations++;
   }
   return keys;
@@ -2468,10 +2735,25 @@ function AnalyticsPage() {
   const [customMonthKey, setCustomMonthKey] = useState(ymKey(new Date()));
   const [weekPickerOpen, setWeekPickerOpen] = useState(false);
   const [monthPickerOpen, setMonthPickerOpen] = useState(false);
+  const [quarterSel, setQuarterSel] = useState<QuarterSelection>("current");
+  const [customQuarterKey, setCustomQuarterKey] = useState(quarterKey(new Date()));
+  const [quarterPickerOpen, setQuarterPickerOpen] = useState(false);
   const fn = useServerFn(listTrades);
   const { data } = useSuspenseQuery({ queryKey: ["trades"], queryFn: () => fn() });
   const trades = useMemo(() => (data ?? []) as DbTrade[], [data]);
   const realTrades = useMemo(() => trades.filter((trade) => !isPaperTrade(trade)), [trades]);
+
+  const accountsFn = useServerFn(listTradingAccounts);
+  const { data: accounts } = useQuery({
+    queryKey: ["trading-accounts"],
+    queryFn: () => accountsFn(),
+  });
+  const [selectedAccountId, setSelectedAccountId] = useState<string>("ALL");
+
+  const filteredTrades = useMemo(() => {
+    if (selectedAccountId === "ALL") return realTrades;
+    return realTrades.filter((t) => t.account_id === selectedAccountId);
+  }, [realTrades, selectedAccountId]);
 
   const oldestTradeDate = useMemo(() => {
     if (realTrades.length === 0) return null;
@@ -2489,6 +2771,10 @@ function AnalyticsPage() {
     return generateMonthKeysInRange(oldestTradeDate);
   }, [oldestTradeDate]);
 
+  const quarterPickerKeys = useMemo(() => {
+    return generateQuarterKeysInRange(oldestTradeDate);
+  }, [oldestTradeDate]);
+
   const labelCustomWeek = useCallback((key: string) => {
     return labelWeekRange(key);
   }, []);
@@ -2497,12 +2783,21 @@ function AnalyticsPage() {
     return labelMonthKey(key);
   }, []);
 
+  const labelCustomQuarter = useCallback((key: string) => {
+    return labelQuarterKey(key);
+  }, []);
+
   const currentWeekKey = weekKey(new Date());
   const prevWeekKey = weekKey(addDays(new Date(), -7));
   const currentMonthKey = ymKey(new Date());
   const prevMonthKey = ymKey(new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1));
   const hasPreviousWeek = weekKeys.includes(prevWeekKey);
   const hasPreviousMonth = monthPickerKeys.includes(prevMonthKey);
+  const currentQuarterKey = quarterKey(new Date());
+  const prevQuarterKey = quarterKey(
+    new Date(new Date().getFullYear(), new Date().getMonth() - 3, 1),
+  );
+  const hasPreviousQuarter = quarterPickerKeys.includes(prevQuarterKey);
 
   useEffect(() => {
     if (weekSel === "previous" && !hasPreviousWeek) setWeekSel("current");
@@ -2511,6 +2806,10 @@ function AnalyticsPage() {
   useEffect(() => {
     if (monthSel === "previous" && !hasPreviousMonth) setMonthSel("current");
   }, [hasPreviousMonth, monthSel]);
+
+  useEffect(() => {
+    if (quarterSel === "previous" && !hasPreviousQuarter) setQuarterSel("current");
+  }, [hasPreviousQuarter, quarterSel]);
 
   const activeKey =
     tab === "weekly"
@@ -2525,21 +2824,27 @@ function AnalyticsPage() {
           : monthSel === "previous"
             ? prevMonthKey
             : customMonthKey
-        : null;
+        : tab === "quarterly"
+          ? quarterSel === "current"
+            ? currentQuarterKey
+            : quarterSel === "previous"
+              ? prevQuarterKey
+              : customQuarterKey
+          : null;
 
   const reportTrades = useMemo(
-    () => filterByScope(realTrades, tab, activeKey),
-    [realTrades, tab, activeKey],
+    () => filterByScope(filteredTrades, tab, activeKey),
+    [filteredTrades, tab, activeKey],
   );
   const report = useMemo(() => buildReport(reportTrades, tab), [reportTrades, tab]);
 
   const lifetimeWeekdays = useMemo<LifetimeWeekday[]>(() => {
-    const ana = realTrades.map(toAnalytics);
+    const ana = filteredTrades.map(toAnalytics);
     const stats = weekdayStats(ana);
     const ALL_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
     return ALL_DAYS.map((d) => {
       const s = stats.find((x) => x.key === d);
-      const subset = realTrades.filter(
+      const subset = filteredTrades.filter(
         (trade) =>
           new Date(trade.trade_date + "T00:00:00").toLocaleDateString("en-US", {
             weekday: "long",
@@ -2558,7 +2863,7 @@ function AnalyticsPage() {
         netR: netR == null ? null : Number(netR.toFixed(2)),
       };
     });
-  }, [realTrades]);
+  }, [filteredTrades]);
 
   const handleWeekSelection = (value: WeeklySelection) => {
     setWeekSel(value);
@@ -2570,112 +2875,181 @@ function AnalyticsPage() {
     if (value === "custom") setMonthPickerOpen(true);
   };
 
+  const handleQuarterSelection = (value: QuarterSelection) => {
+    setQuarterSel(value);
+    if (value === "custom") setQuarterPickerOpen(true);
+  };
+
   return (
     <PageShell>
       <PageHeader
         icon={BarChart3}
         eyebrow="Reports"
         title="Analytics"
-        description="Performance organized into overall, weekly, monthly, and longer-horizon reports."
+        description="Performance organized into overall, weekly, monthly, quarterly, and longer-horizon reports."
       />
 
-      <div className="glow-card relative z-50 mt-6 flex flex-wrap items-center gap-3 overflow-visible rounded-2xl p-3">
-        <div className="inline-flex flex-wrap rounded-xl bg-white/[0.03] p-1 ring-1 ring-white/[0.06]">
-          <button
-            onClick={() => setTab("overall")}
-            className={cn(
-              "inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-all duration-200",
-              tab === "overall"
-                ? "bg-primary text-primary-foreground shadow-[var(--shadow-glow)]"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            <BarChart3 className="h-4 w-4" /> Overall
-          </button>
-          <button
-            onClick={() => setTab("weekly")}
-            className={cn(
-              "inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-all duration-200",
-              tab === "weekly"
-                ? "bg-primary text-primary-foreground shadow-[var(--shadow-glow)]"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            <CalendarDays className="h-4 w-4" /> Weekly
-          </button>
-          <button
-            onClick={() => setTab("monthly")}
-            className={cn(
-              "inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-all duration-200",
-              tab === "monthly"
-                ? "bg-primary text-primary-foreground shadow-[var(--shadow-glow)]"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            <CalendarRange className="h-4 w-4" /> Monthly
-          </button>
-        </div>
+      <div className="glow-card relative z-50 mt-6 overflow-visible rounded-2xl p-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 flex-wrap items-center gap-2 sm:flex-nowrap">
+            <div className="inline-flex flex-wrap rounded-xl bg-white/[0.03] p-1 ring-1 ring-white/[0.06] sm:flex-nowrap">
+              <button
+                onClick={() => setTab("overall")}
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-all duration-200",
+                  tab === "overall"
+                    ? "bg-primary text-primary-foreground shadow-[var(--shadow-glow)]"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <BarChart3 className="h-4 w-4" /> Overall
+              </button>
+              <button
+                onClick={() => setTab("weekly")}
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-all duration-200",
+                  tab === "weekly"
+                    ? "bg-primary text-primary-foreground shadow-[var(--shadow-glow)]"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <CalendarDays className="h-4 w-4" /> Weekly
+              </button>
+              <button
+                onClick={() => setTab("monthly")}
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-all duration-200",
+                  tab === "monthly"
+                    ? "bg-primary text-primary-foreground shadow-[var(--shadow-glow)]"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <CalendarRange className="h-4 w-4" /> Monthly
+              </button>
+              <button
+                onClick={() => setTab("quarterly")}
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-all duration-200",
+                  tab === "quarterly"
+                    ? "bg-primary text-primary-foreground shadow-[var(--shadow-glow)]"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <CalendarFold className="h-4 w-4" /> Quarterly
+              </button>
+            </div>
 
-        {tab === "weekly" && (
-          <div className="inline-flex flex-wrap items-center gap-2 rounded-xl bg-white/[0.03] px-2 py-1.5 ring-1 ring-white/[0.06]">
-            <PeriodDropdown
-              value={weekSel}
-              label={
-                weekSel === "custom"
-                  ? "Custom week"
-                  : weekSel === "previous"
-                    ? "Previous week"
-                    : "This week"
-              }
-              options={[
-                { value: "current", label: "This week" },
-                { value: "custom", label: "Custom week" },
-                ...(hasPreviousWeek ? [{ value: "previous", label: "Previous week" }] : []),
-              ]}
-              onChange={(value) => handleWeekSelection(value as WeeklySelection)}
-              ariaLabel="Weekly report period"
-            />
-            {weekSel === "custom" && (
-              <button
-                type="button"
-                onClick={() => setWeekPickerOpen(true)}
-                className="rounded-lg px-2 py-1 text-xs font-semibold text-muted-foreground transition hover:bg-white/[0.05] hover:text-foreground"
-              >
-                {labelWeekRange(customWeekKey)}
-              </button>
+            {tab === "weekly" && (
+              <div className="inline-flex flex-wrap items-center gap-2 rounded-xl bg-white/[0.03] px-2 py-1.5 ring-1 ring-white/[0.06] sm:flex-nowrap">
+                <PeriodDropdown
+                  value={weekSel}
+                  label={
+                    weekSel === "custom"
+                      ? "Custom week"
+                      : weekSel === "previous"
+                        ? "Previous week"
+                        : "This week"
+                  }
+                  options={[
+                    { value: "current", label: "This week" },
+                    { value: "custom", label: "Custom week" },
+                    ...(hasPreviousWeek ? [{ value: "previous", label: "Previous week" }] : []),
+                  ]}
+                  onChange={(value) => handleWeekSelection(value as WeeklySelection)}
+                  ariaLabel="Weekly report period"
+                />
+                {weekSel === "custom" && (
+                  <button
+                    type="button"
+                    onClick={() => setWeekPickerOpen(true)}
+                    className="rounded-lg px-2 py-1 text-xs font-semibold text-muted-foreground transition hover:bg-white/[0.05] hover:text-foreground"
+                  >
+                    {labelWeekRange(customWeekKey)}
+                  </button>
+                )}
+              </div>
+            )}
+            {tab === "monthly" && (
+              <div className="inline-flex flex-wrap items-center gap-2 rounded-xl bg-white/[0.03] px-2 py-1.5 ring-1 ring-white/[0.06] sm:flex-nowrap">
+                <PeriodDropdown
+                  value={monthSel}
+                  label={
+                    monthSel === "custom"
+                      ? "Custom month"
+                      : monthSel === "previous"
+                        ? "Previous month"
+                        : "This month"
+                  }
+                  options={[
+                    { value: "current", label: "This month" },
+                    { value: "custom", label: "Custom month" },
+                    ...(hasPreviousMonth ? [{ value: "previous", label: "Previous month" }] : []),
+                  ]}
+                  onChange={(value) => handleMonthSelection(value as MonthSelection)}
+                  ariaLabel="Monthly report period"
+                />
+                {monthSel === "custom" && (
+                  <button
+                    type="button"
+                    onClick={() => setMonthPickerOpen(true)}
+                    className="rounded-lg px-2 py-1 text-xs font-semibold text-muted-foreground transition hover:bg-white/[0.05] hover:text-foreground"
+                  >
+                    {cleanMonthLabel(customMonthKey)}
+                  </button>
+                )}
+              </div>
+            )}
+            {tab === "quarterly" && (
+              <div className="inline-flex flex-wrap items-center gap-2 rounded-xl bg-white/[0.03] px-2 py-1.5 ring-1 ring-white/[0.06] sm:flex-nowrap">
+                <PeriodDropdown
+                  value={quarterSel}
+                  label={
+                    quarterSel === "custom"
+                      ? "Custom quarter"
+                      : quarterSel === "previous"
+                        ? "Previous quarter"
+                        : "Current quarter"
+                  }
+                  options={[
+                    { value: "current", label: "Current quarter" },
+                    { value: "custom", label: "Custom quarter" },
+                    ...(hasPreviousQuarter
+                      ? [{ value: "previous", label: "Previous quarter" }]
+                      : []),
+                  ]}
+                  onChange={(value) => handleQuarterSelection(value as QuarterSelection)}
+                  ariaLabel="Quarterly report period"
+                />
+                {quarterSel === "custom" && (
+                  <button
+                    type="button"
+                    onClick={() => setQuarterPickerOpen(true)}
+                    className="rounded-lg px-2 py-1 text-xs font-semibold text-muted-foreground transition hover:bg-white/[0.05] hover:text-foreground"
+                  >
+                    {labelQuarterKey(customQuarterKey)}
+                  </button>
+                )}
+              </div>
             )}
           </div>
-        )}
-        {tab === "monthly" && (
-          <div className="inline-flex flex-wrap items-center gap-2 rounded-xl bg-white/[0.03] px-2 py-1.5 ring-1 ring-white/[0.06]">
-            <PeriodDropdown
-              value={monthSel}
-              label={
-                monthSel === "custom"
-                  ? "Custom month"
-                  : monthSel === "previous"
-                    ? "Previous month"
-                    : "This month"
-              }
-              options={[
-                { value: "current", label: "This month" },
-                { value: "custom", label: "Custom month" },
-                ...(hasPreviousMonth ? [{ value: "previous", label: "Previous month" }] : []),
-              ]}
-              onChange={(value) => handleMonthSelection(value as MonthSelection)}
-              ariaLabel="Monthly report period"
-            />
-            {monthSel === "custom" && (
-              <button
-                type="button"
-                onClick={() => setMonthPickerOpen(true)}
-                className="rounded-lg px-2 py-1 text-xs font-semibold text-muted-foreground transition hover:bg-white/[0.05] hover:text-foreground"
-              >
-                {cleanMonthLabel(customMonthKey)}
-              </button>
-            )}
-          </div>
-        )}
+
+          <ShadcnSelect value={selectedAccountId} onValueChange={setSelectedAccountId}>
+            <SelectTrigger
+              aria-label="Filter by account"
+              className="min-w-[160px] max-w-[220px] rounded-xl bg-white/[0.04] px-3 py-2 text-xs font-semibold text-muted-foreground ring-1 ring-white/[0.06] transition-all duration-200 hover:text-foreground focus:ring-2 focus:ring-primary/40 h-auto"
+            >
+              <SelectValue placeholder="All accounts" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">All accounts</SelectItem>
+              {(accounts ?? []).map((account) => (
+                <SelectItem key={account.id} value={account.id}>
+                  {account.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </ShadcnSelect>
+        </div>
       </div>
 
       <AnimatePresence mode="wait">
@@ -2712,6 +3086,20 @@ function AnalyticsPage() {
               setCustomMonthKey(key);
               setMonthSel("custom");
               setMonthPickerOpen(false);
+            }}
+          />
+        )}
+        {quarterPickerOpen && (
+          <PeriodPickerModal
+            title="Select quarter"
+            items={quarterPickerKeys}
+            selected={customQuarterKey}
+            labelFor={labelCustomQuarter}
+            onClose={() => setQuarterPickerOpen(false)}
+            onSelect={(key) => {
+              setCustomQuarterKey(key);
+              setQuarterSel("custom");
+              setQuarterPickerOpen(false);
             }}
           />
         )}

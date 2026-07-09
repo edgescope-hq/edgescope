@@ -52,10 +52,10 @@ export function EmotionPopup({
   return (
     <AnimatePresence>
       <motion.div
-        initial={{ opacity: 0, y: 24, scale: 0.96 }}
+        initial={{ opacity: 0, y: 8, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: 24, scale: 0.96 }}
-        transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+        exit={{ opacity: 0, y: 8, scale: 0.98 }}
+        transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
         className="fixed bottom-6 right-6 z-[60] w-[min(92vw,360px)] rounded-2xl border border-white/[0.06] bg-[oklch(0.1_0.014_270/0.96)] p-4 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.6)] backdrop-blur-xl"
         role="dialog"
         aria-label="How did you feel?"

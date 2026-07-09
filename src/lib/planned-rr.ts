@@ -1,17 +1,10 @@
-/** Parse planned_rr text: "2", "2.5R", "1:3", "1/3" → numeric reward multiple. */
+/** Parse stored planned_rr values such as "0.1", "1", "1.5", or "2.5". */
 export function parsePlannedRR(raw: number | string | null | undefined): number | null {
   if (raw == null) return null;
   if (typeof raw === "number") return Number.isFinite(raw) && raw > 0 && raw <= 50 ? raw : null;
   const text = raw.trim().toUpperCase().replace(/R$/, "").trim();
   if (!text) return null;
-  const ratio = text.match(/^(\d+(?:\.\d+)?)\s*[:/]\s*(\d+(?:\.\d+)?)$/);
-  if (ratio) {
-    const risk = Number(ratio[1]);
-    const reward = Number(ratio[2]);
-    if (!Number.isFinite(risk) || !Number.isFinite(reward) || risk <= 0) return null;
-    const rr = reward / risk;
-    return rr > 0 && rr <= 50 ? rr : null;
-  }
+  if (!/^\d+(?:\.\d+)?$/.test(text)) return null;
   const n = Number(text);
   return Number.isFinite(n) && n > 0 && n <= 50 ? n : null;
 }

@@ -22,7 +22,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 type AnnotationShape = unknown;
-import { GRADES, type Grade } from "@/components/trades/trade-form-modal";
+import { GRADES, type Grade } from "@/lib/trade-constants";
 import { rrNum, type DbTrade } from "@/lib/trade-mappers";
 import { sessionLabel } from "@/lib/trade-constants";
 import { hasDetailedReviewMinimum } from "@/lib/review-status";
@@ -52,6 +52,11 @@ type Timeframe = "HTF" | "MTF" | "LTF";
 const TIMEFRAMES: Timeframe[] = ["HTF", "MTF", "LTF"];
 
 const modalTransition = { duration: 0.22, ease: [0.16, 1, 0.3, 1] as const };
+const modalPanelMotion = {
+  initial: { opacity: 0, y: 8, scale: 0.98 },
+  animate: { opacity: 1, y: 0, scale: 1 },
+  exit: { opacity: 0, y: 6, scale: 0.98 },
+};
 
 function parseDateKey(value: string): Date | undefined {
   if (!value) return undefined;
@@ -234,7 +239,7 @@ export function TradeReviewModal({
   }, [previewShot, confirmShotDelete, escapePaused, onClose]);
 
   const allTradesQuery = useQuery<DbTrade[]>({ queryKey: ["trades"], queryFn: () => listFn() });
-  const allTrades = allTradesQuery.data ?? [];
+  const allTrades = useMemo(() => allTradesQuery.data ?? [], [allTradesQuery.data]);
   const similar = useMemo(() => {
     if (!trade) return { wins: [] as DbTrade[], losses: [] as DbTrade[] };
     const matches = allTrades.filter((t) => {
@@ -379,12 +384,17 @@ export function TradeReviewModal({
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
+        transition={modalTransition}
         className="fixed inset-0 z-50 grid place-items-center bg-black/70 backdrop-blur-md p-4"
         onClick={onClose}
       >
-        <div className="glow-card w-full max-w-2xl rounded-2xl p-10 text-center text-sm text-muted-foreground">
+        <motion.div
+          {...modalPanelMotion}
+          transition={modalTransition}
+          className="glow-card w-full max-w-2xl rounded-2xl p-10 text-center text-sm text-muted-foreground"
+        >
           Loading trade…
-        </div>
+        </motion.div>
       </motion.div>
     );
   }
@@ -426,13 +436,12 @@ export function TradeReviewModal({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
+      transition={modalTransition}
       className="fixed inset-0 z-50 grid place-items-center bg-black/70 backdrop-blur-md p-4"
       onClick={onClose}
     >
       <motion.div
-        initial={{ scale: 0.98, y: 8 }}
-        animate={{ scale: 1, y: 0 }}
-        exit={{ scale: 0.98, y: 8 }}
+        {...modalPanelMotion}
         transition={modalTransition}
         onClick={(e: MouseEvent) => e.stopPropagation()}
         className={cn(

@@ -140,6 +140,18 @@ async function assertMember(supabaseAdmin: any, groupId: string, userId: string)
   if (!data) throw new Error("Not a member of this group");
 }
 
+async function assertTradeSharedToGroup(supabaseAdmin: any, tradeId: string, groupId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("community_trade_shares")
+    .select("id")
+    .eq("trade_id", tradeId)
+    .eq("group_id", groupId)
+    .maybeSingle();
+  if (error) throw safeError(error);
+  if (!data) throw new Error("Trade is not shared with this group");
+  return data;
+}
+
 async function assertOwner(supabaseAdmin: any, groupId: string, userId: string) {
   const { data } = await supabaseAdmin
     .from("community_groups")
@@ -538,6 +550,7 @@ export const listTradeComments = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<TradeComment[]> => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     await assertMember(supabaseAdmin, data.groupId, context.userId);
+    await assertTradeSharedToGroup(supabaseAdmin, data.tradeId, data.groupId);
     const { data: cmts, error } = await supabaseAdmin
       .from("community_trade_comments")
       .select("id, parent_id, body, user_id, created_at, updated_at")
@@ -584,16 +597,18 @@ export const addComment = createServerFn({ method: "POST" })
     checkRateLimitOrThrow("add-comment", 30, 60_000);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     await assertMember(supabaseAdmin, data.groupId, context.userId);
+    await assertTradeSharedToGroup(supabaseAdmin, data.tradeId, data.groupId);
 
-    // Verify trade exists and is shared to this exact group via community_trade_shares
-    const { data: shareExists } = await supabaseAdmin
-      .from("community_trade_shares")
-      .select("id")
-      .eq("trade_id", data.tradeId)
-      .eq("group_id", data.groupId)
-      .maybeSingle();
-    if (!shareExists) {
-      throw new Error("Trade is not shared with this group");
+    if (data.parentId) {
+      const { data: parent, error: parentErr } = await supabaseAdmin
+        .from("community_trade_comments")
+        .select("id")
+        .eq("id", data.parentId)
+        .eq("trade_id", data.tradeId)
+        .eq("group_id", data.groupId)
+        .maybeSingle();
+      if (parentErr) throw safeError(parentErr);
+      if (!parent) throw new Error("Parent comment was not found in this group");
     }
 
     const { data: row, error } = await supabaseAdmin
@@ -682,6 +697,109 @@ export const deleteComment = createServerFn({ method: "POST" })
       .delete()
       .eq("id", data.id);
     if (delErr) throw safeError(delErr);
+    return { ok: true };
+  });
+
+// ============ Reactions ============
+
+export type TradeReaction = {
+  id: string;
+  share_id: string;
+  user_id: string;
+  reaction_type: "reviewed" | "good_execution" | "rule_break" | "useful_note" | "clean_setup";
+  created_at: string;
+  updated_at: string;
+};
+
+export const listTradeReactions = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z.object({ tradeId: z.string().uuid(), groupId: z.string().uuid() }).parse(d),
+  )
+  .handler(async ({ data, context }): Promise<TradeReaction[]> => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    await assertMember(supabaseAdmin, data.groupId, context.userId);
+
+    const { data: share } = await supabaseAdmin
+      .from("community_trade_shares")
+      .select("id")
+      .eq("trade_id", data.tradeId)
+      .eq("group_id", data.groupId)
+      .maybeSingle();
+    if (!share) throw new Error("Trade not shared with this group");
+
+    const { data: reactions, error } = await supabaseAdmin
+      .from("community_trade_reactions")
+      .select("*")
+      .eq("share_id", share.id);
+    if (error) throw safeError(error);
+    return (reactions ?? []) as TradeReaction[];
+  });
+
+export const upsertReaction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z
+      .object({
+        tradeId: z.string().uuid(),
+        groupId: z.string().uuid(),
+        reactionType: z.enum([
+          "reviewed",
+          "good_execution",
+          "rule_break",
+          "useful_note",
+          "clean_setup",
+        ]),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    await assertMember(supabaseAdmin, data.groupId, context.userId);
+
+    const { data: share } = await supabaseAdmin
+      .from("community_trade_shares")
+      .select("id")
+      .eq("trade_id", data.tradeId)
+      .eq("group_id", data.groupId)
+      .maybeSingle();
+    if (!share) throw new Error("Trade not shared with this group");
+
+    const { error } = await supabaseAdmin.from("community_trade_reactions").upsert(
+      {
+        share_id: share.id,
+        user_id: context.userId,
+        reaction_type: data.reactionType,
+      },
+      { onConflict: "share_id, user_id", ignoreDuplicates: false },
+    );
+    if (error) throw safeError(error);
+    return { ok: true };
+  });
+
+export const deleteReaction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z.object({ tradeId: z.string().uuid(), groupId: z.string().uuid() }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    await assertMember(supabaseAdmin, data.groupId, context.userId);
+
+    const { data: share } = await supabaseAdmin
+      .from("community_trade_shares")
+      .select("id")
+      .eq("trade_id", data.tradeId)
+      .eq("group_id", data.groupId)
+      .maybeSingle();
+    if (!share) throw new Error("Trade not shared with this group");
+
+    const { error } = await supabaseAdmin
+      .from("community_trade_reactions")
+      .delete()
+      .eq("share_id", share.id)
+      .eq("user_id", context.userId);
+    if (error) throw safeError(error);
     return { ok: true };
   });
 

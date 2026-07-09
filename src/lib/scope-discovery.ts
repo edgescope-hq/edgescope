@@ -107,8 +107,6 @@ type ScopeTrade = {
   timeMs: number | null;
 };
 
-
-
 function toScopeTrade(t: DbTrade): ScopeTrade {
   const setup = ((t.categories ?? []).find((c) => c && c.trim()) ?? "").trim() || null;
   const plannedRR = parsePlannedRR(t.planned_rr);
