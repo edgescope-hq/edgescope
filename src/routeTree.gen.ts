@@ -17,6 +17,7 @@ import { Route as DisclaimerRouteImport } from './routes/disclaimer'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiAccountPurgeRouteImport } from './routes/api.account-purge'
 import { Route as AuthenticatedTradesRouteImport } from './routes/_authenticated/trades'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedPlaybookRouteImport } from './routes/_authenticated/playbook'
@@ -67,6 +68,11 @@ const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAccountPurgeRoute = ApiAccountPurgeRouteImport.update({
+  id: '/api/account-purge',
+  path: '/api/account-purge',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedTradesRoute = AuthenticatedTradesRouteImport.update({
@@ -151,6 +157,7 @@ export interface FileRoutesByFullPath {
   '/playbook': typeof AuthenticatedPlaybookRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/trades': typeof AuthenticatedTradesRoute
+  '/api/account-purge': typeof ApiAccountPurgeRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -172,6 +179,7 @@ export interface FileRoutesByTo {
   '/playbook': typeof AuthenticatedPlaybookRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/trades': typeof AuthenticatedTradesRoute
+  '/api/account-purge': typeof ApiAccountPurgeRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -195,6 +203,7 @@ export interface FileRoutesById {
   '/_authenticated/playbook': typeof AuthenticatedPlaybookRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/trades': typeof AuthenticatedTradesRoute
+  '/api/account-purge': typeof ApiAccountPurgeRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -218,6 +227,7 @@ export interface FileRouteTypes {
     | '/playbook'
     | '/settings'
     | '/trades'
+    | '/api/account-purge'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -239,6 +249,7 @@ export interface FileRouteTypes {
     | '/playbook'
     | '/settings'
     | '/trades'
+    | '/api/account-purge'
   id:
     | '__root__'
     | '/'
@@ -261,6 +272,7 @@ export interface FileRouteTypes {
     | '/_authenticated/playbook'
     | '/_authenticated/settings'
     | '/_authenticated/trades'
+    | '/api/account-purge'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -272,6 +284,7 @@ export interface RootRouteChildren {
   ResetPasswordRoute: typeof ResetPasswordRoute
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   TermsRoute: typeof TermsRoute
+  ApiAccountPurgeRoute: typeof ApiAccountPurgeRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -330,6 +343,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/account-purge': {
+      id: '/api/account-purge'
+      path: '/api/account-purge'
+      fullPath: '/api/account-purge'
+      preLoaderRoute: typeof ApiAccountPurgeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/trades': {
@@ -461,6 +481,7 @@ const rootRouteChildren: RootRouteChildren = {
   ResetPasswordRoute: ResetPasswordRoute,
   SitemapDotxmlRoute: SitemapDotxmlRoute,
   TermsRoute: TermsRoute,
+  ApiAccountPurgeRoute: ApiAccountPurgeRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
