@@ -172,25 +172,10 @@ export const cancelAccountDeletion = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
-// Permanently deletes the signed-in user and all their data (cascades via FKs).
-// Until a scheduled purge job exists, run docs/launch/account-deletion-runbook.md
-// for accounts whose deletion_scheduled_for is in the past.
-export const deleteAccount = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    // Clean up storage files before deleting the user (DB rows cascade-delete but storage does not).
-    const { data: shots } = await context.supabase
-      .from("trade_screenshots")
-      .select("storage_path")
-      .eq("user_id", context.userId);
-    if (shots?.length) {
-      const paths = shots.map((s) => s.storage_path).filter(Boolean) as string[];
-      if (paths.length) {
-        await context.supabase.storage.from("trade-screenshots").remove(paths);
-      }
-    }
-    const { error } = await supabaseAdmin.auth.admin.deleteUser(context.userId);
-    if (error) throw safeError(error);
-    return { ok: true };
-  });
+// Immediate permanent deletion is intentionally disabled.
+// Account deletion must use the scheduled 15-day grace-period flow.
+export const deleteAccount = createServerFn({ method: "POST" }).handler(async () => {
+  throw new Error(
+    "Immediate account deletion is disabled. Use the scheduled account deletion flow instead.",
+  );
+});
