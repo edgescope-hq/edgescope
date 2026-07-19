@@ -13,6 +13,7 @@ import {
   X,
   UserCog,
   Wallet,
+  RotateCcw,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -40,6 +41,7 @@ const primaryNav: NavItem[] = [
 
 const secondaryBaseNav: NavItem[] = [
   { to: "/community", label: "Community", icon: Users },
+  { to: "/recentre", label: "Recentre", icon: RotateCcw },
   { to: "/accounts", label: "Accounts", icon: Wallet },
 ];
 

@@ -26,6 +26,7 @@ import {
   TrendingDown,
   TrendingUp,
   User,
+  ArrowRight,
   type LucideIcon,
 } from "lucide-react";
 import { Link } from "@tanstack/react-router";
@@ -556,6 +557,8 @@ export function DashboardView() {
         headline: "Losing streak detected",
         message: `You're on a ${s.currentLoss}-trade losing streak. Slow down and make sure the next trade fits your plan.`,
         secondary: "Loss streaks can happen. Keep risk steady.",
+        showRecentre: true,
+        recentreState: undefined,
       };
     }
     if (s.currentWin >= 3) {
@@ -565,6 +568,8 @@ export function DashboardView() {
         headline: "Strong run detected",
         message: `You've had ${s.currentWin} winning trades in a row. Keep the next trade planned and risk steady.`,
         secondary: "Good results should not change your rules.",
+        showRecentre: true,
+        recentreState: "greed" as const,
       };
     }
     if (latestTrade && latestR <= -2) {
@@ -575,6 +580,8 @@ export function DashboardView() {
         message:
           "Your latest trade was a larger loss. Review what happened before taking the next one.",
         secondary: "Check whether it was normal setup risk or something to adjust.",
+        showRecentre: true,
+        recentreState: undefined,
       };
     }
     return {
@@ -583,6 +590,8 @@ export function DashboardView() {
       headline: "Stay process-first",
       message: "Wait for your plan, keep risk steady, and review the trade after execution.",
       secondary: "Consistent records make your edge easier to see.",
+      showRecentre: false,
+      recentreState: undefined,
     };
   }, [realDb]);
   const currentStreakStat = useMemo(() => formatCurrentStreak(streak), [streak]);
@@ -1000,8 +1009,21 @@ export function DashboardView() {
               </p>
             </div>
           </div>
-          <div className="rounded-xl bg-white/[0.035] px-3.5 py-2 text-xs font-medium leading-5 text-foreground/76 ring-1 ring-white/[0.055] sm:max-w-[270px]">
-            {executionFocus.secondary}
+          <div className="flex shrink-0 flex-col items-start gap-2 sm:max-w-[270px] sm:items-stretch">
+            <div className="rounded-xl bg-white/[0.035] px-3.5 py-2 text-xs font-medium leading-5 text-foreground/76 ring-1 ring-white/[0.055]">
+              {executionFocus.secondary}
+            </div>
+            {executionFocus.showRecentre && (
+              <Link
+                to={executionFocus.recentreState ? "/recentre/$state" : "/recentre"}
+                params={
+                  executionFocus.recentreState ? { state: executionFocus.recentreState } : undefined
+                }
+                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-primary/14 px-3.5 text-xs font-semibold text-primary ring-1 ring-primary/24 transition-colors hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              >
+                Open Recentre <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+            )}
           </div>
         </div>
       )}
