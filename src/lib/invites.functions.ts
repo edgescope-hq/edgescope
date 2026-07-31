@@ -52,6 +52,38 @@ export const listMyInvites = createServerFn({ method: "GET" })
 
 const validateSchema = z.object({ code: z.string().min(4).max(64) });
 
+export const checkBootstrap = createServerFn({ method: "GET" }).handler(async () => {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { count, error } = await supabaseAdmin
+    .from("profiles")
+    .select("id", { count: "exact", head: true });
+  if (error) throw safeError(error);
+  // Only used on the signup form to show/hide the first-admin banner.
+  return { needsBootstrap: (count ?? 0) === 0 };
+});
+
+export const bootstrapFirstAdmin = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { count, error: cErr } = await supabaseAdmin
+      .from("user_roles")
+      .select("user_id", { count: "exact", head: true })
+      .eq("role", "admin");
+    if (cErr) throw safeError(cErr);
+    if ((count ?? 0) > 0) return { promoted: false };
+    await supabaseAdmin.from("user_roles").delete().eq("user_id", context.userId);
+    const { error: insErr } = await supabaseAdmin
+      .from("user_roles")
+      .insert({ user_id: context.userId, role: "admin" });
+    if (insErr) throw safeError(insErr);
+    await supabaseAdmin
+      .from("profiles")
+      .update({ community_access: true })
+      .eq("id", context.userId);
+    return { promoted: true };
+  });
+
 export const deleteInvite = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) => z.object({ id: z.string().uuid() }).parse(d))

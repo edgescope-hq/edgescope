@@ -67,6 +67,7 @@ export type Database = {
       community_group_invitations: {
         Row: {
           created_at: string;
+          expires_at: string;
           group_id: string;
           id: string;
           invitee_id: string;
@@ -76,6 +77,7 @@ export type Database = {
         };
         Insert: {
           created_at?: string;
+          expires_at?: string;
           group_id: string;
           id?: string;
           invitee_id: string;
@@ -85,6 +87,7 @@ export type Database = {
         };
         Update: {
           created_at?: string;
+          expires_at?: string;
           group_id?: string;
           id?: string;
           invitee_id?: string;
@@ -382,49 +385,106 @@ export type Database = {
       };
       profiles: {
         Row: {
+          activation_guide_completed_at: string | null;
           community_access: boolean;
           created_at: string;
           deletion_cancelled_at: string | null;
+          deletion_purge_attempt_count: number;
+          deletion_purge_claim_token: string | null;
+          deletion_purge_claimed_at: string | null;
+          deletion_purge_last_attempt_at: string | null;
+          deletion_purge_last_error_code: string | null;
+          deletion_purge_next_attempt_at: string | null;
+          deletion_purge_state: string;
           deletion_requested_at: string | null;
           deletion_scheduled_for: string | null;
           display_name: string | null;
-          edge_id: string | null;
+          edge_id: string;
           has_seen_intro: boolean;
           id: string;
           notification_preferences: Json;
           profile_completed: boolean;
+          scope_discovery_seen_ids: string[];
           updated_at: string;
           username: string;
         };
         Insert: {
+          activation_guide_completed_at?: string | null;
           community_access?: boolean;
           created_at?: string;
           deletion_cancelled_at?: string | null;
+          deletion_purge_attempt_count?: number;
+          deletion_purge_claim_token?: string | null;
+          deletion_purge_claimed_at?: string | null;
+          deletion_purge_last_attempt_at?: string | null;
+          deletion_purge_last_error_code?: string | null;
+          deletion_purge_next_attempt_at?: string | null;
+          deletion_purge_state?: string;
           deletion_requested_at?: string | null;
           deletion_scheduled_for?: string | null;
           display_name?: string | null;
-          edge_id?: string | null;
+          edge_id?: string;
           has_seen_intro?: boolean;
           id: string;
           notification_preferences?: Json;
           profile_completed?: boolean;
+          scope_discovery_seen_ids?: string[];
           updated_at?: string;
           username: string;
         };
         Update: {
+          activation_guide_completed_at?: string | null;
           community_access?: boolean;
           created_at?: string;
           deletion_cancelled_at?: string | null;
+          deletion_purge_attempt_count?: number;
+          deletion_purge_claim_token?: string | null;
+          deletion_purge_claimed_at?: string | null;
+          deletion_purge_last_attempt_at?: string | null;
+          deletion_purge_last_error_code?: string | null;
+          deletion_purge_next_attempt_at?: string | null;
+          deletion_purge_state?: string;
           deletion_requested_at?: string | null;
           deletion_scheduled_for?: string | null;
           display_name?: string | null;
-          edge_id?: string | null;
+          edge_id?: string;
           has_seen_intro?: boolean;
           id?: string;
           notification_preferences?: Json;
           profile_completed?: boolean;
+          scope_discovery_seen_ids?: string[];
           updated_at?: string;
           username?: string;
+        };
+        Relationships: [];
+      };
+      trade_categories: {
+        Row: {
+          archived_at: string | null;
+          created_at: string;
+          id: string;
+          name: string;
+          normalized_name: string;
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          archived_at?: string | null;
+          created_at?: string;
+          id?: string;
+          name: string;
+          normalized_name: string;
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          archived_at?: string | null;
+          created_at?: string;
+          id?: string;
+          name?: string;
+          normalized_name?: string;
+          updated_at?: string;
+          user_id?: string;
         };
         Relationships: [];
       };
@@ -517,24 +577,28 @@ export type Database = {
           closed_at: string | null;
           closed_reason: string | null;
           created_at: string;
-          direction: Database["public"]["Enums"]["trade_direction"];
+          direction: Database["public"]["Enums"]["trade_direction"] | null;
+          entry_model: string | null;
+          entry_timeframe: string | null;
           emotion_after: string | null;
           emotion_before: string | null;
           emotion_during: string | null;
           emotion_tags: string[];
+          exit_reason: string | null;
           entry_price: number | null;
           exit_price: number | null;
           floating_pnl: number | null;
           grade: Database["public"]["Enums"]["trade_grade"] | null;
           id: string;
           in_killzone: boolean | null;
-          instrument: string;
+          instrument: string | null;
           is_paper: boolean;
           is_shared: boolean;
           killzone: string | null;
           lessons_learned: string | null;
           live_price: number | null;
           market: Database["public"]["Enums"]["market_type"];
+          market_condition: string | null;
           mistake_tags: string[];
           mistakes_made: string | null;
           notes: string | null;
@@ -544,20 +608,24 @@ export type Database = {
           position_size: number | null;
           private_notes: string | null;
           reasoning: string | null;
+          review_completed_at: string | null;
           result: Database["public"]["Enums"]["trade_result"] | null;
           reward_amount: number | null;
           risk_amount: number | null;
           risk_percentage: number | null;
+          news_involvement: string | null;
           session: string | null;
           status: string;
           stop_loss: number | null;
           subcategories: string[];
           take_profit: number | null;
           trade_date: string;
+          trade_management: string[];
           trade_number: number | null;
           trade_time: string | null;
           updated_at: string;
           user_id: string;
+          custom_tags: string[];
         };
         Insert: {
           account_id?: string | null;
@@ -567,24 +635,28 @@ export type Database = {
           closed_at?: string | null;
           closed_reason?: string | null;
           created_at?: string;
-          direction: Database["public"]["Enums"]["trade_direction"];
+          direction?: Database["public"]["Enums"]["trade_direction"] | null;
+          entry_model?: string | null;
+          entry_timeframe?: string | null;
           emotion_after?: string | null;
           emotion_before?: string | null;
           emotion_during?: string | null;
           emotion_tags?: string[];
+          exit_reason?: string | null;
           entry_price?: number | null;
           exit_price?: number | null;
           floating_pnl?: number | null;
           grade?: Database["public"]["Enums"]["trade_grade"] | null;
           id?: string;
           in_killzone?: boolean | null;
-          instrument: string;
+          instrument?: string | null;
           is_paper?: boolean;
           is_shared?: boolean;
           killzone?: string | null;
           lessons_learned?: string | null;
           live_price?: number | null;
           market: Database["public"]["Enums"]["market_type"];
+          market_condition?: string | null;
           mistake_tags?: string[];
           mistakes_made?: string | null;
           notes?: string | null;
@@ -594,20 +666,24 @@ export type Database = {
           position_size?: number | null;
           private_notes?: string | null;
           reasoning?: string | null;
+          review_completed_at?: string | null;
           result?: Database["public"]["Enums"]["trade_result"] | null;
           reward_amount?: number | null;
           risk_amount?: number | null;
           risk_percentage?: number | null;
+          news_involvement?: string | null;
           session?: string | null;
           status?: string;
           stop_loss?: number | null;
           subcategories?: string[];
           take_profit?: number | null;
           trade_date: string;
+          trade_management?: string[];
           trade_number?: number | null;
           trade_time?: string | null;
           updated_at?: string;
           user_id: string;
+          custom_tags?: string[];
         };
         Update: {
           account_id?: string | null;
@@ -617,24 +693,28 @@ export type Database = {
           closed_at?: string | null;
           closed_reason?: string | null;
           created_at?: string;
-          direction?: Database["public"]["Enums"]["trade_direction"];
+          direction?: Database["public"]["Enums"]["trade_direction"] | null;
+          entry_model?: string | null;
+          entry_timeframe?: string | null;
           emotion_after?: string | null;
           emotion_before?: string | null;
           emotion_during?: string | null;
           emotion_tags?: string[];
+          exit_reason?: string | null;
           entry_price?: number | null;
           exit_price?: number | null;
           floating_pnl?: number | null;
           grade?: Database["public"]["Enums"]["trade_grade"] | null;
           id?: string;
           in_killzone?: boolean | null;
-          instrument?: string;
+          instrument?: string | null;
           is_paper?: boolean;
           is_shared?: boolean;
           killzone?: string | null;
           lessons_learned?: string | null;
           live_price?: number | null;
           market?: Database["public"]["Enums"]["market_type"];
+          market_condition?: string | null;
           mistake_tags?: string[];
           mistakes_made?: string | null;
           notes?: string | null;
@@ -644,20 +724,24 @@ export type Database = {
           position_size?: number | null;
           private_notes?: string | null;
           reasoning?: string | null;
+          review_completed_at?: string | null;
           result?: Database["public"]["Enums"]["trade_result"] | null;
           reward_amount?: number | null;
           risk_amount?: number | null;
           risk_percentage?: number | null;
+          news_involvement?: string | null;
           session?: string | null;
           status?: string;
           stop_loss?: number | null;
           subcategories?: string[];
           take_profit?: number | null;
           trade_date?: string;
+          trade_management?: string[];
           trade_number?: number | null;
           trade_time?: string | null;
           updated_at?: string;
           user_id?: string;
+          custom_tags?: string[];
         };
         Relationships: [
           {
@@ -747,6 +831,7 @@ export type Database = {
       trading_preferences: {
         Row: {
           account_type: string | null;
+          analytics_preferences: Json;
           created_at: string;
           default_risk_pct: number | null;
           id: string;
@@ -758,12 +843,25 @@ export type Database = {
           require_post_trade_reflection: boolean;
           require_screenshot: boolean;
           require_setup_selection: boolean;
+          journal_tracking: Json;
+          review_require_category: boolean;
+          review_require_grade: boolean;
+          review_require_reasoning: boolean;
+          review_require_screenshot: boolean;
+          review_require_entry_model: boolean;
+          review_require_market_condition: boolean;
+          review_require_entry_timeframe: boolean;
+          review_require_news_involvement: boolean;
+          review_require_exit_reason: boolean;
+          review_require_trade_management: boolean;
+          review_require_custom_tags: boolean;
           starting_balance: number | null;
           updated_at: string;
           user_id: string;
         };
         Insert: {
           account_type?: string | null;
+          analytics_preferences?: Json;
           created_at?: string;
           default_risk_pct?: number | null;
           id?: string;
@@ -775,12 +873,25 @@ export type Database = {
           require_post_trade_reflection?: boolean;
           require_screenshot?: boolean;
           require_setup_selection?: boolean;
+          journal_tracking?: Json;
+          review_require_category?: boolean;
+          review_require_grade?: boolean;
+          review_require_reasoning?: boolean;
+          review_require_screenshot?: boolean;
+          review_require_entry_model?: boolean;
+          review_require_market_condition?: boolean;
+          review_require_entry_timeframe?: boolean;
+          review_require_news_involvement?: boolean;
+          review_require_exit_reason?: boolean;
+          review_require_trade_management?: boolean;
+          review_require_custom_tags?: boolean;
           starting_balance?: number | null;
           updated_at?: string;
           user_id: string;
         };
         Update: {
           account_type?: string | null;
+          analytics_preferences?: Json;
           created_at?: string;
           default_risk_pct?: number | null;
           id?: string;
@@ -792,6 +903,18 @@ export type Database = {
           require_post_trade_reflection?: boolean;
           require_screenshot?: boolean;
           require_setup_selection?: boolean;
+          journal_tracking?: Json;
+          review_require_category?: boolean;
+          review_require_grade?: boolean;
+          review_require_reasoning?: boolean;
+          review_require_screenshot?: boolean;
+          review_require_entry_model?: boolean;
+          review_require_market_condition?: boolean;
+          review_require_entry_timeframe?: boolean;
+          review_require_news_involvement?: boolean;
+          review_require_exit_reason?: boolean;
+          review_require_trade_management?: boolean;
+          review_require_custom_tags?: boolean;
           starting_balance?: number | null;
           updated_at?: string;
           user_id?: string;
@@ -824,12 +947,38 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
+      begin_account_purge_deletion: {
+        Args: { p_claim_token: string; p_user_id: string };
+        Returns: boolean;
+      };
+      cancel_account_deletion: { Args: never; Returns: boolean };
+      cancel_community_group_invitation: {
+        Args: { p_invitation_id: string };
+        Returns: boolean;
+      };
+      claim_due_account_purges: {
+        Args: { p_lease_seconds?: number; p_limit?: number };
+        Returns: { claim_token: string; user_id: string }[];
+      };
       generate_edge_id: { Args: never; Returns: string };
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"];
           _user_id: string;
         };
+        Returns: boolean;
+      };
+      mark_account_purge_failure: {
+        Args: { p_claim_token: string; p_error_code: string; p_user_id: string };
+        Returns: boolean;
+      };
+      respond_community_group_invitation: {
+        Args: { p_accept: boolean; p_invitation_id: string };
+        Returns: { group_id: string; invitation_status: string; inviter_id: string }[];
+      };
+      schedule_account_deletion: { Args: never; Returns: string };
+      validate_account_purge_claim: {
+        Args: { p_claim_token: string; p_user_id: string };
         Returns: boolean;
       };
     };

@@ -58,12 +58,14 @@ export function ConfirmDialog({
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel
+            type="button"
             className="rounded-xl border-white/[0.06] bg-white/[0.04] text-muted-foreground ring-1 ring-white/[0.06] hover:bg-white/[0.07] hover:text-foreground"
             disabled={loading}
           >
             {cancelLabel}
           </AlertDialogCancel>
           <AlertDialogAction
+            type="button"
             onClick={(e) => {
               e.preventDefault();
               void onConfirm();

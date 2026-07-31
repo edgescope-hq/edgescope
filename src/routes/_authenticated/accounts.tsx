@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   BriefcaseBusiness,
+  Calculator,
   Check,
   CheckCircle2,
   ChevronRight,
@@ -245,6 +246,7 @@ function AccountsPage() {
     name: "",
     account_type: "personal" as TradingAccount["account_type"],
     broker: "",
+    starting_balance: "",
   });
 
   const [editForm, setEditForm] = useState({
@@ -258,6 +260,7 @@ function AccountsPage() {
     daily_loss_limit_pct: "",
     max_trades_per_day: "",
     daily_loss_reminder: true,
+    starting_balance: "",
   });
 
   useEffect(() => {
@@ -317,6 +320,8 @@ function AccountsPage() {
         max_trades_per_day:
           prefsData?.max_trades_per_day != null ? String(prefsData.max_trades_per_day) : "",
         daily_loss_reminder: guardrailsData?.daily_loss_reminder ?? true,
+        starting_balance:
+          selected.starting_balance != null ? String(selected.starting_balance) : "",
       });
     }
   }, [selected, guardrailsData, prefsData]);
@@ -339,7 +344,7 @@ function AccountsPage() {
         data: {
           name: createForm.name.trim(),
           account_type: createForm.account_type,
-          starting_balance: 0,
+          starting_balance: createForm.starting_balance ? Number(createForm.starting_balance) : 0,
           broker: createForm.broker.trim() || null,
         },
       });
@@ -347,7 +352,7 @@ function AccountsPage() {
     onSuccess: (row) => {
       toast.success("Trading account created");
       setShowCreateModal(false);
-      setCreateForm({ name: "", account_type: "personal", broker: "" });
+      setCreateForm({ name: "", account_type: "personal", broker: "", starting_balance: "" });
       setSelectedId(row.id);
       refresh();
     },
@@ -395,6 +400,7 @@ function AccountsPage() {
           patch: {
             max_risk_per_trade_pct: numOrNull(rulesForm.max_risk_per_trade_pct),
             daily_loss_limit_pct: numOrNull(rulesForm.daily_loss_limit_pct),
+            starting_balance: numOrNull(rulesForm.starting_balance) ?? 0,
           },
         },
       });
@@ -486,6 +492,13 @@ function AccountsPage() {
             value={createForm.broker}
             placeholder="Exness, Binance, Tradovate"
             onChange={(v) => setCreateForm((f) => ({ ...f, broker: v }))}
+          />
+          <Field
+            label="Reference balance (optional)"
+            type="number"
+            value={createForm.starting_balance}
+            placeholder="e.g. 10000"
+            onChange={(v) => setCreateForm((f) => ({ ...f, starting_balance: v }))}
           />
         </div>
         <div className="mt-6 flex justify-end gap-2">
@@ -662,6 +675,21 @@ function AccountsPage() {
                         trades.
                       </div>
                       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+                        <div className="flex items-center gap-3 rounded-xl glow-card px-5 py-5">
+                          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 text-emerald-300/85 ring-1 ring-emerald-500/15">
+                            <Calculator className="h-5 w-5" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                              Reference Balance
+                            </div>
+                            <div className="mt-1.5 text-lg font-bold tracking-tight text-foreground">
+                              {selected.starting_balance > 0
+                                ? `$${selected.starting_balance.toLocaleString("en-US", { maximumFractionDigits: 0 })}`
+                                : "Not set"}
+                            </div>
+                          </div>
+                        </div>
                         <div className="flex items-center gap-3 rounded-xl glow-card px-5 py-5">
                           <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-yellow-500/20 to-yellow-500/5 text-yellow-300/85 ring-1 ring-yellow-500/15">
                             <ShieldAlert className="h-5 w-5" />
@@ -885,6 +913,13 @@ function AccountsPage() {
                       </p>
                       <div className="mt-4 space-y-4">
                         <div className="grid grid-cols-2 gap-4">
+                          <Field
+                            label="Reference balance ($)"
+                            type="number"
+                            value={rulesForm.starting_balance}
+                            placeholder="e.g. 10000"
+                            onChange={(v) => setRulesForm((f) => ({ ...f, starting_balance: v }))}
+                          />
                           <Field
                             label="Max risk per trade (%)"
                             type="number"

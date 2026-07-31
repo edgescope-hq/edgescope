@@ -86,7 +86,8 @@ export const getAccountStats = createServerFn({ method: "GET" })
     }
 
     const totalTrades = trades.length;
-    const decided = wins + losses;
+    const breakeven = trades.filter((t) => t.result === "breakeven").length;
+    const decided = wins + losses + breakeven;
     const stats: AccountStats = {
       starting_balance: startingBalance,
       current_balance: equity,

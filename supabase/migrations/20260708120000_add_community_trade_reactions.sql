@@ -14,6 +14,7 @@ GRANT ALL ON public.community_trade_reactions TO service_role;
 ALTER TABLE public.community_trade_reactions ENABLE ROW LEVEL SECURITY;
 
 -- Select: member of the group that owns the share
+DROP POLICY IF EXISTS "ctr_select_group_member" ON public.community_trade_reactions;
 CREATE POLICY "ctr_select_group_member" ON public.community_trade_reactions
   FOR SELECT TO authenticated
   USING (
@@ -27,6 +28,7 @@ CREATE POLICY "ctr_select_group_member" ON public.community_trade_reactions
   );
 
 -- Insert: own reaction, must be member of group, share must exist
+DROP POLICY IF EXISTS "ctr_insert_group_member_self" ON public.community_trade_reactions;
 CREATE POLICY "ctr_insert_group_member_self" ON public.community_trade_reactions
   FOR INSERT TO authenticated
   WITH CHECK (
@@ -41,6 +43,7 @@ CREATE POLICY "ctr_insert_group_member_self" ON public.community_trade_reactions
   );
 
 -- Update: only own reaction, must still be a member
+DROP POLICY IF EXISTS "ctr_update_own" ON public.community_trade_reactions;
 CREATE POLICY "ctr_update_own" ON public.community_trade_reactions
   FOR UPDATE TO authenticated
   USING (user_id = auth.uid())
@@ -56,6 +59,7 @@ CREATE POLICY "ctr_update_own" ON public.community_trade_reactions
   );
 
 -- Delete: own reaction, or group owner
+DROP POLICY IF EXISTS "ctr_delete_own_or_group_owner" ON public.community_trade_reactions;
 CREATE POLICY "ctr_delete_own_or_group_owner" ON public.community_trade_reactions
   FOR DELETE TO authenticated
   USING (
@@ -69,5 +73,6 @@ CREATE POLICY "ctr_delete_own_or_group_owner" ON public.community_trade_reaction
     )
   );
 
+DROP TRIGGER IF EXISTS ctr_set_updated_at ON public.community_trade_reactions;
 CREATE TRIGGER ctr_set_updated_at BEFORE UPDATE ON public.community_trade_reactions
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();

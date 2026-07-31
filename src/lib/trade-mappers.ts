@@ -6,8 +6,8 @@ export type DbTrade = {
   trade_date: string;
   trade_time: string | null;
   market: string;
-  instrument: string;
-  direction: string;
+  instrument: string | null;
+  direction: string | null;
   result: string | null;
   grade: string | null;
   session: string | null;
@@ -34,6 +34,14 @@ export type DbTrade = {
   is_shared: boolean | null;
   is_paper?: boolean | null;
   in_killzone: boolean | null;
+  review_completed_at?: string | null;
+  entry_model?: string | null;
+  market_condition?: string | null;
+  entry_timeframe?: string | null;
+  news_involvement?: string | null;
+  exit_reason?: string | null;
+  trade_management?: string[] | null;
+  custom_tags?: string[] | null;
   account_id?: string | null;
   created_at?: string;
   trade_screenshots?: { id: string }[] | null;
@@ -41,11 +49,10 @@ export type DbTrade = {
 
 // Project a DB trade onto the analytics input shape.
 export function toAnalytics(t: DbTrade): TradeRow {
-  const closedResult = t.result === "win" || t.result === "loss" || t.result === "breakeven";
   return {
     id: t.id,
     result: t.result,
-    achieved_rr: closedResult ? t.achieved_rr : null,
+    achieved_rr: realizedR(t),
     grade: t.grade,
     session: t.session,
     killzone: t.killzone,
@@ -94,20 +101,37 @@ export function localTimeKey(date = new Date()): string {
 }
 
 export function isResultComplete(t: {
+  instrument?: string | null;
+  session?: string | null;
+  direction?: string | null;
   result?: string | null;
+  planned_rr?: number | string | null;
   risk_amount?: number | string | null;
   pnl_amount?: number | string | null;
   reward_amount?: number | string | null;
 }): boolean {
-  if (t.result !== "win" && t.result !== "loss" && t.result !== "breakeven") return false;
-  const riskOk =
-    t.risk_amount != null && t.risk_amount !== "" && Number.isFinite(Number(t.risk_amount));
-  if (!riskOk) return false;
-  const pnlOk =
-    t.pnl_amount != null && t.pnl_amount !== "" && Number.isFinite(Number(t.pnl_amount));
-  const rewardOk =
-    t.reward_amount != null && t.reward_amount !== "" && Number.isFinite(Number(t.reward_amount));
-  return pnlOk || rewardOk;
+  return realizedR(t) !== null;
+}
+
+export function realizedR(t: {
+  result?: string | null;
+  risk_amount?: number | string | null;
+  pnl_amount?: number | string | null;
+  reward_amount?: number | string | null;
+  achieved_rr?: number | string | null;
+}): number | null {
+  if (t.result !== "win" && t.result !== "loss" && t.result !== "breakeven") return null;
+  const risk = finiteNumber(t.risk_amount);
+  const recordedPnl = finiteNumber(t.pnl_amount ?? t.reward_amount);
+  // Risk and P/L are the canonical source for live trades. The persisted value is
+  // retained as a compatibility fallback for valid historical imports that did not
+  // capture the pair. This keeps every Analytics consumer on one result invariant.
+  if (risk == null || risk <= 0 || recordedPnl == null) return recordedR(t.achieved_rr);
+
+  const signedPnl =
+    t.result === "loss" ? -Math.abs(recordedPnl) : t.result === "win" ? Math.abs(recordedPnl) : 0;
+  const value = signedPnl / risk;
+  return Number.isFinite(value) ? Number(value.toFixed(2)) : null;
 }
 
 export function isPaperTrade(t: { is_paper?: boolean | null }): boolean {

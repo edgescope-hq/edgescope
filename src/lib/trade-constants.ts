@@ -12,18 +12,18 @@ export const MARKETS = [
 ] as const;
 
 export const SESSIONS = [
-  { v: "sydney", l: "Sydney" },
-  { v: "tokyo", l: "Tokyo (Asia)" },
+  { v: "asia", l: "Asia" },
   { v: "london", l: "London" },
   { v: "new_york", l: "New York" },
-  { v: "sydney_tokyo", l: "Sydney-Tokyo Overlap" },
-  { v: "tokyo_london", l: "Tokyo-London Overlap" },
   { v: "london_new_york", l: "London-New York Overlap" },
 ] as const;
 
 // Backward-compat labels for legacy session codes still present in old trades.
 const LEGACY_SESSION_LABELS: Record<string, string> = {
-  asia: "Asia",
+  sydney: "Sydney",
+  tokyo: "Tokyo (Asia)",
+  sydney_tokyo: "Sydney-Tokyo Overlap",
+  tokyo_london: "Tokyo-London Overlap",
   overlap: "LDN/NY Overlap",
 };
 

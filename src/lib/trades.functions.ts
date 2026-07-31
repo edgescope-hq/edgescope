@@ -4,7 +4,22 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { checkRateLimitOrThrow } from "@/lib/rate-limiter";
 import { localDateKey, localTimeKey } from "@/lib/trade-mappers";
+import { isOwnedScreenshotPath } from "@/lib/screenshot-storage";
+import {
+  missingReviewRequirements,
+  requirementsFromPreferences,
+  type ReviewRequirementKey,
+} from "@/lib/review-requirements";
 import type { Database } from "@/integrations/supabase/types";
+import {
+  normalizeSingleValue,
+  normalizeEntryTimeframe,
+  normalizeTags,
+  normalizeTradeManagement,
+  journalTrackingFromPreferences,
+  tradeCompletenessRequirementsFromPreferences,
+} from "@/lib/journal-tracking";
+import { getReviewStatus } from "@/lib/review-status";
 
 type TradeListRow = Database["public"]["Tables"]["trades"]["Row"] & {
   trade_screenshots: { id: string }[] | null;
@@ -12,10 +27,10 @@ type TradeListRow = Database["public"]["Tables"]["trades"]["Row"] & {
 
 const tradeSchema = z.object({
   market: z.enum(["forex", "crypto", "stocks", "indices", "futures", "commodities", "other"]),
-  instrument: z.string().min(1).max(64),
+  instrument: z.string().trim().max(64).nullable().optional(),
   trade_date: z.string(),
   trade_time: z.string().nullable().optional(),
-  direction: z.enum(["long", "short"]),
+  direction: z.enum(["long", "short"]).nullable().optional(),
   entry_price: z.number().nullable().optional(),
   stop_loss: z.number().nullable().optional(),
   take_profit: z.number().nullable().optional(),
@@ -47,7 +62,76 @@ const tradeSchema = z.object({
   // Discipline + emoji emotions (Phase 2 quick-capture refactor)
   in_killzone: z.boolean().nullable().optional(),
   emotion_tags: z.array(z.string().max(32)).max(10).optional(),
+  entry_model: z.string().max(80).nullable().optional(),
+  market_condition: z.string().max(80).nullable().optional(),
+  entry_timeframe: z.string().max(32).nullable().optional(),
+  news_involvement: z.string().max(80).nullable().optional(),
+  exit_reason: z.string().max(80).nullable().optional(),
+  trade_management: z.array(z.string().max(80)).max(8).optional(),
+  custom_tags: z.array(z.string().max(48)).max(12).optional(),
 });
+
+const createTradeSchema = tradeSchema;
+
+const detailedReviewPatchSchema = z.object({
+  reasoning: z.string().max(5000).nullable().optional(),
+  grade: z.enum(["A+", "A", "B+", "B", "C", "D"]).nullable().optional(),
+  mistake_tags: z.array(z.string().max(64)).max(20).optional(),
+  in_killzone: z.boolean().nullable().optional(),
+  categories: z.array(z.string().max(64)).max(20).optional(),
+  entry_model: z.string().max(80).nullable().optional(),
+  session: z.string().max(64).nullable().optional(),
+  planned_rr: z.string().max(64).nullable().optional(),
+  market_condition: z.string().max(80).nullable().optional(),
+  entry_timeframe: z.string().max(32).nullable().optional(),
+  news_involvement: z.string().max(80).nullable().optional(),
+  exit_reason: z.string().max(80).nullable().optional(),
+  trade_management: z.array(z.string().max(80)).max(8).optional(),
+  custom_tags: z.array(z.string().max(48)).max(12).optional(),
+  emotion_tags: z.array(z.string().max(32)).max(10).optional(),
+  risk_amount: z.number().nullable().optional(),
+  reward_amount: z.number().nullable().optional(),
+  pnl_amount: z.number().nullable().optional(),
+  trade_date: z.string().optional(),
+});
+
+function normalizeJournalPayload<
+  T extends { result?: string | null; pnl_amount?: number | null; reward_amount?: number | null },
+>(data: T): T {
+  if (data.result !== "win" && data.result !== "loss" && data.result !== "breakeven") return data;
+  const amount = data.pnl_amount ?? data.reward_amount;
+  if (amount == null || !Number.isFinite(amount)) return data;
+  const pnl =
+    data.result === "loss" ? -Math.abs(amount) : data.result === "win" ? Math.abs(amount) : 0;
+  return { ...data, pnl_amount: pnl, reward_amount: pnl };
+}
+
+function normalizeOptionalTracking<T extends Record<string, unknown>>(data: T): T {
+  return {
+    ...data,
+    ...(Object.hasOwn(data, "entry_model")
+      ? { entry_model: normalizeSingleValue(data.entry_model as string | null) }
+      : {}),
+    ...(Object.hasOwn(data, "market_condition")
+      ? { market_condition: normalizeSingleValue(data.market_condition as string | null) }
+      : {}),
+    ...(Object.hasOwn(data, "entry_timeframe")
+      ? { entry_timeframe: normalizeEntryTimeframe(data.entry_timeframe as string | null) }
+      : {}),
+    ...(Object.hasOwn(data, "news_involvement")
+      ? { news_involvement: normalizeSingleValue(data.news_involvement as string | null) }
+      : {}),
+    ...(Object.hasOwn(data, "exit_reason")
+      ? { exit_reason: normalizeSingleValue(data.exit_reason as string | null) }
+      : {}),
+    ...(Object.hasOwn(data, "trade_management")
+      ? { trade_management: normalizeTradeManagement(data.trade_management as string[] | null) }
+      : {}),
+    ...(Object.hasOwn(data, "custom_tags")
+      ? { custom_tags: normalizeTags(data.custom_tags as string[] | null) }
+      : {}),
+  } as T;
+}
 
 async function getActiveAccountId(supabase: any, userId: string): Promise<string | null> {
   const { data } = await supabase
@@ -61,7 +145,7 @@ async function getActiveAccountId(supabase: any, userId: string): Promise<string
 
 export const createTrade = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d) => tradeSchema.parse(d))
+  .inputValidator((d) => createTradeSchema.parse(d))
   .handler(async ({ data, context }) => {
     checkRateLimitOrThrow("create-trade", 60, 60_000);
     const { supabase, userId } = context;
@@ -106,14 +190,15 @@ export const createTrade = createServerFn({ method: "POST" })
       }
     }
 
-    let calculatedAchievedRR = data.achieved_rr;
-    if (data.risk_amount && data.risk_amount > 0 && data.reward_amount != null) {
-      calculatedAchievedRR = Number((data.reward_amount / data.risk_amount).toFixed(2));
+    const journalData = normalizeOptionalTracking(normalizeJournalPayload(data));
+    let calculatedAchievedRR = journalData.achieved_rr;
+    if (journalData.risk_amount && journalData.risk_amount > 0 && journalData.pnl_amount != null) {
+      calculatedAchievedRR = Number((journalData.pnl_amount / journalData.risk_amount).toFixed(2));
     }
 
     const { data: row, error } = await supabase
       .from("trades")
-      .insert({ ...data, user_id: userId, account_id, achieved_rr: calculatedAchievedRR })
+      .insert({ ...journalData, user_id: userId, account_id, achieved_rr: calculatedAchievedRR })
       .select()
       .single();
     if (error) throw safeError(error);
@@ -126,7 +211,7 @@ export const updateTrade = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { data: currentTrade } = await context.supabase
       .from("trades")
-      .select("risk_amount, reward_amount")
+      .select("risk_amount, pnl_amount, reward_amount")
       .eq("id", data.id)
       .eq("user_id", context.userId)
       .maybeSingle();
@@ -135,20 +220,21 @@ export const updateTrade = createServerFn({ method: "POST" })
       data.patch.risk_amount !== undefined
         ? data.patch.risk_amount
         : (currentTrade?.risk_amount ?? null);
-    const mergedReward =
-      data.patch.reward_amount !== undefined
-        ? data.patch.reward_amount
-        : (currentTrade?.reward_amount ?? null);
+    const normalizedPatch = normalizeOptionalTracking(normalizeJournalPayload(data.patch));
+    const mergedPnl =
+      normalizedPatch.pnl_amount !== undefined
+        ? normalizedPatch.pnl_amount
+        : (currentTrade?.pnl_amount ?? currentTrade?.reward_amount ?? null);
 
-    let calculatedAchievedRR = data.patch.achieved_rr;
-    if (mergedRisk && mergedRisk > 0 && mergedReward != null) {
-      calculatedAchievedRR = Number((mergedReward / mergedRisk).toFixed(2));
+    let calculatedAchievedRR = normalizedPatch.achieved_rr;
+    if (mergedRisk && mergedRisk > 0 && mergedPnl != null) {
+      calculatedAchievedRR = Number((mergedPnl / mergedRisk).toFixed(2));
     }
 
     const { data: row, error } = await context.supabase
       .from("trades")
       .update({
-        ...data.patch,
+        ...normalizedPatch,
         ...(calculatedAchievedRR !== undefined ? { achieved_rr: calculatedAchievedRR } : {}),
       })
       .eq("id", data.id)
@@ -157,6 +243,166 @@ export const updateTrade = createServerFn({ method: "POST" })
       .single();
     if (error) throw safeError(error);
     return row;
+  });
+
+export const saveDetailedReview = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z.object({ id: z.string().uuid(), patch: detailedReviewPatchSchema }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const [
+      { data: currentTrade, error: tradeError },
+      { count: screenshotCount, error: screenshotError },
+      { data: preferences, error: preferenceError },
+    ] = await Promise.all([
+      context.supabase
+        .from("trades")
+        .select(
+          "instrument, direction, result, risk_amount, reward_amount, pnl_amount, session, planned_rr, reasoning, grade, categories, review_completed_at, emotion_tags, entry_model, market_condition, entry_timeframe, news_involvement, exit_reason, trade_management, custom_tags",
+        )
+        .eq("id", data.id)
+        .eq("user_id", context.userId)
+        .maybeSingle(),
+      context.supabase
+        .from("trade_screenshots")
+        .select("id", { count: "exact", head: true })
+        .eq("trade_id", data.id)
+        .eq("user_id", context.userId),
+      context.supabase
+        .from("trading_preferences")
+        .select(
+          "review_require_screenshot, review_require_reasoning, review_require_category, review_require_grade, review_require_entry_model, review_require_market_condition, review_require_entry_timeframe, review_require_news_involvement, review_require_exit_reason, review_require_trade_management, review_require_custom_tags, journal_tracking",
+        )
+        .eq("user_id", context.userId)
+        .maybeSingle(),
+    ]);
+    if (tradeError) throw safeError(tradeError);
+    if (screenshotError) throw safeError(screenshotError);
+    if (preferenceError) throw safeError(preferenceError);
+    if (!currentTrade) throw new Error("Not found");
+
+    const categories = (data.patch.categories ?? currentTrade.categories ?? [])
+      .map((category) => category.trim())
+      .filter(Boolean);
+    const patch = normalizeJournalPayload(
+      normalizeOptionalTracking({
+        ...data.patch,
+        reasoning:
+          data.patch.reasoning === undefined
+            ? currentTrade.reasoning
+            : data.patch.reasoning?.trim() || null,
+        grade: data.patch.grade === undefined ? currentTrade.grade : data.patch.grade,
+        categories,
+        entry_model:
+          data.patch.entry_model === undefined ? currentTrade.entry_model : data.patch.entry_model,
+        market_condition:
+          data.patch.market_condition === undefined
+            ? currentTrade.market_condition
+            : data.patch.market_condition,
+        entry_timeframe:
+          data.patch.entry_timeframe === undefined
+            ? currentTrade.entry_timeframe
+            : data.patch.entry_timeframe,
+        news_involvement:
+          data.patch.news_involvement === undefined
+            ? currentTrade.news_involvement
+            : data.patch.news_involvement,
+        exit_reason:
+          data.patch.exit_reason === undefined ? currentTrade.exit_reason : data.patch.exit_reason,
+        trade_management:
+          data.patch.trade_management === undefined
+            ? currentTrade.trade_management
+            : data.patch.trade_management,
+        custom_tags:
+          data.patch.custom_tags === undefined ? currentTrade.custom_tags : data.patch.custom_tags,
+        emotion_tags:
+          data.patch.emotion_tags === undefined
+            ? currentTrade.emotion_tags
+            : data.patch.emotion_tags,
+        risk_amount:
+          data.patch.risk_amount === undefined ? currentTrade.risk_amount : data.patch.risk_amount,
+        reward_amount:
+          data.patch.reward_amount === undefined
+            ? currentTrade.reward_amount
+            : data.patch.reward_amount,
+        pnl_amount:
+          data.patch.pnl_amount === undefined ? currentTrade.pnl_amount : data.patch.pnl_amount,
+        result: currentTrade.result,
+      }),
+    );
+    const calculatedAchievedRR =
+      patch.risk_amount != null &&
+      patch.risk_amount > 0 &&
+      patch.pnl_amount != null &&
+      Number.isFinite(patch.pnl_amount)
+        ? Number((patch.pnl_amount / patch.risk_amount).toFixed(2))
+        : null;
+    const requirements = requirementsFromPreferences(preferences);
+    const missing = missingReviewRequirements(
+      {
+        screenshot_count: screenshotCount ?? 0,
+        reasoning: patch.reasoning,
+        categories,
+        grade: patch.grade,
+        entry_model: patch.entry_model,
+        market_condition: patch.market_condition,
+        entry_timeframe: patch.entry_timeframe,
+        news_involvement: patch.news_involvement,
+        exit_reason: patch.exit_reason,
+        trade_management: patch.trade_management,
+        custom_tags: patch.custom_tags,
+      },
+      requirements,
+    );
+
+    if (requirements.category && !missing.includes("category") && categories.length > 0) {
+      const normalizedCategories = categories.map((category) => category.toLocaleLowerCase());
+      const { data: validCategories, error: categoryError } = await context.supabase
+        .from("trade_categories")
+        .select("normalized_name")
+        .eq("user_id", context.userId)
+        .is("archived_at", null)
+        .in("normalized_name", normalizedCategories);
+      if (categoryError) throw safeError(categoryError);
+      if (!(validCategories ?? []).length) missing.push("category");
+    }
+
+    const pendingMissingRequirements = currentTrade.review_completed_at ? [] : missing;
+    const tracking = journalTrackingFromPreferences(preferences?.journal_tracking);
+    const completenessStatus = getReviewStatus({
+      ...currentTrade,
+      ...patch,
+      achieved_rr: calculatedAchievedRR,
+      screenshot_count: screenshotCount ?? 0,
+      r_performance_enabled: tracking.r_performance !== "hidden",
+      trade_completeness_requirements: tradeCompletenessRequirementsFromPreferences(
+        preferences?.journal_tracking,
+      ),
+    });
+    const reviewCompletedAt =
+      currentTrade.review_completed_at ??
+      (pendingMissingRequirements.length === 0 && completenessStatus !== "incomplete"
+        ? new Date().toISOString()
+        : null);
+    const { data: row, error: updateError } = await context.supabase
+      .from("trades")
+      .update({
+        ...patch,
+        achieved_rr: calculatedAchievedRR,
+        ...(reviewCompletedAt ? { review_completed_at: reviewCompletedAt } : {}),
+      })
+      .eq("id", data.id)
+      .eq("user_id", context.userId)
+      .select()
+      .single();
+    if (updateError) throw safeError(updateError);
+
+    return {
+      trade: row,
+      missingRequirements: pendingMissingRequirements as ReviewRequirementKey[],
+      reviewCompletedAt: reviewCompletedAt ?? null,
+    };
   });
 
 export const deleteTrade = createServerFn({ method: "POST" })
@@ -235,6 +481,9 @@ export const getTrade = createServerFn({ method: "GET" })
 
     const withUrls = await Promise.all(
       (shots ?? []).map(async (s) => {
+        if (!isOwnedScreenshotPath(s.storage_path, context.userId, data.id)) {
+          return { ...s, url: null };
+        }
         const { data: signed } = await context.supabase.storage
           .from("trade-screenshots")
           .createSignedUrl(s.storage_path, 60 * 60);
@@ -263,7 +512,7 @@ export const addScreenshot = createServerFn({ method: "POST" })
     // this row is later read by an admin client (community signed URLs) which
     // bypasses storage RLS, so re-check here to prevent registering another
     // user's path.
-    if (!data.storage_path.startsWith(context.userId + "/")) {
+    if (!isOwnedScreenshotPath(data.storage_path, context.userId, data.trade_id)) {
       throw new Error("Forbidden: path does not belong to caller");
     }
     // Verify the trade belongs to the caller before attaching a screenshot.
@@ -324,6 +573,57 @@ export const deleteScreenshot = createServerFn({ method: "POST" })
       .eq("user_id", context.userId);
     if (error) throw safeError(error);
     return { ok: true };
+  });
+
+export const replaceScreenshot = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        storage_path: z.string().min(1).max(500),
+        kind: z.enum(["before", "after"]),
+        caption: z.string().max(120).nullable(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    checkRateLimitOrThrow("replace-screenshot", 20, 60_000);
+    const { data: current } = await context.supabase
+      .from("trade_screenshots")
+      .select("storage_path, trade_id")
+      .eq("id", data.id)
+      .eq("user_id", context.userId)
+      .maybeSingle();
+    if (!current) throw new Error("Forbidden");
+    if (!isOwnedScreenshotPath(data.storage_path, context.userId, current.trade_id)) {
+      throw new Error("Forbidden: path does not belong to caller");
+    }
+
+    const { data: row, error } = await context.supabase
+      .from("trade_screenshots")
+      .update({
+        storage_path: data.storage_path,
+        kind: data.kind,
+        caption: data.caption,
+      })
+      .eq("id", data.id)
+      .eq("user_id", context.userId)
+      .select()
+      .single();
+    if (error) throw safeError(error);
+
+    if (current.storage_path && current.storage_path !== data.storage_path) {
+      const { error: cleanupError } = await context.supabase.storage
+        .from("trade-screenshots")
+        .remove([current.storage_path]);
+      if (cleanupError) {
+        console.error("[screenshot-replace] Previous object cleanup failed", {
+          code: cleanupError.name || "storage_remove_failed",
+        });
+      }
+    }
+    return row;
   });
 
 const annotationShape = z.object({

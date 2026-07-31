@@ -25,10 +25,11 @@ function isMissingProfileCompletedColumn(error: { code?: string; message?: strin
   );
 }
 
-function deletionScheduledFor(from = new Date()) {
-  const date = new Date(from);
-  date.setDate(date.getDate() + 15);
-  return date.toISOString();
+function isMissingActivationGuideColumn(error: { code?: string; message?: string } | null) {
+  return (
+    error?.code === "42703" &&
+    error.message?.toLowerCase().includes("profiles.activation_guide_completed_at")
+  );
 }
 
 export const getProfile = createServerFn({ method: "GET" })
@@ -37,7 +38,7 @@ export const getProfile = createServerFn({ method: "GET" })
     const profileWithIntro = await context.supabase
       .from("profiles")
       .select(
-        "id, username, display_name, notification_preferences, has_seen_intro, deletion_requested_at, deletion_scheduled_for, deletion_cancelled_at, profile_completed",
+        "id, username, display_name, notification_preferences, has_seen_intro, deletion_requested_at, deletion_scheduled_for, deletion_cancelled_at, profile_completed, scope_discovery_seen_ids, activation_guide_completed_at",
       )
       .eq("id", context.userId)
       .maybeSingle();
@@ -48,7 +49,8 @@ export const getProfile = createServerFn({ method: "GET" })
     if (
       isMissingIntroSeenColumn(error) ||
       isMissingDeletionColumns(error) ||
-      isMissingProfileCompletedColumn(error)
+      isMissingProfileCompletedColumn(error) ||
+      isMissingActivationGuideColumn(error)
     ) {
       const profileWithoutIntro = await context.supabase
         .from("profiles")
@@ -64,6 +66,8 @@ export const getProfile = createServerFn({ method: "GET" })
             deletion_scheduled_for: null,
             deletion_cancelled_at: null,
             profile_completed: true,
+            scope_discovery_seen_ids: [],
+            activation_guide_completed_at: null,
           }
         : null;
       error = profileWithoutIntro.error;
@@ -71,7 +75,19 @@ export const getProfile = createServerFn({ method: "GET" })
 
     if (error) throw safeError(error);
     const { data: userResp } = await context.supabase.auth.getUser();
-    return data ? { ...data, email: userResp.user?.email ?? null } : null;
+    const metadata = userResp.user?.user_metadata as
+      | { full_name?: unknown; name?: unknown; display_name?: unknown }
+      | undefined;
+    const authDisplayName = [metadata?.full_name, metadata?.name, metadata?.display_name].find(
+      (value): value is string => typeof value === "string" && value.trim().length > 0,
+    );
+    return data
+      ? {
+          ...data,
+          email: userResp.user?.email ?? null,
+          auth_display_name: authDisplayName?.trim() ?? null,
+        }
+      : null;
   });
 
 export const updateProfile = createServerFn({ method: "POST" })
@@ -116,6 +132,19 @@ export const markIntroSeen = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+export const markActivationGuideComplete = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { error } = await context.supabase
+      .from("profiles")
+      .update({ activation_guide_completed_at: new Date().toISOString() })
+      .eq("id", context.userId)
+      .is("activation_guide_completed_at", null);
+    if (isMissingActivationGuideColumn(error)) return { ok: true };
+    if (error) throw safeError(error);
+    return { ok: true };
+  });
+
 export const updateNotificationPreferences = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) =>
@@ -134,39 +163,55 @@ export const updateNotificationPreferences = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+export const markScopeDiscoveriesSeen = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d) =>
+    z.object({ discoveryIds: z.array(z.string().min(1).max(180)).max(12) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { data: profile, error: selectError } = await context.supabase
+      .from("profiles")
+      .select("scope_discovery_seen_ids")
+      .eq("id", context.userId)
+      .maybeSingle();
+    if (selectError) throw safeError(selectError);
+    const next = Array.from(
+      new Set([...(profile?.scope_discovery_seen_ids ?? []), ...data.discoveryIds]),
+    );
+    const { error } = await context.supabase
+      .from("profiles")
+      .update({ scope_discovery_seen_ids: next })
+      .eq("id", context.userId);
+    if (error) throw safeError(error);
+    return { ok: true };
+  });
+
 export const scheduleAccountDeletion = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const requestedAt = new Date().toISOString();
-    const scheduledFor = deletionScheduledFor();
-    const { error } = await context.supabase
-      .from("profiles")
-      .update({
-        deletion_requested_at: requestedAt,
-        deletion_scheduled_for: scheduledFor,
-        deletion_cancelled_at: null,
-      })
-      .eq("id", context.userId);
-    if (isMissingDeletionColumns(error)) {
+    const { data: scheduledFor, error } = await context.supabase.rpc("schedule_account_deletion");
+    if (isMissingDeletionColumns(error) || error?.code === "PGRST202") {
       throw new Error("Account deletion scheduling requires the latest profile migration.");
     }
+    if (error?.code === "55000") {
+      throw new Error("Permanent account deletion is already in progress.");
+    }
     if (error) throw safeError(error);
+    if (!scheduledFor) throw new Error("Account deletion could not be scheduled.");
     return { ok: true, deletion_scheduled_for: scheduledFor };
   });
 
 export const cancelAccountDeletion = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { error } = await context.supabase
-      .from("profiles")
-      .update({
-        deletion_requested_at: null,
-        deletion_scheduled_for: null,
-        deletion_cancelled_at: new Date().toISOString(),
-      })
-      .eq("id", context.userId);
-    if (isMissingDeletionColumns(error)) {
+    const { error } = await context.supabase.rpc("cancel_account_deletion");
+    if (isMissingDeletionColumns(error) || error?.code === "PGRST202") {
       throw new Error("Account deletion cancellation requires the latest profile migration.");
+    }
+    if (error?.code === "55000") {
+      throw new Error(
+        "Permanent account deletion is already in progress and can no longer be cancelled.",
+      );
     }
     if (error) throw safeError(error);
     return { ok: true };

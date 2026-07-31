@@ -20,6 +20,11 @@ export const EMOTIONS: EmotionTag[] = [
   { key: "fearful", emoji: "😔", label: "Fearful" },
 ];
 
+/** The current Quick Capture vocabulary. Legacy keys remain above so old trades stay readable. */
+export const QUICK_CAPTURE_EMOTIONS = EMOTIONS.filter(
+  (emotion) => emotion.key !== "confused" && emotion.key !== "fearful",
+);
+
 export function emotionByKey(key: string): EmotionTag | undefined {
   return EMOTIONS.find((e) => e.key === key);
 }

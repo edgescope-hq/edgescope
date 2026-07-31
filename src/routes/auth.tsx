@@ -4,13 +4,24 @@ import { z } from "zod";
 import { AnimatePresence, motion } from "framer-motion";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { ArrowLeft, BookOpen, Loader2, Lock, Search, ShieldCheck } from "lucide-react";
+import {
+  ArrowLeft,
+  BookOpen,
+  CheckCircle2,
+  Loader2,
+  Lock,
+  Search,
+  ShieldCheck,
+} from "lucide-react";
+import { bootstrapFirstAdmin, checkBootstrap } from "@/lib/invites.functions";
 import logo from "@/assets/edgescope-horizontal.png.asset.json";
 import { Premium3DBackground } from "@/components/landing/premium-3d-background";
 
 const searchSchema = z.object({
-  mode: z.enum(["signin", "signup"]).default("signin").catch("signin"),
+  mode: z.enum(["signin", "signup", "forgot"]).default("signin").catch("signin"),
   oauth: z.enum(["google"]).optional(),
   error: z.string().optional(),
   error_code: z.string().optional(),
@@ -21,7 +32,7 @@ const EASE = [0.16, 1, 0.3, 1] as const;
 const CARD_HOVER =
   "transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/25 hover:shadow-[0_22px_70px_-34px_oklch(0.68_0.23_295/0.55)]";
 const EYEBROW_ACCENT = "text-primary";
-type AuthMode = "signin" | "signup";
+type AuthMode = "signin" | "signup" | "forgot";
 
 const AUTH_COPY = {
   signin: {
@@ -38,6 +49,13 @@ const AUTH_COPY = {
     cardTitle: "Create your account",
     cardBody: "Start with a private journal built around review.",
   },
+  forgot: {
+    eyebrow: "Password reset",
+    title: "Get back to your journal.",
+    body: "Request a reset link and continue reviewing your trades.",
+    cardTitle: "Reset your password",
+    cardBody: "Enter your email and we will send you a reset link.",
+  },
 } as const;
 
 const AUTH_BULLETS = {
@@ -50,6 +68,11 @@ const AUTH_BULLETS = {
     { icon: BookOpen, text: "Quick trade capture" },
     { icon: Search, text: "Detailed review when you are ready" },
     { icon: Lock, text: "Private by default" },
+  ],
+  forgot: [
+    { icon: Lock, text: "Secure reset flow" },
+    { icon: Search, text: "Return to review" },
+    { icon: ShieldCheck, text: "Private workspace" },
   ],
 } as const;
 
@@ -193,6 +216,7 @@ function AuthPage() {
                 >
                   {mode === "signin" && <SignInForm />}
                   {mode === "signup" && <SignUpForm />}
+                  {mode === "forgot" && <ForgotForm />}
                 </motion.div>
               </AnimatePresence>
             </div>
@@ -239,7 +263,7 @@ function AuthTitle({ mode }: { mode: AuthMode }) {
     return <>Start your trading journal.</>;
   }
 
-  return <>Start your trading journal.</>;
+  return <>Get back to your journal.</>;
 }
 
 function getOAuthErrorMessage(errorCode?: string, errorDescription?: string) {
@@ -278,7 +302,19 @@ function GoogleIcon() {
   );
 }
 
-function GoogleAuthButton({ mode }: { mode: AuthMode }) {
+function OAuthDivider() {
+  return (
+    <div className="flex items-center gap-3" aria-hidden="true">
+      <div className="h-px flex-1 bg-white/[0.1]" />
+      <span className="text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground/70">
+        Or continue with email
+      </span>
+      <div className="h-px flex-1 bg-white/[0.1]" />
+    </div>
+  );
+}
+
+function GoogleAuthButton({ mode }: { mode: Exclude<AuthMode, "forgot"> }) {
   const [loading, setLoading] = useState(false);
 
   async function startGoogleAuth() {
@@ -341,7 +377,7 @@ function AuthPreview() {
   );
 }
 
-function AuthLinks({ mode }: { mode: AuthMode }) {
+function AuthLinks({ mode }: { mode: "signin" | "signup" | "forgot" }) {
   return (
     <div className="mt-6 text-center text-sm text-muted-foreground">
       {mode === "signin" && (
@@ -369,6 +405,15 @@ function AuthLinks({ mode }: { mode: AuthMode }) {
             Sign in
           </Link>
         </>
+      )}
+      {mode === "forgot" && (
+        <Link
+          to="/auth"
+          search={{ mode: "signin" }}
+          className="cursor-pointer font-medium text-primary transition-colors duration-200 hover:text-primary-glow"
+        >
+          Back to sign in
+        </Link>
       )}
       <div className="mt-4 flex flex-wrap items-center justify-center gap-3 text-xs text-muted-foreground/70">
         <Link to="/terms" className="transition hover:text-foreground">
@@ -398,5 +443,61 @@ function SignUpForm() {
     <div className="space-y-4">
       <GoogleAuthButton mode="signup" />
     </div>
+  );
+}
+
+function ForgotForm() {
+  const [email, setEmail] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [sent, setSent] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    setLoading(false);
+    if (error) return toast.error(error.message);
+    setSent(true);
+  }
+
+  if (sent) {
+    return (
+      <div className="py-4 text-center">
+        <div className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-xl bg-success/15 text-success">
+          <CheckCircle2 className="h-6 w-6" />
+        </div>
+        <p className="text-sm text-muted-foreground">Check your inbox for the reset link.</p>
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <div className="space-y-2">
+        <Label
+          htmlFor="email"
+          className="text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+        >
+          Email
+        </Label>
+        <Input
+          id="email"
+          type="email"
+          required
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          className="h-11 rounded-xl border-white/[0.08] bg-white/[0.045] text-foreground transition-colors duration-200 placeholder:text-muted-foreground/50 focus:border-primary/50 focus:ring-primary/25"
+        />
+      </div>
+      <Button
+        type="submit"
+        className="h-11 w-full rounded-xl bg-primary text-sm font-semibold shadow-[var(--shadow-glow)] transition-all duration-200 hover:-translate-y-px hover:brightness-110"
+        disabled={loading}
+      >
+        {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Send reset link
+      </Button>
+    </form>
   );
 }

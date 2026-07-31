@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Area,
-  AreaChart,
   CartesianGrid,
+  ComposedChart,
+  Line,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -26,27 +28,30 @@ import {
   TrendingDown,
   TrendingUp,
   User,
+  ArrowRight,
+  Activity,
+  PanelsTopLeft,
   type LucideIcon,
 } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { TradeFormModal } from "@/components/trades/trade-form-modal";
 import { TradeReviewModal } from "@/components/trades/trade-review-modal";
-import {
-  Select as ShadcnSelect,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { AccountFilterSelect } from "@/components/account-filter-select";
+import { useActiveAccount } from "@/components/active-account-provider";
 import { useSuspenseQuery, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { listTrades } from "@/lib/trades.functions";
-import { getProfile, markIntroSeen, updateProfile } from "@/lib/account.functions";
+import {
+  getProfile,
+  markActivationGuideComplete,
+  markIntroSeen,
+  updateProfile,
+} from "@/lib/account.functions";
 import { listTradingAccounts, type TradingAccount } from "@/lib/trading-accounts.functions";
 import { AnimatedNumber } from "@/components/dashboard/animated-number";
-import { PageHeader, PageShell, PremiumEmptyState } from "@/components/ui/premium";
+import { PageHeader, PageShell } from "@/components/ui/premium";
 import { cn } from "@/lib/utils";
-import { overview, equityCurve } from "@/lib/analytics";
+import { overview } from "@/lib/analytics";
 import {
   isPaperTrade,
   isResultComplete,
@@ -60,10 +65,14 @@ import {
 } from "@/lib/trade-mappers";
 import { getReviewStatus } from "@/lib/review-status";
 import { toast } from "sonner";
-
-function sumRecordedR<T extends { achieved_rr: number | string | null }>(trades: T[]) {
-  return trades.reduce((sum, trade) => sum + (recordedR(trade.achieved_rr) ?? 0), 0);
-}
+import {
+  dashboardChartEligibility,
+  dashboardCumulativeRPoints,
+  formatRAxisTick,
+  missingRTradeHeadline,
+  qualifyingRValue,
+  type DashboardChartPoint,
+} from "@/lib/dashboard-charts";
 
 type Tone = "primary" | "info" | "success" | "warning" | "destructive";
 
@@ -100,7 +109,7 @@ const INTRO_WORKFLOW = [
   },
   {
     icon: Target,
-    title: "Complete the review",
+    title: "Complete your first review",
     body: "Capture the chart context, reasoning, and review details for this trade.",
   },
 ];
@@ -115,8 +124,10 @@ type DashboardProfile = {
   username: string;
   display_name: string | null;
   email: string | null;
+  auth_display_name?: string | null;
   has_seen_intro: boolean;
   profile_completed: boolean;
+  activation_guide_completed_at?: string | null;
 } | null;
 
 function emailPrefix(email?: string | null) {
@@ -258,7 +269,9 @@ function ProfileSetupModal({
 }) {
   const prefix = emailPrefix(profile.email);
   const initialDisplay =
-    normalizeHandle(profile.display_name) === prefix ? "" : (profile.display_name ?? "");
+    normalizeHandle(profile.display_name) === prefix
+      ? (profile.auth_display_name ?? "")
+      : (profile.display_name ?? profile.auth_display_name ?? "");
   const [displayName, setDisplayName] = useState(initialDisplay);
   const [username, setUsername] = useState(suggestedUsername(profile));
   const usernameValid = /^[a-zA-Z0-9_]{3,32}$/.test(username.trim());
@@ -289,7 +302,7 @@ function ProfileSetupModal({
           if (!canSave) return;
           onSave({ username: username.trim(), display_name: displayName.trim() });
         }}
-        className={`relative w-full max-w-lg overflow-hidden rounded-2xl border border-white/[0.1] bg-[radial-gradient(circle_at_top_left,oklch(0.68_0.23_295/0.1),transparent_34%),linear-gradient(145deg,oklch(0.12_0.02_270/0.97),oklch(0.075_0.012_270/0.98))] p-7 shadow-[0_22px_70px_-34px_oklch(0_0_0/0.86),0_0_34px_-28px_oklch(0.68_0.23_295/0.46)] ${INTRO_CARD_HOVER}`}
+        className="relative w-full max-w-lg overflow-hidden rounded-2xl border border-white/[0.1] bg-[radial-gradient(circle_at_top_left,oklch(0.68_0.23_295/0.1),transparent_34%),linear-gradient(145deg,oklch(0.12_0.02_270/0.97),oklch(0.075_0.012_270/0.98))] p-7 shadow-[0_22px_70px_-34px_oklch(0_0_0/0.86),0_0_34px_-28px_oklch(0.68_0.23_295/0.46)]"
       >
         <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-primary/65 to-transparent" />
         <div className="flex items-start gap-4">
@@ -339,16 +352,6 @@ function ProfileSetupModal({
             )}
           </label>
 
-          <label className="block">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground/60">
-              Email
-            </span>
-            <input
-              value={profile.email ?? ""}
-              readOnly
-              className="mt-1.5 w-full rounded-xl bg-white/[0.03] px-3.5 py-2.5 text-sm text-foreground/62 ring-1 ring-white/[0.06]"
-            />
-          </label>
         </div>
 
         <div className="mt-7 flex justify-end">
@@ -375,7 +378,7 @@ function getBrowserLocalGreeting(date = new Date()): string {
 
 function formatTradeDateOnly(date: string): string {
   try {
-    return new Date(`${date}T00:00:00`).toLocaleDateString("en-US", {
+    return new Date(`${date}T00:00:00`).toLocaleDateString("en-GB", {
       month: "short",
       day: "numeric",
       year: "numeric",
@@ -417,6 +420,7 @@ export function DashboardView() {
   const profileFn = useServerFn(getProfile);
   const updateProfileFn = useServerFn(updateProfile);
   const markIntroSeenFn = useServerFn(markIntroSeen);
+  const markActivationGuideCompleteFn = useServerFn(markActivationGuideComplete);
   const accountsFn = useServerFn(listTradingAccounts);
   const qc = useQueryClient();
   const { data: trades } = useSuspenseQuery({ queryKey: ["trades"], queryFn: () => tradesFn() });
@@ -428,7 +432,8 @@ export function DashboardView() {
   const db = useMemo(() => (trades ?? []) as DbTrade[], [trades]);
   const realDb = useMemo(() => db.filter((trade) => !isPaperTrade(trade)), [db]);
 
-  const [selectedAccountId, setSelectedAccountId] = useState<string>("ALL");
+  const { activeAccountId: selectedAccountId, setActiveAccountId: setSelectedAccountId } =
+    useActiveAccount();
 
   const dashboardDb = useMemo(() => {
     if (selectedAccountId === "ALL") return realDb;
@@ -448,16 +453,10 @@ export function DashboardView() {
   }, []);
 
   const dashboardRows = useMemo(() => dashboardDb.map(toAnalytics), [dashboardDb]);
-  const dashboardResultCompleteRows = useMemo(
-    () => dashboardResultCompleteDb.map(toAnalytics),
-    [dashboardResultCompleteDb],
-  );
-
   const o = useMemo(() => overview(dashboardRows), [dashboardRows]);
-  const eq = useMemo(() => equityCurve(dashboardResultCompleteRows), [dashboardResultCompleteRows]);
   const streak = useMemo(() => streaks(dashboardDb), [dashboardDb]);
 
-  const recent = useMemo(() => [...dashboardDb].slice(0, 5), [dashboardDb]);
+  const recent = useMemo(() => [...dashboardDb].slice(0, 4), [dashboardDb]);
   const tradeNumbersById = useMemo(() => numberTradesById(dashboardDb), [dashboardDb]);
 
   // ------ Today snapshot (Phase 3: lighter daily-focused dashboard) ------
@@ -466,7 +465,17 @@ export function DashboardView() {
     () => dashboardDb.filter((t) => t.trade_date === todayStr),
     [dashboardDb, todayStr],
   );
-  const todayNetR = useMemo(() => sumRecordedR(todayTrades.map(toAnalytics)), [todayTrades]);
+  const todayQualifyingR = useMemo(
+    () =>
+      todayTrades
+        .map(qualifyingRValue)
+        .filter((value): value is number => value !== null),
+    [todayTrades],
+  );
+  const todayNetR = useMemo(
+    () => todayQualifyingR.reduce((sum, value) => sum + value, 0),
+    [todayQualifyingR],
+  );
 
   // ------ Journal completeness reminder ------
   const journalGaps = useMemo(() => {
@@ -481,22 +490,22 @@ export function DashboardView() {
   const now = new Date();
   const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   const monthLabel = now.toLocaleString("en-US", { month: "long", year: "numeric" });
-  const currentMonthCompleteRows = useMemo(
-    () => dashboardResultCompleteRows.filter((t) => t.trade_date.startsWith(ym)),
-    [dashboardResultCompleteRows, ym],
-  );
-  const currentMonthLogged = useMemo(
-    () => dashboardRows.filter((t) => t.trade_date.startsWith(ym)),
-    [dashboardRows, ym],
+  const currentMonthTrades = useMemo(
+    () => dashboardDb.filter((t) => t.trade_date.startsWith(ym)),
+    [dashboardDb, ym],
   );
   const monthChart = useMemo(() => {
-    const eqM = equityCurve(currentMonthCompleteRows);
-    return eqM.map((p) => ({ d: p.tradeIndex === 0 ? "0" : p.date.slice(8), v: p.cumR }));
-  }, [currentMonthCompleteRows]);
+    return dashboardCumulativeRPoints(currentMonthTrades);
+  }, [currentMonthTrades]);
+  const monthEligibility = useMemo(
+    () => dashboardChartEligibility(currentMonthTrades),
+    [currentMonthTrades],
+  );
 
   const equityAll = useMemo(() => {
-    return eq.map((point) => ({ d: point.tradeIndex === 0 ? "0" : point.date, v: point.cumR }));
-  }, [eq]);
+    return dashboardCumulativeRPoints(dashboardDb);
+  }, [dashboardDb]);
+  const equityEligibility = useMemo(() => dashboardChartEligibility(dashboardDb), [dashboardDb]);
 
   const closedCount = useMemo(
     () =>
@@ -511,16 +520,18 @@ export function DashboardView() {
     ? `Based on ${resultCompleteCount} of ${Math.max(closedCount, resultCompleteCount)} trades`
     : undefined;
 
-  const sumR = useMemo(
-    () => sumRecordedR(dashboardResultCompleteRows),
-    [dashboardResultCompleteRows],
+  const qualifyingR = useMemo(
+    () =>
+      dashboardDb
+        .map(qualifyingRValue)
+        .filter((value): value is number => value !== null),
+    [dashboardDb],
   );
-  const avgRR = useMemo(() => {
-    const rrs = dashboardResultCompleteRows
-      .map((t) => recordedR(t.achieved_rr))
-      .filter((n): n is number => n !== null);
-    return rrs.length ? rrs.reduce((a, b) => a + b, 0) / rrs.length : null;
-  }, [dashboardResultCompleteRows]);
+  const sumR = useMemo(() => qualifyingR.reduce((sum, value) => sum + value, 0), [qualifyingR]);
+  const avgRR = useMemo(
+    () => (qualifyingR.length ? sumR / qualifyingR.length : null),
+    [qualifyingR, sumR],
+  );
 
   const accountCount = accounts?.length ?? 0;
   const profileIncomplete = isProfileIncomplete(profile);
@@ -531,6 +542,10 @@ export function DashboardView() {
     () => dashboardDb.filter((trade) => getReviewStatus(trade) === "reviewed").length,
     [dashboardDb],
   );
+  const globalReviewedTradesCount = useMemo(
+    () => realDb.filter((trade) => getReviewStatus(trade) === "reviewed").length,
+    [realDb],
+  );
   const [scopeUnlockDismissed, setScopeUnlockDismissed] = useState(() => {
     try {
       return localStorage.getItem("edgescope.scopeUnlockDismissed") === "true";
@@ -538,8 +553,9 @@ export function DashboardView() {
       return false;
     }
   });
-  const hasFirstReview = reviewedTradesCount > 0;
-  const scopeReady = reviewedTradesCount >= SCOPE_UNLOCK_THRESHOLD;
+  const hasFirstReview =
+    Boolean(profile?.activation_guide_completed_at) || globalReviewedTradesCount > 0;
+  const scopeReady = globalReviewedTradesCount >= SCOPE_UNLOCK_THRESHOLD;
   const executionFocus = useMemo(() => {
     const allDb = realDb;
     const s = streaks(allDb);
@@ -556,6 +572,8 @@ export function DashboardView() {
         headline: "Losing streak detected",
         message: `You're on a ${s.currentLoss}-trade losing streak. Slow down and make sure the next trade fits your plan.`,
         secondary: "Loss streaks can happen. Keep risk steady.",
+        showRecentre: true,
+        recentreState: undefined,
       };
     }
     if (s.currentWin >= 3) {
@@ -565,6 +583,8 @@ export function DashboardView() {
         headline: "Strong run detected",
         message: `You've had ${s.currentWin} winning trades in a row. Keep the next trade planned and risk steady.`,
         secondary: "Good results should not change your rules.",
+        showRecentre: true,
+        recentreState: "greed" as const,
       };
     }
     if (latestTrade && latestR <= -2) {
@@ -575,6 +595,8 @@ export function DashboardView() {
         message:
           "Your latest trade was a larger loss. Review what happened before taking the next one.",
         secondary: "Check whether it was normal setup risk or something to adjust.",
+        showRecentre: true,
+        recentreState: undefined,
       };
     }
     return {
@@ -583,6 +605,8 @@ export function DashboardView() {
       headline: "Stay process-first",
       message: "Wait for your plan, keep risk steady, and review the trade after execution.",
       secondary: "Consistent records make your edge easier to see.",
+      showRecentre: false,
+      recentreState: undefined,
     };
   }, [realDb]);
   const currentStreakStat = useMemo(() => formatCurrentStreak(streak), [streak]);
@@ -613,7 +637,7 @@ export function DashboardView() {
     return {
       stage: "review" as const,
       eyebrow: "REVIEW",
-      title: "Complete the review",
+        title: "Complete your first review",
       body: "Capture the chart context, reasoning, and review details for this trade.",
       cta: "Complete review",
       to: "/trades" as const,
@@ -635,6 +659,11 @@ export function DashboardView() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["profile"] }),
   });
 
+  const markActivationGuideCompleteMutation = useMutation({
+    mutationFn: () => markActivationGuideCompleteFn(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["profile"] }),
+  });
+
   useEffect(() => {
     if (!shouldShowIntroGuide) setIntroOpen(false);
   }, [shouldShowIntroGuide]);
@@ -646,6 +675,22 @@ export function DashboardView() {
     markIntroSeenMutation.mutate();
   }, [hasSeenIntro, introMarkedLocal, profile, profileIncomplete, markIntroSeenMutation]);
 
+  useEffect(() => {
+    if (
+      !profile ||
+      profile.activation_guide_completed_at ||
+      globalReviewedTradesCount === 0 ||
+      markActivationGuideCompleteMutation.isPending
+    ) {
+      return;
+    }
+    markActivationGuideCompleteMutation.mutate();
+  }, [
+    globalReviewedTradesCount,
+    markActivationGuideCompleteMutation,
+    profile,
+  ]);
+
   const closeIntro = () => {
     setIntroOpen(false);
     if (!profile || hasSeenIntro || introMarkedLocal) return;
@@ -656,31 +701,21 @@ export function DashboardView() {
   return (
     <PageShell>
       <PageHeader
+        icon={PanelsTopLeft}
         eyebrow="Dashboard"
         title={`${displayGreeting}, ${displayName}`}
         description="Your trading overview, journal gaps, account health, and review momentum."
         className="sm:items-center"
         actions={
           <div className="flex items-center gap-2">
-            <ShadcnSelect value={selectedAccountId} onValueChange={setSelectedAccountId}>
-              <SelectTrigger
-                aria-label="Filter by account"
-                className="min-w-[160px] max-w-[220px] rounded-xl bg-white/[0.04] px-3 py-2 text-xs font-semibold text-muted-foreground ring-1 ring-white/[0.06] transition-all duration-200 hover:text-foreground focus:ring-2 focus:ring-primary/40 h-auto"
-              >
-                <SelectValue placeholder="All accounts" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">All accounts</SelectItem>
-                {(accounts ?? []).map((account) => (
-                  <SelectItem key={account.id} value={account.id}>
-                    {account.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </ShadcnSelect>
+            <AccountFilterSelect
+              accounts={(accounts ?? []).filter((account) => account.status !== "archived")}
+              value={selectedAccountId}
+              onValueChange={setSelectedAccountId}
+            />
             <button
               onClick={() => setNewOpen(true)}
-              className="group relative inline-flex items-center gap-2 rounded-xl bg-gradient-to-br from-primary to-primary/85 px-5 py-2.5 text-sm font-semibold text-primary-foreground whitespace-nowrap ring-1 ring-primary/40 shadow-[0_0_0_1px_oklch(0.68_0.23_295/0.35),0_8px_28px_-6px_oklch(0.68_0.23_295/0.55),0_0_44px_-10px_oklch(0.68_0.23_295/0.65)] transition-all duration-200 hover:-translate-y-px hover:brightness-110 hover:shadow-[0_0_0_1px_oklch(0.68_0.23_295/0.5),0_12px_36px_-6px_oklch(0.68_0.23_295/0.7),0_0_64px_-12px_oklch(0.68_0.23_295/0.85)]"
+              className="group relative inline-flex items-center gap-2 rounded-xl bg-gradient-to-br from-primary to-primary/85 px-5 py-2.5 text-sm font-semibold text-primary-foreground whitespace-nowrap ring-1 ring-primary/40 shadow-[0_8px_24px_-12px_oklch(0.68_0.23_295/0.5)] transition-all duration-200 hover:-translate-y-px hover:brightness-110 hover:shadow-[0_10px_28px_-12px_oklch(0.68_0.23_295/0.62)]"
             >
               <span
                 aria-hidden
@@ -699,7 +734,7 @@ export function DashboardView() {
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={motionTransition}
-          className={`mt-6 w-full overflow-hidden rounded-2xl border border-primary/18 bg-[radial-gradient(circle_at_top_left,oklch(0.68_0.23_295/0.08),transparent_32%),linear-gradient(145deg,oklch(0.14_0.022_270/0.9),oklch(0.09_0.014_270/0.86))] p-5 shadow-[0_18px_52px_-42px_oklch(0.68_0.23_295/0.36)] ring-1 ring-white/[0.05] backdrop-blur-xl sm:max-w-xl ${INTRO_CARD_HOVER}`}
+          className="mt-6 w-full overflow-hidden rounded-2xl border border-primary/18 bg-[radial-gradient(circle_at_top_left,oklch(0.68_0.23_295/0.08),transparent_32%),linear-gradient(145deg,oklch(0.14_0.022_270/0.9),oklch(0.09_0.014_270/0.86))] p-5 shadow-[0_18px_52px_-42px_oklch(0.68_0.23_295/0.36)] ring-1 ring-white/[0.05] backdrop-blur-xl sm:max-w-xl"
         >
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-primary/15 text-primary ring-1 ring-primary/25 shadow-[0_0_28px_-12px_oklch(0.68_0.23_295/0.8)]">
@@ -707,10 +742,14 @@ export function DashboardView() {
             </div>
             <div className="min-w-0 flex-1">
               <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-primary/85">
-                {activationGuide.eyebrow}
+                GETTING STARTED
               </div>
-              <h2 className="mt-1 text-lg font-bold tracking-tight">{activationGuide.title}</h2>
-              <p className="mt-1.5 text-sm leading-6 text-foreground/68">{activationGuide.body}</p>
+              <h2 className="mt-1 text-lg font-bold tracking-tight">
+                Set up your EdgeScope workflow
+              </h2>
+              <p className="mt-1.5 text-sm leading-6 text-foreground/68">
+                Create your workspace, capture a trade, and complete your first review.
+              </p>
               <div className="mt-4 flex flex-wrap gap-2.5">
                 {activationGuide.to ? (
                   <Link
@@ -811,7 +850,7 @@ export function DashboardView() {
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.98, y: 6 }}
               transition={modalTransition}
-              className={`relative w-full max-w-xl overflow-hidden rounded-2xl border border-white/[0.1] bg-[radial-gradient(circle_at_top_left,oklch(0.68_0.23_295/0.1),transparent_34%),linear-gradient(145deg,oklch(0.12_0.02_270/0.96),oklch(0.075_0.012_270/0.98))] p-7 shadow-[0_22px_70px_-34px_oklch(0_0_0/0.86),0_0_38px_-28px_oklch(0.68_0.23_295/0.46)] ${INTRO_CARD_HOVER}`}
+              className="relative w-full max-w-xl overflow-hidden rounded-2xl border border-white/[0.1] bg-[radial-gradient(circle_at_top_left,oklch(0.68_0.23_295/0.1),transparent_34%),linear-gradient(145deg,oklch(0.12_0.02_270/0.96),oklch(0.075_0.012_270/0.98))] p-7 shadow-[0_22px_70px_-34px_oklch(0_0_0/0.86),0_0_38px_-28px_oklch(0.68_0.23_295/0.46)]"
             >
               <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-primary/70 to-transparent" />
               <div className="flex items-start gap-4">
@@ -823,19 +862,11 @@ export function DashboardView() {
                     Getting started
                   </div>
                   <h2 id="intro-guide-title" className="mt-1 text-2xl font-bold tracking-tight">
-                    Your trading review starts here.
+                    Set up your EdgeScope workflow
                   </h2>
-                  {activationGuide && (
-                    <div className="mt-4 rounded-xl bg-primary/[0.08] px-4 py-3 ring-1 ring-primary/25">
-                      <div className="text-xs font-semibold text-primary">Next step</div>
-                      <div className="mt-1 text-sm font-bold text-foreground">
-                        {activationGuide.title}
-                      </div>
-                      <p className="mt-0.5 text-sm leading-5 text-foreground/80">
-                        {activationGuide.body}
-                      </p>
-                    </div>
-                  )}
+                  <p className="mt-2 text-sm leading-6 text-foreground/70">
+                    Create your workspace, capture a trade, and complete your first review.
+                  </p>
                 </div>
               </div>
 
@@ -852,7 +883,7 @@ export function DashboardView() {
                     <div
                       key={title}
                       className={cn(
-                        `flex items-start gap-3 rounded-xl border px-4 py-3.5 ring-1 ${INTRO_CARD_HOVER}`,
+                        "flex items-start gap-3 rounded-xl border px-4 py-3.5 ring-1",
                         completed
                           ? "border-success/18 bg-success/[0.045] ring-success/[0.08]"
                           : current
@@ -882,11 +913,6 @@ export function DashboardView() {
                           >
                             {title}
                           </h3>
-                          {completed && (
-                            <span className="rounded-full bg-success/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-success">
-                              Done
-                            </span>
-                          )}
                         </div>
                         <p
                           className={cn(
@@ -950,40 +976,46 @@ export function DashboardView() {
           <div className="mt-1.5 text-3xl font-bold tabular-nums">{todayTrades.length}</div>
           <div className="mt-1 text-xs text-muted-foreground">Logged today</div>
         </div>
-        <div className="glow-card rounded-2xl p-5">
+        <div className="glow-card flex flex-col items-start rounded-2xl p-5 text-left">
           <div className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground">
             TODAY NET R
           </div>
           <div
             className={cn(
-              "mt-1.5 text-3xl font-bold tabular-nums",
+              "mt-1.5 whitespace-nowrap text-left text-3xl font-bold tabular-nums",
               todayNetR > 0 && "text-success",
               todayNetR < 0 && "text-destructive",
             )}
           >
-            {todayTrades.length === 0
-              ? "—"
-              : `${todayNetR > 0 ? "+" : ""}${Math.abs(todayNetR).toFixed(2)}R`}
+            {todayQualifyingR.length === 0 ? (
+              "\u2014"
+            ) : (
+              <span className="relative inline-block">
+                {todayNetR !== 0 && (
+                  <span className="absolute right-full mr-[0.08ch]">
+                    {todayNetR > 0 ? "+" : "−"}
+                  </span>
+                )}
+                {Math.abs(todayNetR).toFixed(2)}R
+              </span>
+            )}
           </div>
           <div className="mt-1 text-xs text-muted-foreground">Net result today</div>
         </div>
       </div>
 
-      {/* Execution Focus */}
-      {hasFirstReview && (
-        <div
+      {(hasFirstReview || hasJournalGaps) && (
+        <div className="mt-4 grid gap-3">
+          {hasFirstReview && (
+            <div
           className={cn(
-            "mt-4 flex flex-col gap-4 rounded-2xl px-5 py-4 ring-1 sm:flex-row sm:items-center sm:justify-between",
-            executionFocus.tone === "warning"
-              ? "bg-[linear-gradient(135deg,oklch(0.15_0.025_70/0.72),oklch(0.09_0.014_270/0.9))] ring-warning/[0.18]"
-              : "bg-[linear-gradient(135deg,oklch(0.15_0.035_295/0.64),oklch(0.09_0.014_270/0.9))] ring-primary/[0.16]",
+                "flex flex-col gap-4 rounded-2xl border border-primary/14 bg-[linear-gradient(135deg,oklch(0.15_0.035_295/0.64),oklch(0.09_0.014_270/0.9))] px-5 py-3.5 ring-1 ring-primary/[0.18] sm:min-h-[94px] sm:flex-row sm:items-center sm:justify-between",
           )}
         >
           <div className="flex min-w-0 items-start gap-3">
             <div
               className={cn(
-                "grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br ring-1 ring-white/[0.06]",
-                toneStyles[executionFocus.tone].icon,
+                "grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-primary/25 to-primary/5 text-primary ring-1 ring-primary/20",
               )}
             >
               <ClipboardCheck className="h-5 w-5" />
@@ -1000,24 +1032,44 @@ export function DashboardView() {
               </p>
             </div>
           </div>
-          <div className="rounded-xl bg-white/[0.035] px-3.5 py-2 text-xs font-medium leading-5 text-foreground/76 ring-1 ring-white/[0.055] sm:max-w-[270px]">
-            {executionFocus.secondary}
-          </div>
-        </div>
-      )}
+              <div className="flex w-full shrink-0 flex-col justify-center gap-2 sm:w-[18rem] sm:max-w-[34%] sm:items-end">
+                <div className="max-w-[18rem] text-pretty text-xs font-medium leading-5 text-muted-foreground sm:text-right">
+              {executionFocus.secondary}
+                </div>
+                {executionFocus.showRecentre && (
+                  <Link
+                    to={executionFocus.recentreState ? "/recentre/$state" : "/recentre"}
+                    params={
+                      executionFocus.recentreState ? { state: executionFocus.recentreState } : undefined
+                    }
+                    className="inline-flex min-h-9 items-center justify-center gap-2 self-start rounded-lg bg-primary/14 px-3.5 text-xs font-semibold text-primary ring-1 ring-primary/24 transition-colors hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary sm:self-end"
+                  >
+                    Open Recentre <ArrowRight className="h-3.5 w-3.5" />
+                  </Link>
+                )}
+              </div>
+            </div>
+          )}
 
-      {/* Journal completeness reminder */}
-      {hasJournalGaps && (
-        <Link
-          to="/trades"
-          className="mt-3 flex items-center justify-between gap-4 rounded-2xl bg-warning/[0.045] px-5 py-3.5 ring-1 ring-warning/16 transition-all hover:bg-warning/[0.065]"
-        >
-          <div className="flex items-start gap-3">
-            <ClipboardList className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
-            <div>
-              <div className="text-sm font-semibold">Journal reminder</div>
-              <div className="mt-0.5 text-xs text-muted-foreground">
-                {(() => {
+          {hasJournalGaps && (
+            <Link
+              to="/trades"
+              search={{
+                account: selectedAccountId === "ALL" ? undefined : selectedAccountId,
+                review: "incomplete,needs_review",
+              }}
+              className="flex items-center justify-between gap-4 rounded-2xl bg-warning/[0.045] px-5 py-2.5 ring-1 ring-warning/16 transition-colors hover:bg-warning/[0.065]"
+            >
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-warning/10 text-warning ring-1 ring-warning/18">
+                  <ClipboardList className="h-5 w-5" />
+                </span>
+                <div className="min-w-0">
+                  <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground/85">
+                    Journal reminder
+                  </div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">
+                  {(() => {
                   const inc = journalGaps.incomplete;
                   const rev = journalGaps.needsReview;
                   if (inc > 0 && rev > 0) {
@@ -1033,12 +1085,14 @@ export function DashboardView() {
                     return rev === 1 ? "1 needs review" : `${rev} need review`;
                   }
                   return "";
-                })()}
+                  })()}
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-          <span className="text-xs font-medium text-warning">Complete journal &rarr;</span>
-        </Link>
+              <span className="shrink-0 text-xs font-medium text-warning">Complete journal &rarr;</span>
+            </Link>
+          )}
+        </div>
       )}
 
       {/* KPI Cards */}
@@ -1055,8 +1109,8 @@ export function DashboardView() {
         />
         <StatCard
           icon={Scale}
-          label="AVERAGE RR"
-          value={avgRR ?? 0}
+          label="AVERAGE R"
+          value={avgRR ?? "\u2014"}
           decimals={2}
           suffix="R"
           tone="success"
@@ -1079,7 +1133,7 @@ export function DashboardView() {
         />
         <StatCard
           icon={ClipboardCheck}
-          label="REVIEWED TRADES"
+          label="COMPLETED REVIEWS"
           value={reviewedTradesCount}
           tone="warning"
           sub={o.total ? `${reviewedTradesCount} of ${o.total}` : "No trades yet"}
@@ -1098,7 +1152,7 @@ export function DashboardView() {
         <motion.div
           {...card}
           transition={{ ...motionTransition, delay: 0.04 }}
-          className="section-card rounded-2xl p-5 lg:col-span-5"
+          className="section-card relative flex h-full flex-col overflow-hidden rounded-2xl border border-white/[0.11] bg-[radial-gradient(ellipse_at_top,oklch(0.68_0.23_295/0.09),transparent_48%),linear-gradient(145deg,oklch(0.15_0.02_270/0.94),oklch(0.105_0.014_270/0.97))] p-5 shadow-[0_18px_44px_-34px_oklch(0_0_0/0.82)] before:pointer-events-none before:absolute before:inset-x-7 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-primary/60 before:to-transparent lg:col-span-5"
         >
           <div className="flex items-center justify-between">
             <h3 className="flex items-center gap-2 text-sm font-semibold">
@@ -1106,19 +1160,28 @@ export function DashboardView() {
             </h3>
             <Link
               to="/trades"
+              search={{ account: selectedAccountId === "ALL" ? undefined : selectedAccountId }}
               className="text-xs font-medium text-primary transition-colors duration-200 hover:text-primary-glow"
             >
               View all →
             </Link>
           </div>
-          <div className="mt-4 space-y-2">
+          <div
+            className={cn(
+              "mt-5",
+              recent.length === 0
+                ? "flex h-[230px]"
+                : "grid flex-1 grid-rows-4 divide-y divide-white/[0.06] border-y border-white/[0.06]",
+            )}
+          >
             {recent.length === 0 && (
-              <PremiumEmptyState
-                icon={History}
-                title="No trades logged yet"
-                description="Log your first trade to start building an execution record."
-                compact
-              />
+              <div className="flex h-full w-full items-center justify-center rounded-xl bg-white/[0.02] text-center ring-1 ring-white/[0.04]">
+                <div>
+                  <History className="mx-auto h-5 w-5 text-muted-foreground/60" aria-hidden="true" />
+                  <p className="mt-2 text-sm font-semibold">No trades logged yet</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Log your first trade to begin.</p>
+                </div>
+              </div>
             )}
             {recent.map((t, index) => {
               const displayR = recordedR(t.achieved_rr);
@@ -1139,12 +1202,12 @@ export function DashboardView() {
                   key={t.id}
                   type="button"
                   onClick={() => setReviewTrade({ id: t.id, number: tradeNumber })}
-                  className="grid w-full grid-cols-[minmax(0,1fr)_minmax(78px,92px)_minmax(68px,78px)] items-center gap-3 rounded-xl bg-white/[0.025] px-3 py-3 text-left ring-1 ring-white/[0.05] transition-all duration-200 hover:bg-white/[0.04] focus:outline-none focus-visible:bg-white/[0.05] focus-visible:ring-1 focus-visible:ring-primary/30"
+                  className="grid min-h-[60px] w-full grid-cols-[minmax(0,1fr)_74px_88px] items-center gap-3 px-1 py-3 text-left transition-colors duration-150 hover:bg-white/[0.025] focus:outline-none focus-visible:bg-white/[0.04] focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary/30"
                 >
-                  <div className="min-w-0 leading-tight">
-                    <div className="truncate text-sm font-medium">{t.instrument}</div>
-                    <div className="text-[11px] text-muted-foreground">
-                      {formatTradeDateOnly(t.trade_date)}
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium">{t.instrument?.trim() || "\u2014"}</div>
+                    <div className="mt-0.5 text-xs text-muted-foreground">
+                      {formatRecentTradeDate(t.trade_date)}
                     </div>
                   </div>
                   <span
@@ -1157,13 +1220,14 @@ export function DashboardView() {
                   </span>
                   <span
                     className={cn(
-                      "shrink-0 justify-self-end text-sm font-semibold tabular-nums",
+                      "w-full shrink-0 text-sm font-semibold tabular-nums",
+                      "justify-self-end text-right",
                       displayR != null && rr > 0 && "text-success",
                       displayR != null && rr < 0 && "text-destructive",
                       (displayR == null || rr === 0) && "text-muted-foreground",
                     )}
                   >
-                    {displayR != null ? (rr > 0 ? "+" : "") + rr.toFixed(2) + "R" : "—"}
+                    {displayR != null ? (rr > 0 ? "+" : "") + rr.toFixed(2) + "R" : "\u2014"}
                   </span>
                 </button>
               );
@@ -1174,9 +1238,9 @@ export function DashboardView() {
         <div className="lg:col-span-7">
           <MonthlyPerformanceTabbed
             monthChart={monthChart}
+            monthKey={ym}
             monthLabel={monthLabel}
-            currentMonthTradeCount={currentMonthCompleteRows.length}
-            loggedMonthCount={currentMonthLogged.length}
+            eligibility={monthEligibility}
           />
         </div>
       </div>
@@ -1184,8 +1248,7 @@ export function DashboardView() {
       {/* Overall Equity Curve */}
       <OverallEquitySection
         data={equityAll}
-        tradeCount={dashboardResultCompleteRows.length}
-        loggedCount={dashboardRows.length}
+        eligibility={equityEligibility}
       />
 
       <AnimatePresence>
@@ -1201,23 +1264,138 @@ export function DashboardView() {
   );
 }
 
+function formatRecentTradeDate(date: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!match) return date;
+  return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]))).toLocaleDateString(
+    "en-US",
+    { month: "short", day: "numeric", timeZone: "UTC" },
+  );
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+type DashboardPlotPoint = DashboardChartPoint & {
+  time: number;
+  positiveR?: number | null;
+  negativeR?: number | null;
+  isChartAnchor?: boolean;
+};
+
+type ChartDomain = { start: number; end: number };
+
+function chartTime(date: string): number {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!match) return Date.parse(date);
+  return Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+}
+
+function chartDate(time: number): string {
+  const date = new Date(time);
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(
+    date.getUTCDate(),
+  ).padStart(2, "0")}`;
+}
+
+function chartTimeTick(time: number): string {
+  return new Date(time).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+function monthChartDomain(monthKey: string): ChartDomain {
+  const [year, month] = monthKey.split("-").map(Number);
+  const start = Date.UTC(year, month - 1, 1);
+  return { start, end: Date.UTC(year, month, 0) };
+}
+
+function equityChartDomain(data: DashboardChartPoint[]): ChartDomain {
+  const start = chartTime(data[0]?.date ?? "");
+  const final = chartTime(data.at(-1)?.date ?? "");
+  if (!Number.isFinite(start)) return { start: 0, end: 1 };
+  return { start, end: Number.isFinite(final) && final > start ? final : start + DAY_MS };
+}
+
+function chartTimeTicks(domain: ChartDomain, count: number): number[] {
+  const span = domain.end - domain.start;
+  if (!(span > 0)) return [];
+  return Array.from({ length: count }, (_, index) => domain.start + (span * (index + 1)) / (count + 1));
+}
+
+function chartYDomain(data: DashboardChartPoint[]): [number, number] {
+  const values = [0, ...data.map((point) => point.cumulativeR)];
+  const minimum = Math.min(...values);
+  const maximum = Math.max(...values);
+  const padding = Math.max(0.25, (maximum - minimum) * 0.12);
+  return [minimum - padding, maximum + padding];
+}
+
+function dashboardPlotPoints(
+  data: DashboardChartPoint[],
+  domain: ChartDomain,
+  includeMonthAnchor = false,
+): DashboardPlotPoint[] {
+  const points: DashboardPlotPoint[] = data.map((point) => ({ ...point, time: chartTime(point.date) }));
+  if (includeMonthAnchor && (!points.length || points[0].time > domain.start)) {
+    points.unshift({
+      point: `${chartDate(domain.start)}|anchor`,
+      date: chartDate(domain.start),
+      cumulativeR: 0,
+      time: domain.start,
+      isChartAnchor: true,
+    });
+  }
+
+  return points.reduce<DashboardPlotPoint[]>((result, point, index) => {
+    const previous = result.at(-1);
+    if (
+      previous &&
+      previous.cumulativeR !== 0 &&
+      point.cumulativeR !== 0 &&
+      (previous.cumulativeR < 0) !== (point.cumulativeR < 0)
+    ) {
+      const progress = Math.abs(previous.cumulativeR) /
+        (Math.abs(previous.cumulativeR) + Math.abs(point.cumulativeR));
+      result.push({
+        point: `cross-${index}`,
+        date: chartDate(previous.time + (point.time - previous.time) * progress),
+        cumulativeR: 0,
+        time: previous.time + (point.time - previous.time) * progress,
+        isChartAnchor: true,
+      });
+    }
+    result.push(point);
+    return result;
+  }, []).map((point) => ({
+    ...point,
+    positiveR: point.cumulativeR >= 0 ? point.cumulativeR : null,
+    negativeR: point.cumulativeR <= 0 ? point.cumulativeR : null,
+  }));
+}
+
 function MonthlyPerformanceTabbed({
   monthChart,
+  monthKey,
   monthLabel,
-  currentMonthTradeCount,
-  loggedMonthCount,
+  eligibility,
 }: {
-  monthChart: { d: string; v: number }[];
+  monthChart: DashboardChartPoint[];
+  monthKey: string;
   monthLabel: string;
-  currentMonthTradeCount: number;
-  loggedMonthCount: number;
+  eligibility: ReturnType<typeof dashboardChartEligibility>;
 }) {
-  const missingCount = Math.max(0, 3 - currentMonthTradeCount);
+  const domain = monthChartDomain(monthKey);
+  const plotData = dashboardPlotPoints(monthChart, domain, true);
+  const xTicks = chartTimeTicks(domain, 4);
+  const yDomain = chartYDomain(monthChart);
+
   return (
     <motion.div
       {...card}
       transition={{ ...motionTransition, delay: 0.08 }}
-      className="section-card rounded-2xl p-5"
+      className="section-card relative overflow-hidden rounded-2xl border border-white/[0.11] bg-[radial-gradient(ellipse_at_top,oklch(0.68_0.23_295/0.09),transparent_48%),linear-gradient(145deg,oklch(0.15_0.02_270/0.94),oklch(0.105_0.014_270/0.97))] p-5 shadow-[0_18px_44px_-34px_oklch(0_0_0/0.82)] before:pointer-events-none before:absolute before:inset-x-7 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-primary/60 before:to-transparent"
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="flex items-center gap-2 text-sm font-semibold">
@@ -1228,55 +1406,85 @@ function MonthlyPerformanceTabbed({
         </span>
       </div>
 
-      <div className="mt-4 h-[260px]">
-        {currentMonthTradeCount < 3 ? (
-          loggedMonthCount >= 3 ? (
-            <DashboardLowDataState
-              title="Add trade result details"
-              description={`Add risk and profit/loss for ${missingCount} more trade${missingCount === 1 ? "" : "s"}.`}
-            />
-          ) : (
-            <DashboardLowDataState description="Log at least 3 trades to make monthly performance useful." />
-          )
+      <div className="mt-4 h-[250px]">
+        {!eligibility.eligible ? (
+          <DashboardLowDataState missingTradeCount={eligibility.missingTradeCount} />
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={monthChart} margin={{ top: 10, right: 8, left: -16, bottom: 8 }}>
+            <ComposedChart data={plotData} margin={{ top: 18, right: 16, left: 4, bottom: 12 }}>
               <defs>
-                <linearGradient id="dash-month" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="oklch(0.74 0.19 152)" stopOpacity={0.4} />
-                  <stop offset="100%" stopColor="oklch(0.74 0.19 152)" stopOpacity={0} />
+                <linearGradient id="dash-month-positive" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="oklch(0.74 0.19 152)" stopOpacity={0.26} />
+                  <stop offset="100%" stopColor="oklch(0.74 0.19 152)" stopOpacity={0.02} />
+                </linearGradient>
+                <linearGradient id="dash-month-negative" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="oklch(0.62 0.015 270)" stopOpacity={0.03} />
+                  <stop offset="100%" stopColor="oklch(0.62 0.015 270)" stopOpacity={0.24} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="oklch(1 0 0 / 0.04)" vertical={false} />
               <XAxis
-                dataKey="d"
+                type="number"
+                dataKey="time"
+                scale="time"
+                domain={[domain.start, domain.end]}
                 tick={{ fontSize: 10, fill: "oklch(0.55 0 0)" }}
                 axisLine={false}
                 tickLine={false}
                 tickMargin={8}
+                ticks={xTicks}
+                interval={0}
+                tickFormatter={chartTimeTick}
               />
               <YAxis
                 tick={{ fontSize: 10, fill: "oklch(0.5 0 0)" }}
                 axisLine={false}
                 tickLine={false}
+                width={54}
+                ticks={[yDomain[0], (yDomain[0] + yDomain[1]) / 2, yDomain[1]]}
+                allowDecimals
+                tickFormatter={formatRAxisTick}
+                domain={yDomain}
               />
-              <Tooltip
-                contentStyle={{
-                  background: "oklch(0.13 0.018 270)",
-                  border: "1px solid oklch(1 0 0 / 0.08)",
-                  borderRadius: 12,
-                  fontSize: 12,
-                }}
-                formatter={(v: number) => [`${v.toFixed(2)}R`, "Cum R"]}
+              <Tooltip content={<DashboardChartTooltip label="Cum R" />} />
+              <ReferenceLine y={0} stroke="oklch(1 0 0 / 0.18)" strokeDasharray="3 3" />
+              <Area
+                type="linear"
+                dataKey="positiveR"
+                stroke="transparent"
+                fill="url(#dash-month-positive)"
+                baseValue={0}
+                isAnimationActive={false}
               />
               <Area
-                type="monotone"
-                dataKey="v"
-                stroke="oklch(0.74 0.19 152)"
-                strokeWidth={2}
-                fill="url(#dash-month)"
+                type="linear"
+                dataKey="negativeR"
+                stroke="transparent"
+                fill="url(#dash-month-negative)"
+                baseValue={0}
+                isAnimationActive={false}
               />
-            </AreaChart>
+              <Line
+                type="linear"
+                dataKey="positiveR"
+                stroke="oklch(0.74 0.19 152)"
+                strokeWidth={2.25}
+                dot={false}
+                activeDot={false}
+                isAnimationActive={false}
+                connectNulls={false}
+              />
+              <Line
+                type="linear"
+                dataKey="negativeR"
+                stroke="oklch(0.62 0.015 270)"
+                strokeWidth={2.25}
+                dot={false}
+                activeDot={false}
+                isAnimationActive={false}
+                connectNulls={false}
+              />
+            </ComposedChart>
           </ResponsiveContainer>
         )}
       </div>
@@ -1284,21 +1492,45 @@ function MonthlyPerformanceTabbed({
   );
 }
 
+function DashboardChartTooltip({
+  active,
+  payload,
+  label,
+}: {
+  active?: boolean;
+  payload?: Array<{ payload?: DashboardChartPoint }>;
+  label: string;
+}) {
+  const point = payload?.find((entry) => entry.payload?.date)?.payload;
+  if (!active || !point) return null;
+  return (
+    <div className="rounded-xl border border-white/[0.08] bg-[oklch(0.13_0.018_270)] px-3 py-2 text-xs shadow-[0_8px_32px_-8px_oklch(0_0_0/0.5)]">
+      <div className="text-muted-foreground">{formatTradeDateOnly(point.date || label)}</div>
+      <div className="mt-1 font-semibold text-foreground">
+        {point.cumulativeR > 0 ? "+" : ""}
+        {point.cumulativeR.toFixed(2)}R
+      </div>
+    </div>
+  );
+}
+
 function OverallEquitySection({
   data,
-  tradeCount,
-  loggedCount,
+  eligibility,
 }: {
-  data: { d: string; v: number }[];
-  tradeCount: number;
-  loggedCount: number;
+  data: DashboardChartPoint[];
+  eligibility: ReturnType<typeof dashboardChartEligibility>;
 }) {
-  const missingCount = Math.max(0, 3 - tradeCount);
+  const domain = equityChartDomain(data);
+  const plotData = dashboardPlotPoints(data, domain);
+  const xTicks = chartTimeTicks(domain, 5);
+  const yDomain = chartYDomain(data);
+
   return (
     <motion.div
       {...card}
       transition={{ ...motionTransition, delay: 0.1 }}
-      className="mt-4 section-card rounded-2xl p-5"
+      className="relative mt-4 overflow-hidden rounded-2xl border border-white/[0.11] bg-[radial-gradient(ellipse_at_top,oklch(0.68_0.23_295/0.1),transparent_48%),linear-gradient(145deg,oklch(0.15_0.02_270/0.94),oklch(0.105_0.014_270/0.97))] p-5 shadow-[0_18px_44px_-34px_oklch(0_0_0/0.82)] before:pointer-events-none before:absolute before:inset-x-7 before:top-0 before:h-px before:bg-gradient-to-r before:from-transparent before:via-primary/65 before:to-transparent"
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="flex items-center gap-2 text-sm font-semibold">
@@ -1308,57 +1540,62 @@ function OverallEquitySection({
           All-time
         </span>
       </div>
-      <div className="mt-4 h-[320px]">
-        {tradeCount < 3 ? (
-          loggedCount >= 3 ? (
-            <DashboardLowDataState
-              title="Add trade result details"
-              description={`Add risk and profit/loss for ${missingCount} more trade${missingCount === 1 ? "" : "s"}.`}
-            />
-          ) : (
-            <DashboardLowDataState description="Log at least 3 trades to make the equity curve useful." />
-          )
+      <div className={cn("mt-4", eligibility.eligible ? "h-[320px]" : "h-[170px]")}>
+        {!eligibility.eligible ? (
+          <DashboardLowDataState missingTradeCount={eligibility.missingTradeCount} />
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={data} margin={{ top: 10, right: 8, left: -16, bottom: 8 }}>
+            <ComposedChart data={plotData} margin={{ top: 18, right: 16, left: 4, bottom: 12 }}>
               <defs>
                 <linearGradient id="dash-equity" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="oklch(0.68 0.23 295)" stopOpacity={0.45} />
-                  <stop offset="100%" stopColor="oklch(0.68 0.23 295)" stopOpacity={0} />
+                  <stop offset="0%" stopColor="oklch(0.68 0.23 295)" stopOpacity={0.38} />
+                  <stop offset="100%" stopColor="oklch(0.68 0.23 295)" stopOpacity={0.03} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="oklch(1 0 0 / 0.04)" vertical={false} />
               <XAxis
-                dataKey="d"
+                type="number"
+                dataKey="time"
+                scale="time"
+                domain={[domain.start, domain.end]}
                 tick={{ fontSize: 10, fill: "oklch(0.55 0 0)" }}
                 axisLine={false}
                 tickLine={false}
                 tickMargin={10}
+                ticks={xTicks}
+                interval={0}
+                tickFormatter={chartTimeTick}
               />
               <YAxis
                 tick={{ fontSize: 10, fill: "oklch(0.5 0 0)" }}
                 axisLine={false}
                 tickLine={false}
+                width={54}
+                ticks={[yDomain[0], (yDomain[0] + yDomain[1]) / 2, yDomain[1]]}
+                allowDecimals
+                tickFormatter={formatRAxisTick}
+                domain={yDomain}
               />
-              <Tooltip
-                contentStyle={{
-                  background: "oklch(0.13 0.018 270)",
-                  border: "1px solid oklch(1 0 0 / 0.08)",
-                  borderRadius: 12,
-                  fontSize: 12,
-                  boxShadow: "0 8px 32px -8px oklch(0 0 0 / 0.5)",
-                }}
-                formatter={(v: number) => [`${v.toFixed(2)}R`, "Equity"]}
-                labelStyle={{ color: "oklch(0.6 0 0)" }}
-              />
+              <Tooltip content={<DashboardChartTooltip label="Equity" />} />
+              <ReferenceLine y={0} stroke="oklch(1 0 0 / 0.14)" strokeDasharray="3 3" />
               <Area
-                type="monotone"
-                dataKey="v"
-                stroke="oklch(0.78 0.19 295)"
-                strokeWidth={2}
+                type="linear"
+                dataKey="cumulativeR"
+                stroke="transparent"
                 fill="url(#dash-equity)"
+                baseValue={yDomain[0]}
+                isAnimationActive={false}
               />
-            </AreaChart>
+              <Line
+                type="linear"
+                dataKey="cumulativeR"
+                stroke="oklch(0.78 0.19 295)"
+                strokeWidth={2.25}
+                dot={false}
+                activeDot={false}
+                isAnimationActive={false}
+              />
+            </ComposedChart>
           </ResponsiveContainer>
         )}
       </div>
@@ -1367,17 +1604,18 @@ function OverallEquitySection({
 }
 
 function DashboardLowDataState({
-  title = "More trades needed",
-  description,
+  missingTradeCount,
 }: {
-  title?: string;
-  description: string;
+  missingTradeCount: number;
 }) {
   return (
     <div className="flex h-full min-h-[160px] items-center justify-center rounded-xl bg-white/[0.02] px-5 text-center ring-1 ring-white/[0.04]">
-      <div>
-        <div className="text-sm font-semibold text-foreground">{title}</div>
-        <p className="mt-1 text-sm leading-5 text-muted-foreground">{description}</p>
+      <div className="flex flex-col items-center">
+        <Activity className="mb-2 h-5 w-5 text-muted-foreground/60" aria-hidden="true" />
+        <div className="text-sm font-semibold text-foreground">
+          {missingRTradeHeadline(missingTradeCount)}
+        </div>
+        <p className="mt-1 text-sm leading-5 text-muted-foreground">Add risk and P/L.</p>
       </div>
     </div>
   );

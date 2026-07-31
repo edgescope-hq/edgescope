@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { AppSidebar } from "@/components/app/sidebar";
 import { cancelAccountDeletion, getProfile } from "@/lib/account.functions";
+import { ActiveAccountProvider } from "@/components/active-account-provider";
 
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
@@ -24,6 +25,7 @@ export const Route = createFileRoute("/_authenticated")({
 });
 
 function AuthenticatedLayout() {
+  const { user } = Route.useRouteContext();
   const navigate = useNavigate();
   const location = useLocation();
   const qc = useQueryClient();
@@ -75,10 +77,12 @@ function AuthenticatedLayout() {
         className="pointer-events-none absolute right-[-18rem] top-[-16rem] h-[42rem] w-[42rem] rounded-full bg-primary/[0.035] blur-3xl"
         aria-hidden
       />
-      <AppSidebar />
-      <main className="relative min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
-        <Outlet />
-      </main>
+      <ActiveAccountProvider userId={user.id}>
+        <AppSidebar />
+        <main className="relative min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
+          <Outlet />
+        </main>
+      </ActiveAccountProvider>
       {deletionScheduledFor && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-4 backdrop-blur-md">
           <div className="glow-card w-full max-w-lg rounded-2xl p-6">

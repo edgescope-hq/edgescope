@@ -23,7 +23,7 @@ export type TradeRow = {
 const num = (v: number | string | null): number | null => {
   if (v == null) return null;
   const n = Number(v);
-  return isNaN(n) ? null : n;
+  return Number.isFinite(n) ? n : null;
 };
 
 function rrAvg(trades: TradeRow[]): number | null {
@@ -32,11 +32,16 @@ function rrAvg(trades: TradeRow[]): number | null {
   return rrs.reduce((a, b) => a + b, 0) / rrs.length;
 }
 
-function winRate(trades: TradeRow[]): number | null {
+export function computeWinRate(trades: { result: string | null }[]): number | null {
   const wins = trades.filter((t) => t.result === "win").length;
   const losses = trades.filter((t) => t.result === "loss").length;
-  const decided = wins + losses;
+  const breakeven = trades.filter((t) => t.result === "breakeven").length;
+  const decided = wins + losses + breakeven;
   return decided > 0 ? (wins / decided) * 100 : null;
+}
+
+function winRate(trades: TradeRow[]): number | null {
+  return computeWinRate(trades);
 }
 
 export type GroupStat = {
@@ -169,11 +174,48 @@ export function mostCommon(stats: GroupStat[]): GroupStat | null {
   return stats.length ? stats[0] : null;
 }
 
-const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+export const WEEKDAYS = [
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
+] as const;
+
+/**
+ * `trade_date` is a journal date, not an instant. Parse its calendar fields
+ * directly so browser/UTC conversion can never move a Saturday or Sunday trade.
+ */
+export function weekdayFromTradeDate(tradeDate: string): (typeof WEEKDAYS)[number] | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(tradeDate);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day)
+    return null;
+  const sundayFirst = [
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+  ] as const;
+  return sundayFirst[date.getDay()];
+}
 
 export function weekdayStats(trades: TradeRow[]): GroupStat[] {
-  const stats = groupBy(trades, (t) => WEEKDAYS[new Date(t.trade_date + "T00:00:00").getDay()]);
-  return stats.sort((a, b) => WEEKDAYS.indexOf(a.key) - WEEKDAYS.indexOf(b.key));
+  const stats = groupBy(trades, (t) => weekdayFromTradeDate(t.trade_date));
+  return stats.sort(
+    (a, b) =>
+      WEEKDAYS.indexOf(a.key as (typeof WEEKDAYS)[number]) -
+      WEEKDAYS.indexOf(b.key as (typeof WEEKDAYS)[number]),
+  );
 }
 
 export function monthStats(trades: TradeRow[]): GroupStat[] {

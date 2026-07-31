@@ -20,6 +20,8 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiAccountPurgeRouteImport } from './routes/api.account-purge'
 import { Route as AuthenticatedTradesRouteImport } from './routes/_authenticated/trades'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
+import { Route as AuthenticatedResetRouteImport } from './routes/_authenticated/reset'
+import { Route as AuthenticatedRecentreRouteImport } from './routes/_authenticated/recentre'
 import { Route as AuthenticatedPlaybookRouteImport } from './routes/_authenticated/playbook'
 import { Route as AuthenticatedPeopleRouteImport } from './routes/_authenticated/people'
 import { Route as AuthenticatedPaperRouteImport } from './routes/_authenticated/paper'
@@ -30,6 +32,8 @@ import { Route as AuthenticatedDashboardRouteImport } from './routes/_authentica
 import { Route as AuthenticatedCommunityRouteImport } from './routes/_authenticated/community'
 import { Route as AuthenticatedAnalyticsRouteImport } from './routes/_authenticated/analytics'
 import { Route as AuthenticatedAccountsRouteImport } from './routes/_authenticated/accounts'
+import { Route as AuthenticatedRecentreIndexRouteImport } from './routes/_authenticated/recentre.index'
+import { Route as AuthenticatedRecentreStateRouteImport } from './routes/_authenticated/recentre.$state'
 
 const TermsRoute = TermsRouteImport.update({
   id: '/terms',
@@ -85,6 +89,16 @@ const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedResetRoute = AuthenticatedResetRouteImport.update({
+  id: '/reset',
+  path: '/reset',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedRecentreRoute = AuthenticatedRecentreRouteImport.update({
+  id: '/recentre',
+  path: '/recentre',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedPlaybookRoute = AuthenticatedPlaybookRouteImport.update({
   id: '/playbook',
   path: '/playbook',
@@ -136,6 +150,18 @@ const AuthenticatedAccountsRoute = AuthenticatedAccountsRouteImport.update({
   path: '/accounts',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedRecentreIndexRoute =
+  AuthenticatedRecentreIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthenticatedRecentreRoute,
+  } as any)
+const AuthenticatedRecentreStateRoute =
+  AuthenticatedRecentreStateRouteImport.update({
+    id: '/$state',
+    path: '/$state',
+    getParentRoute: () => AuthenticatedRecentreRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -155,9 +181,13 @@ export interface FileRoutesByFullPath {
   '/paper': typeof AuthenticatedPaperRoute
   '/people': typeof AuthenticatedPeopleRoute
   '/playbook': typeof AuthenticatedPlaybookRoute
+  '/recentre': typeof AuthenticatedRecentreRouteWithChildren
+  '/reset': typeof AuthenticatedResetRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/trades': typeof AuthenticatedTradesRoute
   '/api/account-purge': typeof ApiAccountPurgeRoute
+  '/recentre/$state': typeof AuthenticatedRecentreStateRoute
+  '/recentre/': typeof AuthenticatedRecentreIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -177,9 +207,12 @@ export interface FileRoutesByTo {
   '/paper': typeof AuthenticatedPaperRoute
   '/people': typeof AuthenticatedPeopleRoute
   '/playbook': typeof AuthenticatedPlaybookRoute
+  '/reset': typeof AuthenticatedResetRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/trades': typeof AuthenticatedTradesRoute
   '/api/account-purge': typeof ApiAccountPurgeRoute
+  '/recentre/$state': typeof AuthenticatedRecentreStateRoute
+  '/recentre': typeof AuthenticatedRecentreIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -201,9 +234,13 @@ export interface FileRoutesById {
   '/_authenticated/paper': typeof AuthenticatedPaperRoute
   '/_authenticated/people': typeof AuthenticatedPeopleRoute
   '/_authenticated/playbook': typeof AuthenticatedPlaybookRoute
+  '/_authenticated/recentre': typeof AuthenticatedRecentreRouteWithChildren
+  '/_authenticated/reset': typeof AuthenticatedResetRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/trades': typeof AuthenticatedTradesRoute
   '/api/account-purge': typeof ApiAccountPurgeRoute
+  '/_authenticated/recentre/$state': typeof AuthenticatedRecentreStateRoute
+  '/_authenticated/recentre/': typeof AuthenticatedRecentreIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -225,9 +262,13 @@ export interface FileRouteTypes {
     | '/paper'
     | '/people'
     | '/playbook'
+    | '/recentre'
+    | '/reset'
     | '/settings'
     | '/trades'
     | '/api/account-purge'
+    | '/recentre/$state'
+    | '/recentre/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -247,9 +288,12 @@ export interface FileRouteTypes {
     | '/paper'
     | '/people'
     | '/playbook'
+    | '/reset'
     | '/settings'
     | '/trades'
     | '/api/account-purge'
+    | '/recentre/$state'
+    | '/recentre'
   id:
     | '__root__'
     | '/'
@@ -270,9 +314,13 @@ export interface FileRouteTypes {
     | '/_authenticated/paper'
     | '/_authenticated/people'
     | '/_authenticated/playbook'
+    | '/_authenticated/recentre'
+    | '/_authenticated/reset'
     | '/_authenticated/settings'
     | '/_authenticated/trades'
     | '/api/account-purge'
+    | '/_authenticated/recentre/$state'
+    | '/_authenticated/recentre/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -366,6 +414,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSettingsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/reset': {
+      id: '/_authenticated/reset'
+      path: '/reset'
+      fullPath: '/reset'
+      preLoaderRoute: typeof AuthenticatedResetRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/recentre': {
+      id: '/_authenticated/recentre'
+      path: '/recentre'
+      fullPath: '/recentre'
+      preLoaderRoute: typeof AuthenticatedRecentreRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/playbook': {
       id: '/_authenticated/playbook'
       path: '/playbook'
@@ -436,8 +498,37 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAccountsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/recentre/': {
+      id: '/_authenticated/recentre/'
+      path: '/'
+      fullPath: '/recentre/'
+      preLoaderRoute: typeof AuthenticatedRecentreIndexRouteImport
+      parentRoute: typeof AuthenticatedRecentreRoute
+    }
+    '/_authenticated/recentre/$state': {
+      id: '/_authenticated/recentre/$state'
+      path: '/$state'
+      fullPath: '/recentre/$state'
+      preLoaderRoute: typeof AuthenticatedRecentreStateRouteImport
+      parentRoute: typeof AuthenticatedRecentreRoute
+    }
   }
 }
+
+interface AuthenticatedRecentreRouteChildren {
+  AuthenticatedRecentreStateRoute: typeof AuthenticatedRecentreStateRoute
+  AuthenticatedRecentreIndexRoute: typeof AuthenticatedRecentreIndexRoute
+}
+
+const AuthenticatedRecentreRouteChildren: AuthenticatedRecentreRouteChildren = {
+  AuthenticatedRecentreStateRoute: AuthenticatedRecentreStateRoute,
+  AuthenticatedRecentreIndexRoute: AuthenticatedRecentreIndexRoute,
+}
+
+const AuthenticatedRecentreRouteWithChildren =
+  AuthenticatedRecentreRoute._addFileChildren(
+    AuthenticatedRecentreRouteChildren,
+  )
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedAccountsRoute: typeof AuthenticatedAccountsRoute
@@ -450,6 +541,8 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedPaperRoute: typeof AuthenticatedPaperRoute
   AuthenticatedPeopleRoute: typeof AuthenticatedPeopleRoute
   AuthenticatedPlaybookRoute: typeof AuthenticatedPlaybookRoute
+  AuthenticatedRecentreRoute: typeof AuthenticatedRecentreRouteWithChildren
+  AuthenticatedResetRoute: typeof AuthenticatedResetRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
   AuthenticatedTradesRoute: typeof AuthenticatedTradesRoute
 }
@@ -465,6 +558,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedPaperRoute: AuthenticatedPaperRoute,
   AuthenticatedPeopleRoute: AuthenticatedPeopleRoute,
   AuthenticatedPlaybookRoute: AuthenticatedPlaybookRoute,
+  AuthenticatedRecentreRoute: AuthenticatedRecentreRouteWithChildren,
+  AuthenticatedResetRoute: AuthenticatedResetRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
   AuthenticatedTradesRoute: AuthenticatedTradesRoute,
 }

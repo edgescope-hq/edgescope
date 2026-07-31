@@ -380,7 +380,19 @@ CREATE TABLE IF NOT EXISTS "public"."profiles" (
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "edge_id" "text" DEFAULT "public"."generate_edge_id"() NOT NULL,
-    "profile_completed" boolean DEFAULT false NOT NULL
+    "has_seen_intro" boolean DEFAULT false NOT NULL,
+    "profile_completed" boolean DEFAULT false NOT NULL,
+    "activation_guide_completed_at" timestamp with time zone,
+    "deletion_requested_at" timestamp with time zone,
+    "deletion_scheduled_for" timestamp with time zone,
+    "deletion_cancelled_at" timestamp with time zone,
+    "deletion_purge_state" "text" DEFAULT 'unclaimed'::"text" NOT NULL,
+    "deletion_purge_claim_token" "uuid",
+    "deletion_purge_claimed_at" timestamp with time zone,
+    "deletion_purge_attempt_count" integer DEFAULT 0 NOT NULL,
+    "deletion_purge_last_attempt_at" timestamp with time zone,
+    "deletion_purge_next_attempt_at" timestamp with time zone,
+    "deletion_purge_last_error_code" "text"
 );
 
 

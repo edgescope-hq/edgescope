@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { motion, AnimatePresence } from "framer-motion";
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useState, useMemo } from "react";
 import {
   Brain,
   BookOpen,
@@ -14,14 +14,11 @@ import {
   Lightbulb,
   ListChecks,
   NotebookPen,
-  Play,
   Plus,
   Radar,
   Save,
   Search,
   SearchCheck,
-  Sparkles,
-  Square,
   Target,
   Trash2,
   X,
@@ -44,7 +41,7 @@ export const Route = createFileRoute("/_authenticated/playbook")({
       { title: "Playbook — EdgeScope" },
       {
         name: "description",
-        content: "Your personal trading rules, notes, templates and mindset space.",
+        content: "Your personal trading rules, notes, and templates.",
       },
       { name: "robots", content: "noindex, nofollow" },
     ],
@@ -69,7 +66,7 @@ const TYPE_OPTIONS: { v: NoteType; l: string }[] = [
   { v: "review", l: "Review" },
 ];
 
-type Tab = "notes" | "templates" | "meditation";
+type Tab = "notes" | "templates";
 
 function PlaybookPage() {
   const [tab, setTab] = useState<Tab>("notes");
@@ -80,7 +77,7 @@ function PlaybookPage() {
         icon={BookOpen}
         eyebrow="Process"
         title="Playbook"
-        description="Your personal rules, notes, templates, and mindset space for quieter review."
+        description="Your personal rules, notes, and templates for structured review."
       />
 
       <div className="mt-6 inline-flex rounded-xl bg-white/[0.03] p-1 ring-1 ring-white/[0.06]">
@@ -88,7 +85,6 @@ function PlaybookPage() {
           [
             { v: "notes", l: "Notes", icon: NotebookPen },
             { v: "templates", l: "Templates", icon: FileText },
-            { v: "meditation", l: "Meditation", icon: Sparkles },
           ] as const
         ).map((t) => {
           const Icon = t.icon;
@@ -114,7 +110,6 @@ function PlaybookPage() {
       <div className="mt-6">
         {tab === "notes" && <NotesTab />}
         {tab === "templates" && <TemplatesTab />}
-        {tab === "meditation" && <MeditationTab />}
       </div>
     </PageShell>
   );
@@ -837,169 +832,4 @@ function TemplatesTab() {
       </Dialog>
     </div>
   );
-}
-
-/* ============ Meditation tab ============ */
-
-function MeditationTab() {
-  const [duration, setDuration] = useState<5 | 10>(5);
-  const [remaining, setRemaining] = useState<number>(5 * 60);
-  const [running, setRunning] = useState(false);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [streak, setStreak] = useState(0);
-  const [lastDay, setLastDay] = useState<string | null>(null);
-
-  useEffect(() => {
-    try {
-      const s = Number(localStorage.getItem("edgescope.meditation.streak") ?? "0");
-      const d = localStorage.getItem("edgescope.meditation.lastDay");
-      setStreak(Number.isFinite(s) ? s : 0);
-      setLastDay(d);
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!running) setRemaining(duration * 60);
-  }, [duration, running]);
-
-  useEffect(() => {
-    if (!running) return;
-    intervalRef.current = setInterval(() => {
-      setRemaining((r) => {
-        if (r <= 1) {
-          if (intervalRef.current) clearInterval(intervalRef.current);
-          setRunning(false);
-          playDoneSound();
-          const today = new Date().toISOString().slice(0, 10);
-          const yesterday = (() => {
-            const d = new Date();
-            d.setDate(d.getDate() - 1);
-            return d.toISOString().slice(0, 10);
-          })();
-          let newStreak = 1;
-          if (lastDay === today) newStreak = streak;
-          else if (lastDay === yesterday) newStreak = streak + 1;
-          try {
-            localStorage.setItem("edgescope.meditation.streak", String(newStreak));
-            localStorage.setItem("edgescope.meditation.lastDay", today);
-          } catch {
-            /* ignore */
-          }
-          setStreak(newStreak);
-          setLastDay(today);
-          toast.success("Meditation complete — welcome back.");
-          return 0;
-        }
-        return r - 1;
-      });
-    }, 1000);
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, [running, streak, lastDay]);
-
-  const mm = String(Math.floor(remaining / 60)).padStart(2, "0");
-  const ss = String(remaining % 60).padStart(2, "0");
-
-  return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
-      <div className="glow-card rounded-2xl p-6">
-        <h3 className="text-base font-bold tracking-tight">Daily Meditation</h3>
-        <p className="mt-1 text-xs text-muted-foreground">
-          A short, focused pause before you trade. Calm mind, clean decisions.
-        </p>
-
-        <div className="mt-6 grid place-items-center rounded-2xl bg-white/[0.02] border border-white/[0.04] py-8">
-          <div className="font-display text-5xl font-bold tabular-nums tracking-tight">
-            {mm}:{ss}
-          </div>
-          <div className="mt-1 text-[9px] uppercase tracking-[0.2em] text-muted-foreground">
-            {running ? "Breathe…" : "Ready"}
-          </div>
-        </div>
-
-        <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-          <div className="inline-flex rounded-lg bg-white/[0.04] p-1 ring-1 ring-white/[0.06]">
-            {([5, 10] as const).map((d) => (
-              <button
-                key={d}
-                disabled={running}
-                onClick={() => setDuration(d)}
-                className={cn(
-                  "rounded-md px-3.5 py-1.5 text-xs font-semibold transition-all duration-200 disabled:opacity-40",
-                  duration === d
-                    ? "bg-primary/20 text-foreground"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {d} min
-              </button>
-            ))}
-          </div>
-          {running ? (
-            <button
-              onClick={() => {
-                setRunning(false);
-                setRemaining(duration * 60);
-              }}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-destructive/[0.045] px-4 py-2 text-xs font-semibold text-destructive/78 ring-1 ring-destructive/[0.08] hover:bg-destructive/[0.07] hover:text-destructive/85"
-            >
-              <Square className="h-3.5 w-3.5" /> Stop
-            </button>
-          ) : (
-            <button
-              onClick={() => {
-                setRemaining(duration * 60);
-                setRunning(true);
-              }}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground shadow-[var(--shadow-glow)] hover:brightness-110"
-            >
-              <Play className="h-3.5 w-3.5" /> Start
-            </button>
-          )}
-        </div>
-      </div>
-
-      <div className="glow-card rounded-2xl p-6">
-        <div className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground/75">
-          Daily streak
-        </div>
-        <div className="mt-2 flex items-baseline gap-2">
-          <div className="text-4xl font-bold tabular-nums text-primary">{streak}</div>
-          <div className="text-xs text-muted-foreground">day{streak === 1 ? "" : "s"}</div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function playDoneSound() {
-  try {
-    const Ctx =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    if (!Ctx) return;
-    const ctx = new Ctx();
-    const playTone = (freq: number, start: number, dur: number) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.frequency.value = freq;
-      osc.type = "sine";
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      const t0 = ctx.currentTime + start;
-      gain.gain.setValueAtTime(0.0001, t0);
-      gain.gain.exponentialRampToValueAtTime(0.25, t0 + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-      osc.start(t0);
-      osc.stop(t0 + dur + 0.05);
-    };
-    playTone(528, 0, 0.6);
-    playTone(660, 0.35, 0.8);
-    setTimeout(() => ctx.close().catch(() => {}), 1800);
-  } catch {
-    /* no-op */
-  }
 }

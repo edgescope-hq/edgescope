@@ -1,8 +1,31 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { joinUserStoragePath } from "@/lib/screenshot-storage";
 
 const BATCH_SIZE = 25;
+const CLAIM_LEASE_SECONDS = 15 * 60;
+const LIST_PAGE_SIZE = 100;
+const REMOVE_BATCH_SIZE = 100;
 const SCREENSHOT_BUCKET = "trade-screenshots";
+
+type PurgeFailureCode =
+  | "storage_list_failed"
+  | "storage_path_invalid"
+  | "storage_delete_failed"
+  | "storage_delete_incomplete"
+  | "claim_finalize_failed"
+  | "auth_delete_failed"
+  | "unknown";
+
+class PurgeFailure extends Error {
+  constructor(readonly code: PurgeFailureCode) {
+    super(code);
+  }
+}
+
+function failureCode(error: unknown): PurgeFailureCode {
+  return error instanceof PurgeFailure ? error.code : "unknown";
+}
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -12,6 +35,53 @@ function json(body: unknown, status = 200) {
       "Cache-Control": "no-store",
     },
   });
+}
+
+async function listAllUserScreenshotObjects(userId: string): Promise<string[]> {
+  const bucket = supabaseAdmin.storage.from(SCREENSHOT_BUCKET);
+  const pendingDirectories = [userId];
+  const seenDirectories = new Set<string>();
+  const objectPaths: string[] = [];
+
+  while (pendingDirectories.length > 0) {
+    const directory = pendingDirectories.shift()!;
+    if (seenDirectories.has(directory)) continue;
+    seenDirectories.add(directory);
+
+    for (let offset = 0; ; offset += LIST_PAGE_SIZE) {
+      const { data: entries, error } = await bucket.list(directory, {
+        limit: LIST_PAGE_SIZE,
+        offset,
+        sortBy: { column: "name", order: "asc" },
+      });
+      if (error) throw new PurgeFailure("storage_list_failed");
+
+      for (const entry of entries ?? []) {
+        const childPath = joinUserStoragePath(directory, entry.name, userId);
+        if (!childPath) throw new PurgeFailure("storage_path_invalid");
+
+        if (entry.id) objectPaths.push(childPath);
+        else pendingDirectories.push(childPath);
+      }
+
+      if (!entries || entries.length < LIST_PAGE_SIZE) break;
+    }
+  }
+
+  return objectPaths;
+}
+
+async function deleteAllUserScreenshotObjects(userId: string): Promise<void> {
+  const bucket = supabaseAdmin.storage.from(SCREENSHOT_BUCKET);
+  const paths = await listAllUserScreenshotObjects(userId);
+
+  for (let index = 0; index < paths.length; index += REMOVE_BATCH_SIZE) {
+    const { error } = await bucket.remove(paths.slice(index, index + REMOVE_BATCH_SIZE));
+    if (error) throw new PurgeFailure("storage_delete_failed");
+  }
+
+  const remaining = await listAllUserScreenshotObjects(userId);
+  if (remaining.length > 0) throw new PurgeFailure("storage_delete_incomplete");
 }
 
 export const Route = createFileRoute("/api/account-purge")({
@@ -25,69 +95,74 @@ export const Route = createFileRoute("/api/account-purge")({
           return json({ error: "Unauthorized" }, 401);
         }
 
-        const now = new Date().toISOString();
+        const summary = {
+          claimed: 0,
+          processed: 0,
+          succeeded: 0,
+          failed: 0,
+          skipped: 0,
+        };
 
-        const { data: dueProfiles, error: dueProfilesError } = await supabaseAdmin
-          .from("profiles")
-          .select("id")
-          .not("deletion_requested_at", "is", null)
-          .not("deletion_scheduled_for", "is", null)
-          .is("deletion_cancelled_at", null)
-          .lte("deletion_scheduled_for", now)
-          .order("deletion_scheduled_for", { ascending: true })
-          .limit(BATCH_SIZE);
+        const { data: claims, error: claimError } = await supabaseAdmin.rpc(
+          "claim_due_account_purges",
+          { p_limit: BATCH_SIZE, p_lease_seconds: CLAIM_LEASE_SECONDS },
+        );
 
-        if (dueProfilesError) {
-          console.error("[account-purge] Failed to load due profiles", dueProfilesError);
-          return json({ error: "Failed to load due accounts" }, 500);
+        if (claimError) {
+          console.error("[account-purge] Failed to claim due accounts", { code: "claim_failed" });
+          return json({ error: "claim_failed", ...summary }, 500);
         }
 
-        const deleted: string[] = [];
-        const failed: Array<{ userId: string; reason: string }> = [];
+        summary.claimed = claims?.length ?? 0;
 
-        for (const profile of dueProfiles ?? []) {
-          const userId = profile.id;
+        for (const claim of claims ?? []) {
+          summary.processed += 1;
 
           try {
-            const { data: screenshots, error: screenshotsError } = await supabaseAdmin
-              .from("trade_screenshots")
-              .select("storage_path")
-              .eq("user_id", userId);
-
-            if (screenshotsError) throw screenshotsError;
-
-            const paths = (screenshots ?? [])
-              .map((row) => row.storage_path)
-              .filter((path): path is string => Boolean(path));
-
-            if (paths.length > 0) {
-              const { error: storageError } = await supabaseAdmin.storage
-                .from(SCREENSHOT_BUCKET)
-                .remove(paths);
-
-              if (storageError) throw storageError;
+            const { data: mayStartDeleting, error: beginError } = await supabaseAdmin.rpc(
+              "begin_account_purge_deletion",
+              { p_user_id: claim.user_id, p_claim_token: claim.claim_token },
+            );
+            if (beginError) throw new PurgeFailure("claim_finalize_failed");
+            if (!mayStartDeleting) {
+              summary.skipped += 1;
+              continue;
             }
 
-            const { error: deleteUserError } = await supabaseAdmin.auth.admin.deleteUser(userId);
+            await deleteAllUserScreenshotObjects(claim.user_id);
 
-            if (deleteUserError) throw deleteUserError;
+            const { data: mayDelete, error: validateError } = await supabaseAdmin.rpc(
+              "validate_account_purge_claim",
+              { p_user_id: claim.user_id, p_claim_token: claim.claim_token },
+            );
+            if (validateError || !mayDelete) throw new PurgeFailure("claim_finalize_failed");
 
-            deleted.push(userId);
+            const { error: deleteUserError } = await supabaseAdmin.auth.admin.deleteUser(
+              claim.user_id,
+            );
+            if (deleteUserError) throw new PurgeFailure("auth_delete_failed");
+
+            summary.succeeded += 1;
           } catch (error) {
-            const reason = error instanceof Error ? error.message : "Unknown purge failure";
-            console.error("[account-purge] Failed to purge user", {
-              userId,
-              reason,
+            const code = failureCode(error);
+            const { data: retryRecorded, error: retryError } = await supabaseAdmin.rpc(
+              "mark_account_purge_failure",
+              {
+                p_user_id: claim.user_id,
+                p_claim_token: claim.claim_token,
+                p_error_code: code,
+              },
+            );
+
+            console.error("[account-purge] Account purge failed", {
+              code,
+              retryRecorded: !retryError && retryRecorded === true,
             });
-            failed.push({ userId, reason });
+            summary.failed += 1;
           }
         }
 
-        return json({
-          processed: dueProfiles?.length ?? 0,
-          deleted: deleted.length,
-          failed: failed.length,
-        });
+        return json(summary, summary.failed > 0 ? 500 : 200);
       },
     },
   },

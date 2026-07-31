@@ -20,9 +20,8 @@ import {
 import logo from "@/assets/edgescope-logo.png.asset.json";
 import logoHorizontal from "@/assets/edgescope-horizontal.png.asset.json";
 import { Premium3DBackground } from "@/components/landing/premium-3d-background";
-import { getPublicSiteUrl } from "@/lib/site-url";
 
-const SITE_URL = getPublicSiteUrl();
+const SITE_URL = import.meta.env.VITE_SITE_URL || process.env.SITE_URL || "https://your-domain.com";
 const PAGE_TITLE = "EdgeScope - Trading Journal & Analytics";
 const PAGE_DESCRIPTION =
   "EdgeScope helps traders log trades, review execution, track behavior, and uncover evidence-backed patterns from their own journal data.";
@@ -37,7 +36,7 @@ export const Route = createFileRoute("/")({
       { name: "robots", content: "index, follow" },
       { property: "og:title", content: PAGE_TITLE },
       { property: "og:description", content: PAGE_DESCRIPTION },
-      { property: "og:url", content: `${SITE_URL}/` },
+      { property: "og:url", content: SITE_URL + "/" },
       { property: "og:type", content: "website" },
       { property: "og:image", content: OG_IMAGE },
       { name: "twitter:card", content: "summary_large_image" },
@@ -45,7 +44,7 @@ export const Route = createFileRoute("/")({
       { name: "twitter:description", content: PAGE_DESCRIPTION },
       { name: "twitter:image", content: OG_IMAGE },
     ],
-    links: [{ rel: "canonical", href: `${SITE_URL}/` }],
+    links: [{ rel: "canonical", href: SITE_URL + "/" }],
     scripts: [
       {
         type: "application/ld+json",

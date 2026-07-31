@@ -12,6 +12,7 @@ GRANT ALL ON public.community_trade_shares TO service_role;
 
 ALTER TABLE public.community_trade_shares ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "trade_shares_select" ON public.community_trade_shares;
 CREATE POLICY "trade_shares_select" ON public.community_trade_shares FOR SELECT TO authenticated
 USING (
   user_id = auth.uid()
@@ -21,6 +22,7 @@ USING (
   )
 );
 
+DROP POLICY IF EXISTS "trade_shares_insert" ON public.community_trade_shares;
 CREATE POLICY "trade_shares_insert" ON public.community_trade_shares FOR INSERT TO authenticated
 WITH CHECK (
   user_id = auth.uid()
@@ -34,6 +36,7 @@ WITH CHECK (
   )
 );
 
+DROP POLICY IF EXISTS "trade_shares_delete" ON public.community_trade_shares;
 CREATE POLICY "trade_shares_delete" ON public.community_trade_shares FOR DELETE TO authenticated
 USING (
   user_id = auth.uid()

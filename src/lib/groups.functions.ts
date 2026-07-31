@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { safeError } from "@/lib/server-errors";
 import { checkRateLimitOrThrow } from "@/lib/rate-limiter";
+import { isOwnedScreenshotPath } from "@/lib/screenshot-storage";
 
 // ============ Profile / Edge ID ============
 
@@ -364,28 +365,16 @@ export const respondInvitation = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) => z.object({ id: z.string().uuid(), accept: z.boolean() }).parse(d))
   .handler(async ({ data, context }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: inv, error } = await supabaseAdmin
-      .from("community_group_invitations")
-      .select("*")
-      .eq("id", data.id)
-      .maybeSingle();
+    const { data: responseRows, error } = await context.supabase.rpc(
+      "respond_community_group_invitation",
+      { p_invitation_id: data.id, p_accept: data.accept },
+    );
     if (error) throw safeError(error);
-    if (!inv) throw new Error("Invitation not found");
-    if (inv.invitee_id !== context.userId) throw new Error("Not your invitation");
-    if (inv.status !== "pending") throw new Error("Invitation already responded to");
-
-    const status = data.accept ? "accepted" : "declined";
-    const { error: uErr } = await supabaseAdmin
-      .from("community_group_invitations")
-      .update({ status, responded_at: new Date().toISOString() })
-      .eq("id", data.id);
-    if (uErr) throw safeError(uErr);
+    const response = responseRows?.[0];
+    if (!response) throw new Error("Invitation could not be updated");
 
     if (data.accept) {
-      await supabaseAdmin
-        .from("community_group_members")
-        .insert({ group_id: inv.group_id, user_id: context.userId, role: "member" });
+      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
       // notify inviter
       const { data: prof } = await supabaseAdmin
         .from("profiles")
@@ -393,10 +382,10 @@ export const respondInvitation = createServerFn({ method: "POST" })
         .eq("id", context.userId)
         .maybeSingle();
       await supabaseAdmin.from("community_notifications").insert({
-        user_id: inv.inviter_id,
+        user_id: response.inviter_id,
         type: "invite_accepted",
         payload: {
-          group_id: inv.group_id,
+          group_id: response.group_id,
           invitee_edge_id: prof?.edge_id ?? "",
           invitee_display: prof?.display_name ?? prof?.username ?? "Trader",
         },
@@ -409,12 +398,9 @@ export const cancelInvitation = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
-    const { error } = await context.supabase
-      .from("community_group_invitations")
-      .update({ status: "cancelled", responded_at: new Date().toISOString() })
-      .eq("id", data.id)
-      .eq("inviter_id", context.userId)
-      .eq("status", "pending");
+    const { error } = await context.supabase.rpc("cancel_community_group_invitation", {
+      p_invitation_id: data.id,
+    });
     if (error) throw safeError(error);
     return { ok: true };
   });
@@ -425,7 +411,6 @@ export type GroupTrade = {
   id: string;
   trade_date: string;
   instrument: string;
-  direction: "long" | "short" | null;
   result: "win" | "loss" | "breakeven" | null;
   reasoning: string | null;
   user_id: string;
@@ -460,7 +445,7 @@ export const listGroupTrades = createServerFn({ method: "POST" })
 
     const { data: trades, error } = await supabaseAdmin
       .from("trades")
-      .select("id, trade_date, instrument, direction, result, reasoning, user_id, created_at")
+      .select("id, trade_date, instrument, result, reasoning, user_id, created_at")
       .in("id", sharedTradeIds)
       .in("user_id", memberIds)
       .order("trade_date", { ascending: false })
@@ -479,7 +464,7 @@ export const listGroupTrades = createServerFn({ method: "POST" })
         .in("id", userIds),
       supabaseAdmin
         .from("trade_screenshots")
-        .select("id, trade_id, user_id, storage_path")
+        .select("id, trade_id, user_id, storage_path, caption")
         .in("trade_id", tradeIds),
       supabaseAdmin
         .from("community_trade_comments")
@@ -490,7 +475,12 @@ export const listGroupTrades = createServerFn({ method: "POST" })
 
     const pMap = new Map((profs ?? []).map((p) => [p.id, p]));
     const ownerByTrade = new Map(trades.map((t) => [t.id, t.user_id]));
-    const safeShots = (shots ?? []).filter((s) => ownerByTrade.get(s.trade_id) === s.user_id);
+    const safeShots = (shots ?? []).filter(
+      (s) =>
+        ownerByTrade.get(s.trade_id) === s.user_id &&
+        s.caption === "LTF" &&
+        isOwnedScreenshotPath(s.storage_path, s.user_id, s.trade_id),
+    );
     const signedByPath = new Map<string, string>();
     await Promise.all(
       safeShots.map(async (s) => {
@@ -513,8 +503,7 @@ export const listGroupTrades = createServerFn({ method: "POST" })
       return {
         id: t.id,
         trade_date: t.trade_date,
-        instrument: t.instrument,
-        direction: (t.direction as "long" | "short" | null) ?? null,
+        instrument: t.instrument ?? "—",
         result: (t.result as "win" | "loss" | "breakeven" | null) ?? null,
         reasoning: reasoningByTrade.get(t.id) ? (t.reasoning ?? null) : null,
         user_id: t.user_id,
@@ -877,7 +866,7 @@ export const shareTradeToGroups = createServerFn({ method: "POST" })
       .object({
         tradeId: z.string().uuid(),
         groupIds: z.array(z.string().uuid()),
-        includeReasoning: z.boolean().default(false),
+        includeReasoning: z.boolean().default(true),
       })
       .parse(d),
   )
@@ -965,16 +954,6 @@ export const shareTradeToGroups = createServerFn({ method: "POST" })
           }
         }
       }
-    }
-
-    if (data.groupIds.length) {
-      const { error: updateErr } = await supabaseAdmin
-        .from("community_trade_shares")
-        .update({ include_reasoning: data.includeReasoning })
-        .eq("trade_id", data.tradeId)
-        .eq("user_id", context.userId)
-        .in("group_id", data.groupIds);
-      if (updateErr) throw safeError(updateErr);
     }
 
     return { ok: true };

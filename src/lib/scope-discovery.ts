@@ -101,6 +101,8 @@ type ScopeTrade = {
   rrBucket: string | null;
   inKillzone: boolean | null;
   riskAmount: number | null;
+  riskPct: number | null;
+  accountId: string | null;
   mistakeTags: string[];
   reasoningLength: number;
   tradeDate: string;
@@ -112,6 +114,18 @@ function toScopeTrade(t: DbTrade): ScopeTrade {
   const plannedRR = parsePlannedRR(t.planned_rr);
   const timeMsRaw = t.trade_time ? new Date(`${t.trade_date}T${t.trade_time}`).getTime() : NaN;
   const risk = t.risk_amount == null || t.risk_amount === "" ? NaN : Number(t.risk_amount);
+  const rpRaw =
+    t.risk_percentage == null || t.risk_percentage === "" ? NaN : Number(t.risk_percentage);
+  const riskPct =
+    Number.isFinite(rpRaw) && rpRaw > 0
+      ? rpRaw
+      : Number.isFinite(risk) && risk > 0
+        ? (() => {
+            const size =
+              t.account_size == null || t.account_size === "" ? NaN : Number(t.account_size);
+            return Number.isFinite(size) && size > 0 ? (risk / size) * 100 : NaN;
+          })()
+        : NaN;
   return {
     id: t.id,
     result: t.result === "win" || t.result === "loss" || t.result === "breakeven" ? t.result : null,
@@ -124,6 +138,8 @@ function toScopeTrade(t: DbTrade): ScopeTrade {
     rrBucket: rrBucketLabel(plannedRR),
     inKillzone: typeof t.in_killzone === "boolean" ? t.in_killzone : null,
     riskAmount: Number.isFinite(risk) ? risk : null,
+    riskPct: Number.isFinite(riskPct) ? riskPct : null,
+    accountId: t.account_id ?? null,
     mistakeTags: (t.mistake_tags ?? []).map((tag) => tag.trim()).filter(Boolean),
     reasoningLength: (t.reasoning ?? "").trim().length,
     tradeDate: t.trade_date,
@@ -143,7 +159,8 @@ type SampleStats = {
 function statsOf(trades: ScopeTrade[]): SampleStats {
   const wins = trades.filter((t) => t.result === "win").length;
   const losses = trades.filter((t) => t.result === "loss").length;
-  const decided = wins + losses;
+  const breakeven = trades.filter((t) => t.result === "breakeven").length;
+  const decided = wins + losses + breakeven;
   const rs = trades.map((t) => t.r).filter((r): r is number => r != null);
   return {
     sampleSize: trades.length,
@@ -510,24 +527,32 @@ function scanRiskBehavior(trades: ScopeTrade[]): ScopeDiscovery[] {
     }
   }
 
-  // 3) Oversized risk vs normal risk (needs risk_amount on enough trades).
-  const riskKnown = trades.filter((t) => t.riskAmount != null && t.riskAmount! > 0);
-  if (riskKnown.length >= 30) {
-    const sortedRisk = riskKnown.map((t) => t.riskAmount!).sort((a, b) => a - b);
-    const median = sortedRisk[Math.floor(sortedRisk.length / 2)];
+  // 3) Oversized risk vs normal risk — normalized by account, within same account only.
+  const riskPctKnown = trades.filter((t) => t.riskPct != null && t.riskPct! > 0);
+  const riskByAccount = new Map<string | null, ScopeTrade[]>();
+  for (const t of riskPctKnown) {
+    const key = t.accountId ?? "_none";
+    if (!riskByAccount.has(key)) riskByAccount.set(key, []);
+    riskByAccount.get(key)!.push(t);
+  }
+  for (const [accountKey, accountTrades] of riskByAccount) {
+    if (accountTrades.length < 20) continue;
+    const sortedPct = accountTrades.map((t) => t.riskPct!).sort((a, b) => a - b);
+    const median = sortedPct[Math.floor(sortedPct.length / 2)];
     if (median > 0) {
-      const oversized = riskKnown.filter((t) => t.riskAmount! > median * 1.5);
-      const normal = riskKnown.filter((t) => t.riskAmount! <= median * 1.5);
+      const oversized = accountTrades.filter((t) => t.riskPct! > median * 1.5);
+      const normal = accountTrades.filter((t) => t.riskPct! <= median * 1.5);
+      if (oversized.length < 10) continue;
       const discovery = evaluateComparison({
-        id: "risk:oversized-risk",
+        id: `risk:oversized-risk:${accountKey}`,
         category: "risk",
         matching: oversized,
         baselineTrades: normal,
-        baselineLabel: "Your normal-risk trades",
-        conditionChips: [{ key: "risk", label: "Risk above 1.5× your median" }],
-        conditionLabel: "Oversized-risk trades",
+        baselineLabel: "Your normal %-risk trades",
+        conditionChips: [{ key: "risk", label: "Risk% above 1.5× your median" }],
+        conditionLabel: "Oversized %-risk trades",
         factorCount: 2,
-        fieldCompleteness: riskKnown.length / reviewedCount,
+        fieldCompleteness: accountTrades.length / reviewedCount,
       });
       if (discovery && discovery.direction === "negative") discoveries.push(discovery);
     }

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
-  LayoutDashboard,
+  PanelsTopLeft,
   LineChart,
   CandlestickChart,
   BarChart3,
@@ -13,6 +13,7 @@ import {
   X,
   UserCog,
   Wallet,
+  RotateCcw,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -24,13 +25,13 @@ import { cn } from "@/lib/utils";
 type NavItem = {
   to: string;
   label: string;
-  icon: typeof LayoutDashboard;
+  icon: typeof PanelsTopLeft;
   disabled?: boolean;
   badge?: string;
 };
 
 const primaryNav: NavItem[] = [
-  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/dashboard", label: "Dashboard", icon: PanelsTopLeft },
   { to: "/trades", label: "My Trades", icon: LineChart },
   { to: "/analytics", label: "Analytics", icon: BarChart3 },
   { to: "/playbook", label: "Playbook", icon: BookOpen },
@@ -40,6 +41,7 @@ const primaryNav: NavItem[] = [
 
 const secondaryBaseNav: NavItem[] = [
   { to: "/community", label: "Community", icon: Users },
+  { to: "/recentre", label: "Recentre", icon: RotateCcw },
   { to: "/accounts", label: "Accounts", icon: Wallet },
 ];
 
@@ -97,7 +99,7 @@ export function AppSidebar() {
     return (
       <Link
         key={item.to}
-        to={item.to}
+        to={item.to} hash=""
         className={cn(
           "group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-all duration-200",
           active
@@ -183,3 +185,4 @@ export function AppSidebar() {
     </>
   );
 }
+
