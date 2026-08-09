@@ -1,7 +1,7 @@
 import { motion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent } from "react";
-import { X, AlertTriangle, CheckCircle2, Check } from "lucide-react";
+import { X, AlertTriangle, Check } from "lucide-react";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -142,14 +142,12 @@ export function TradeFormModal({
   nextNum,
   onClose,
   onSaved,
-  onReviewNow,
   editing,
 }: {
   taxonomy?: Taxonomy;
   nextNum: number;
   onClose: () => void;
   onSaved: (savedId?: string) => void;
-  onReviewNow?: (savedId: string) => void;
   editing?: DbTrade;
 }) {
   const qc = useQueryClient();
@@ -241,8 +239,6 @@ export function TradeFormModal({
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [attemptedSubmit, setAttemptedSubmit] = useState(false);
-  const [savedTradeId, setSavedTradeId] = useState<string | null>(null);
-  const [shareFailure, setShareFailure] = useState<string | null>(null);
   useUnsavedChanges(dirty);
   const markDirty = () => {
     if (!dirty) setDirty(true);
@@ -608,7 +604,6 @@ export function TradeFormModal({
         toast.error(`Trade saved. Screenshots were not uploaded: ${result.screenshotError}`);
       }
       if (result.shareError) {
-        setShareFailure(result.shareError);
         toast.error(`Trade saved privately. Sharing failed: ${result.shareError}`);
       }
       if (editing) {
@@ -622,7 +617,6 @@ export function TradeFormModal({
         return;
       }
       if (!result.shareError) toast.success("Trade logged successfully.");
-      setSavedTradeId(savedId ?? null);
       onSaved(savedId);
       onClose();
     },
@@ -630,25 +624,6 @@ export function TradeFormModal({
       toast.error(e.message ?? "Failed to save trade");
     },
     onSettled: () => setSaving(false),
-  });
-
-  const retryShare = useMutation({
-    mutationFn: async () => {
-      if (!savedTradeId || sharedGroupIds.length === 0) return;
-      await shareTradeFn({
-        data: { tradeId: savedTradeId, groupIds: sharedGroupIds, includeReasoning: true },
-      });
-    },
-    onSuccess: () => {
-      setShareFailure(null);
-      qc.invalidateQueries({ queryKey: ["shared-trades-count"] });
-      qc.invalidateQueries({ queryKey: ["trade-shares", savedTradeId] });
-      toast.success("Trade shared");
-    },
-    onError: (error: Error) => {
-      setShareFailure(error.message);
-      toast.error(`Sharing failed: ${error.message}`);
-    },
   });
 
   // Guardrail check: warn when risk amount exceeds account's Max Risk Per Trade %.
@@ -840,79 +815,6 @@ export function TradeFormModal({
   const inputClass =
     "mt-1.5 w-full rounded-xl bg-white/[0.04] px-3 py-2.5 text-sm ring-1 ring-white/[0.06] transition-all duration-200 placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/40";
   const labelClass = "text-[10px] font-semibold tracking-[0.16em] text-muted-foreground";
-
-  if (!editing && savedTradeId !== null) {
-    const closeSuccess = () => {
-      onSaved(savedTradeId);
-      onClose();
-    };
-    const reviewNow = () => {
-      if (!savedTradeId) return;
-      onSaved(savedTradeId);
-      onReviewNow?.(savedTradeId);
-      onClose();
-    };
-
-    return (
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={modalTransition}
-        onClick={closeSuccess}
-        className="fixed inset-0 z-50 grid place-items-center bg-black/25 backdrop-blur-[2px] p-4"
-      >
-        <motion.div
-          {...modalPanelMotion}
-          transition={modalTransition}
-          onClick={(e: MouseEvent) => e.stopPropagation()}
-          className="glow-card w-full max-w-md rounded-2xl p-6"
-        >
-          <div className="flex items-start gap-3">
-            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/15 text-primary ring-1 ring-primary/25">
-              <CheckCircle2 className="h-5 w-5" />
-            </div>
-            <div className="min-w-0">
-              <h2 className="text-lg font-bold">
-                {shareFailure ? "Trade saved privately." : "Trade logged successfully."}
-              </h2>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                {shareFailure
-                  ? "The trade is private because sharing did not complete. You can retry now."
-                  : "Complete the review now to record your reasoning, mistakes, grade, and chart screenshot."}
-              </p>
-            </div>
-          </div>
-          <div className="mt-6 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={closeSuccess}
-              className="rounded-xl bg-white/[0.04] px-4 py-2.5 text-sm font-medium text-muted-foreground ring-1 ring-white/[0.06] transition-all duration-200 hover:text-foreground hover:ring-white/[0.1]"
-            >
-              Later
-            </button>
-            <button
-              type="button"
-              hidden={!shareFailure}
-              disabled={retryShare.isPending}
-              onClick={() => retryShare.mutate()}
-              className="rounded-xl bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-foreground ring-1 ring-white/[0.08] hover:bg-white/[0.07] disabled:opacity-50"
-            >
-              {retryShare.isPending ? "Retrying…" : "Retry sharing"}
-            </button>
-            <button
-              type="button"
-              disabled={!savedTradeId}
-              onClick={reviewNow}
-              className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] transition-all duration-200 hover:brightness-110 disabled:opacity-40"
-            >
-              Review now
-            </button>
-          </div>
-        </motion.div>
-      </motion.div>
-    );
-  }
 
   return (
     <motion.div
@@ -1115,7 +1017,7 @@ export function TradeFormModal({
                 }}
                 triggerClassName={cn(
                   inputClass,
-                  "h-auto justify-between border-0 shadow-none data-[placeholder]:text-muted-foreground/40",
+                  "h-auto justify-between border-0 shadow-none",
                 )}
               />
             </div>
@@ -1600,13 +1502,15 @@ export function TradeFormModal({
                     {myGroups.map((group) => (
                       <label
                         key={group.id}
+                        onClick={(event) => event.stopPropagation()}
                         className={cn(
-                          "flex min-h-9 cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm ring-1",
+                          "flex min-h-9 cursor-pointer items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 text-sm ring-1",
                           sharedGroupIds.includes(group.id)
                             ? "bg-primary/[0.08] ring-primary/25"
                             : "bg-white/[0.025] ring-white/[0.06]",
                         )}
                       >
+                        <span className="min-w-0 truncate">{group.name}</span>
                         <input
                           type="checkbox"
                           checked={sharedGroupIds.includes(group.id)}
@@ -1621,7 +1525,6 @@ export function TradeFormModal({
                           }}
                           className="h-4 w-4 shrink-0 accent-primary"
                         />
-                        <span className="min-w-0 truncate">{group.name}</span>
                       </label>
                     ))}
                   </div>

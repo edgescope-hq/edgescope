@@ -5,6 +5,7 @@ import {
   compactDateTick,
   dashboardCumulativeRPoints,
   dashboardChartEligibility,
+  dashboardMovementStops,
   dashboardPointTick,
   formatRAxisTick,
   missingRTradeHeadline,
@@ -45,6 +46,7 @@ describe("Dashboard chart eligibility", () => {
   it("formats only signed R values on the axis", () => {
     assert.equal(formatRAxisTick(-2), "-2R");
     assert.equal(formatRAxisTick(0), "0R");
+    assert.equal(formatRAxisTick(0.05), "+0.05R");
     assert.equal(formatRAxisTick(2), "+2R");
   });
 
@@ -74,5 +76,28 @@ describe("Dashboard chart eligibility", () => {
       ],
     );
     assert.equal(dashboardPointTick(points[2]!.point, points[1]!.point), "");
+  });
+
+  it("marks real monthly rises and falls without changing cumulative values", () => {
+    const points = [
+      { point: "1", date: "2026-07-02", cumulativeR: 1 },
+      { point: "2", date: "2026-07-12", cumulativeR: 2.5 },
+      { point: "3", date: "2026-07-22", cumulativeR: 1.25 },
+    ];
+
+    const stops = dashboardMovementStops(points);
+    assert.deepEqual(
+      stops.map(({ offset, tone }) => [offset, tone]),
+      [
+        [0, "rising"],
+        [0.5, "rising"],
+        [0.5, "falling"],
+        [1, "falling"],
+      ],
+    );
+    assert.deepEqual(
+      points.map((point) => point.cumulativeR),
+      [1, 2.5, 1.25],
+    );
   });
 });

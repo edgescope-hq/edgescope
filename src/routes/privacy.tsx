@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import appLogoHorizontal from "@/assets/edgescope-horizontal.png.asset.json";
+import { EdgeScopeLogo } from "@/components/brand/edgescope-logo";
 
 export const Route = createFileRoute("/privacy")({
   head: () => ({
@@ -18,7 +18,7 @@ function LegalShell({ title, children }: { title: string; children: ReactNode })
       <div className="mx-auto flex w-full max-w-4xl flex-col px-6 py-8">
         <div className="flex items-center justify-between gap-4">
           <Link to="/" className="inline-flex w-fit">
-            <img src={appLogoHorizontal.url} alt="EdgeScope" className="h-12 w-auto" />
+            <EdgeScopeLogo tone="light" className="h-12 w-auto" />
           </Link>
           <button
             onClick={() => window.history.back()}

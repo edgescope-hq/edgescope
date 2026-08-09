@@ -142,9 +142,22 @@ async function main() {
       const brokenImgs = imgInfo.filter(i => !i.loaded);
       
       // Check specific assets via fetch
-      const assets = ['/brand/edgescope-horizontal.png', '/brand/edgescope-icon.png', 
-        '/favicon.ico', '/favicon-32x32.png', '/favicon-16x16.png', '/apple-touch-icon.png',
-        '/site.webmanifest', '/src/styles.css'];
+      const assets = [
+        '/brand/edgescope-lockup-light.png',
+        '/brand/edgescope-lockup-dark.png',
+        '/brand/edgescope-mark-light.png',
+        '/brand/edgescope-mark-dark.png',
+        '/favicon.ico',
+        '/favicon-32x32.png',
+        '/favicon-16x16.png',
+        '/favicon-light-32x32.png',
+        '/favicon-light-16x16.png',
+        '/apple-touch-icon.png',
+        '/android-chrome-192x192.png',
+        '/android-chrome-512x512.png',
+        '/site.webmanifest',
+        '/src/styles.css',
+      ];
       
       const assetChecks = await Promise.all(assets.map(async a => {
         try {

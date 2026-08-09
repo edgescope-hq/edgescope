@@ -144,7 +144,7 @@ export function SessionSelect({
   );
 }
 
-export function SessionManagerButton({ label = "Manage sessions" }: { label?: string }) {
+export function SessionManagerButton({ label = "Sessions" }: { label?: string }) {
   const qc = useQueryClient();
   const getPreferences = useServerFn(getTradingPreferences);
   const savePreferences = useServerFn(updateJournalTrackingPreferences);
@@ -268,7 +268,7 @@ export function SessionManagerButton({ label = "Manage sessions" }: { label?: st
         </DialogTrigger>
         <DialogContent className="max-h-[min(34rem,calc(100vh-2rem))] overflow-hidden">
           <DialogHeader>
-            <DialogTitle>Manage sessions</DialogTitle>
+            <DialogTitle>Sessions</DialogTitle>
             <DialogDescription>Create and manage session options.</DialogDescription>
           </DialogHeader>
           <div className="flex gap-2">

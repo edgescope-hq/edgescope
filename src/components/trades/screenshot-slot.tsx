@@ -36,7 +36,10 @@ export function ScreenshotSlot({
         {previewUrl && onRemove && (
           <button
             type="button"
-            onClick={onRemove}
+            onClick={(event) => {
+              event.stopPropagation();
+              onRemove();
+            }}
             aria-label={`Delete ${label} screenshot`}
             title="Delete screenshot"
             className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-white/[0.04] text-muted-foreground/70 ring-1 ring-white/10 transition-all hover:bg-destructive/20 hover:text-destructive"

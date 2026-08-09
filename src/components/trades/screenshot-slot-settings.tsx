@@ -25,7 +25,7 @@ import {
 import { screenshotDraftAfterDialogChange } from "@/lib/preference-modal-state";
 
 export function ScreenshotSlotSettingsButton({
-  label = "Configure screenshots",
+  label = "Screenshots",
 }: {
   label?: string;
 }) {
@@ -80,7 +80,7 @@ export function ScreenshotSlotSettingsButton({
       </DialogTrigger>
       <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Configure screenshots</DialogTitle>
+          <DialogTitle>Screenshots</DialogTitle>
           <DialogDescription>
             Choose which chart slots appear and how they are labelled.
           </DialogDescription>

@@ -1226,14 +1226,16 @@ export function TradeReviewModal({
                         return (
                           <label
                             key={g.id}
+                            onClick={(event) => event.stopPropagation()}
                             className={cn(
-                              "flex min-h-9 cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm ring-1",
+                              "flex min-h-9 cursor-pointer items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 text-sm ring-1",
                               checked
                                 ? "bg-primary/[0.08] ring-primary/25"
                                 : "bg-white/[0.025] ring-white/[0.06]",
                               !shareEligible && !checked && "opacity-40 cursor-not-allowed",
                             )}
                           >
+                            <span className="min-w-0 truncate">{g.name}</span>
                             <input
                               type="checkbox"
                               disabled={!shareEligible && !checked}
@@ -1248,7 +1250,6 @@ export function TradeReviewModal({
                               }
                               className="h-4 w-4 shrink-0 accent-primary"
                             />
-                            <span className="min-w-0 truncate">{g.name}</span>
                           </label>
                         );
                       })}

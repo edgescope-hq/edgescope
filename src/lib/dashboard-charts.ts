@@ -59,6 +59,62 @@ export type DashboardChartPoint = {
   cumulativeR: number;
 };
 
+export type DashboardMovementTone = "rising" | "falling" | "flat";
+
+export type DashboardMovementStop = {
+  /** Normalized horizontal position used by the monthly chart's stroke gradient. */
+  offset: number;
+  tone: DashboardMovementTone;
+};
+
+/**
+ * Produces abrupt gradient transitions at real turning points so the monthly
+ * curve can distinguish rising and falling movement without changing its data.
+ */
+export function dashboardMovementStops(
+  points: readonly DashboardChartPoint[],
+): DashboardMovementStop[] {
+  if (points.length === 0) return [];
+  if (points.length === 1) {
+    return [
+      { offset: 0, tone: "flat" },
+      { offset: 1, tone: "flat" },
+    ];
+  }
+
+  const times = points.map((point) => Date.parse(`${point.date}T00:00:00Z`));
+  const firstTime = times[0]!;
+  const lastTime = times.at(-1)!;
+  const hasTimeSpan =
+    times.every(Number.isFinite) && Number.isFinite(lastTime) && lastTime > firstTime;
+  const positions = points.map((_, index) =>
+    hasTimeSpan ? (times[index]! - firstTime) / (lastTime - firstTime) : index / (points.length - 1),
+  );
+  const movementTone = (from: number, to: number): DashboardMovementTone =>
+    to > from ? "rising" : to < from ? "falling" : "flat";
+  const stops: DashboardMovementStop[] = [];
+  const append = (offset: number, tone: DashboardMovementTone) => {
+    const normalizedOffset = Math.min(1, Math.max(0, offset));
+    const previous = stops.at(-1);
+    if (previous?.offset === normalizedOffset && previous.tone === tone) return;
+    stops.push({ offset: normalizedOffset, tone });
+  };
+
+  let priorTone = movementTone(points[0]!.cumulativeR, points[1]!.cumulativeR);
+  append(positions[0]!, priorTone);
+  for (let index = 1; index < points.length; index += 1) {
+    const tone = movementTone(points[index - 1]!.cumulativeR, points[index]!.cumulativeR);
+    const segmentStart = positions[index - 1]!;
+    if (tone !== priorTone) {
+      append(segmentStart, priorTone);
+      append(segmentStart, tone);
+    }
+    append(positions[index]!, tone);
+    priorTone = tone;
+  }
+  return stops;
+}
+
 /**
  * Builds the chart population from canonical realised-R inputs only.  The
  * persisted `achieved_rr` value is intentionally not used: a stale saved R
@@ -97,7 +153,8 @@ export function dashboardCumulativeRPoints(
 
 export function formatRAxisTick(value: number): string {
   if (!Number.isFinite(value)) return "";
-  const rounded = Math.abs(value) < 0.005 ? 0 : Number(value.toFixed(1));
+  const decimals = Math.abs(value) > 0 && Math.abs(value) < 1 ? 2 : 1;
+  const rounded = Math.abs(value) < 0.005 ? 0 : Number(value.toFixed(decimals));
   return `${rounded > 0 ? "+" : ""}${rounded}R`;
 }
 

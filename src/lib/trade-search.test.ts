@@ -57,6 +57,17 @@ describe("My Trades search", () => {
     assert.equal(tradeSearchSuggestions([row], "#")[0]?.value, "#4");
   });
 
+  it("suggests readable dates in either day-month order", () => {
+    const suggestions = tradeSearchSuggestions(
+      [{ ...row, instrument: "", tradeDate: "2026-07-19" }],
+      "Jul 19",
+    );
+    assert.deepEqual(suggestions, [
+      { value: "19 Jul 2026", label: "19 Jul 2026", detail: "Date" },
+    ]);
+    assert.match(tradeSearchSuggestions([{ ...row, instrument: "" }], "#4")[0]!.detail, /^— · /);
+  });
+
   it("uses the visible day-month-year date format", () => {
     assert.equal(formatTradeDateKey("2026-07-19"), "19 Jul 2026");
   });

@@ -29,7 +29,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import appLogoHorizontal from "@/assets/edgescope-horizontal.png.asset.json";
+import { EdgeScopeLogo } from "@/components/brand/edgescope-logo";
 import {
   cancelAccountDeletion,
   getProfile,
@@ -109,7 +109,10 @@ export const Route = createFileRoute("/_authenticated/settings")({
   head: () => ({
     meta: [
       { title: "Settings — EdgeScope" },
-      { name: "description", content: "Manage your profile, appearance, and security." },
+      {
+        name: "description",
+        content: "Manage your profile, journal, analytics, appearance, and security.",
+      },
       { name: "robots", content: "noindex, nofollow" },
     ],
   }),
@@ -117,6 +120,7 @@ export const Route = createFileRoute("/_authenticated/settings")({
 });
 
 type SectionId = "profile" | "journal" | "analytics" | "appearance" | "security" | "about";
+type JournalTab = "tracking" | "requirements" | "sessions" | "screenshots";
 
 const ANALYTICS_GROUP_ICONS = {
   overview: BarChart3,
@@ -202,6 +206,32 @@ function RequirementToggle({
           onCheckedChange={onChange}
         />
       )}
+    </div>
+  );
+}
+
+function LockedRequirementRow({
+  label,
+  onTrack,
+}: {
+  label: string;
+  onTrack: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+      <span className="text-sm font-medium text-foreground">{label}</span>
+      <span className="flex shrink-0 items-center gap-3">
+        <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Lock className="h-3.5 w-3.5" aria-hidden="true" /> Field hidden
+        </span>
+        <button
+          type="button"
+          onClick={onTrack}
+          className="text-xs font-semibold text-primary transition-colors hover:text-primary-glow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45"
+        >
+          Track field
+        </button>
+      </span>
     </div>
   );
 }
@@ -297,7 +327,7 @@ function SettingsPage() {
   const [trackingSaveState, setTrackingSaveState] = useState<"idle" | "saved" | "error">("idle");
   const [tradeCompletenessRequirements, setTradeCompletenessRequirements] =
     useState<TradeCompletenessRequirements>({});
-  const [journalTab, setJournalTab] = useState<"tracking" | "requirements">("tracking");
+  const [journalTab, setJournalTab] = useState<JournalTab>("tracking");
   const [restoreDefaultsOpen, setRestoreDefaultsOpen] = useState(false);
   const [analyticsTab, setAnalyticsTab] = useState<"summary" | "reports">("summary");
   const [analyticsSummaryCards, setAnalyticsSummaryCards] = useState<AnalyticsKpiId[]>(
@@ -554,14 +584,15 @@ function SettingsPage() {
   });
 
   const restoreAnalyticsDefaults = useMutation({
-    mutationFn: () => {
-      const stored = analyticsPreferencesFromStored(tradingPreferences?.analytics_preferences);
-      const next =
-        analyticsTab === "summary"
-          ? { ...stored, summaryCards: [...DEFAULT_ANALYTICS_PREFERENCES.summaryCards] }
-          : { ...stored, hidden: [...DEFAULT_ANALYTICS_PREFERENCES.hidden] };
-      return saveAnalyticsPreferencesFn({ data: analyticsPreferencesForStorage(next) });
-    },
+    mutationFn: () =>
+      saveAnalyticsPreferencesFn({
+        data: analyticsPreferencesForStorage({
+          ...DEFAULT_ANALYTICS_PREFERENCES,
+          summaryCards: [...DEFAULT_ANALYTICS_PREFERENCES.summaryCards],
+          hidden: [...DEFAULT_ANALYTICS_PREFERENCES.hidden],
+          order: [...DEFAULT_ANALYTICS_PREFERENCES.order],
+        }),
+      }),
     onSuccess: (row) => {
       qc.setQueryData(["trading-preferences"], row);
       const stored = analyticsPreferencesFromStored(row.analytics_preferences);
@@ -587,6 +618,18 @@ function SettingsPage() {
     }
     setTrackingSaveState("idle");
     setTracking(next);
+  };
+
+  const openTrackingField = (field: JournalTrackingField) => {
+    setActive("journal");
+    setJournalTab("tracking");
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const row = document.getElementById(`tracking-field-${field}`);
+        row?.scrollIntoView({ behavior: "smooth", block: "center" });
+        row?.querySelector<HTMLElement>("[role='combobox']")?.focus();
+      });
+    });
   };
 
   const scheduleDeletionM = useMutation({
@@ -699,13 +742,7 @@ function SettingsPage() {
           })}
         </nav>
 
-        <motion.div
-          key={active}
-          initial={{ opacity: 0, y: 6 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-          className="glow-card rounded-2xl p-6"
-        >
+        <div className="glow-card rounded-2xl p-6">
           {active === "profile" && (
             <div>
               <h2 className="text-lg font-bold">Profile</h2>
@@ -770,32 +807,49 @@ function SettingsPage() {
 
           {active === "journal" && (
             <div className="mb-6">
-              <h2 className="text-lg font-bold">Journal preferences</h2>
-              <div className="mt-4 max-w-md">
-                <div className="grid grid-cols-2 gap-2">
-                  {[
-                    ["tracking", "Tracking fields"],
-                    ["requirements", "Status requirements"],
-                  ].map(([value, label]) => (
+              <div className="flex items-start justify-between gap-3">
+                <h2 className="text-lg font-bold">Journal preferences</h2>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
                     <button
-                      key={value}
                       type="button"
-                      onClick={() =>
-                        setJournalTab(
-                          value as "tracking" | "requirements",
-                        )
-                      }
-                      className={cn(
-                        "min-h-11 rounded-xl px-3 py-2 text-sm font-semibold ring-1 transition",
-                        journalTab === value
-                          ? "bg-primary/14 text-foreground ring-primary/25"
-                          : "bg-white/[0.025] text-muted-foreground ring-white/[0.06] hover:text-foreground",
-                      )}
+                      aria-label="Journal preference actions"
+                      className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground ring-1 ring-white/[0.07] hover:bg-white/[0.04] hover:text-foreground"
                     >
-                      {label}
+                      <MoreHorizontal className="h-4 w-4" />
                     </button>
-                  ))}
-                </div>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onSelect={() => setRestoreDefaultsOpen(true)}>
+                      Restore defaults
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+              <div className="mt-4 grid max-w-4xl grid-cols-2 gap-2 xl:grid-cols-4">
+                {(
+                  [
+                    ["tracking", "Tracking fields", "Fields"],
+                    ["requirements", "Status requirements", "Status"],
+                    ["sessions", "Sessions", "Sessions"],
+                    ["screenshots", "Screenshots", "Screenshots"],
+                  ] as const
+                ).map(([value, label, compactLabel]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setJournalTab(value)}
+                    className={cn(
+                      "min-h-11 rounded-xl px-3 py-2 text-sm font-semibold ring-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45",
+                      journalTab === value
+                        ? "bg-primary/14 text-foreground ring-primary/25"
+                        : "bg-white/[0.025] text-muted-foreground ring-white/[0.06] hover:bg-white/[0.04] hover:text-foreground",
+                    )}
+                  >
+                    <span className="sm:hidden">{compactLabel}</span>
+                    <span className="hidden sm:inline">{label}</span>
+                  </button>
+                ))}
               </div>
             </div>
           )}
@@ -826,6 +880,7 @@ function SettingsPage() {
                           return (
                             <div
                               key={field}
+                              id={`tracking-field-${field}`}
                               className="flex items-center justify-between gap-4 px-4 py-3.5"
                             >
                               <span className="min-w-0">
@@ -886,7 +941,7 @@ function SettingsPage() {
                   ))}
                 </div>
               ) : (
-                <div className="mt-6 max-w-4xl space-y-4">
+                <div className="mt-6 grid max-w-4xl gap-4 xl:grid-cols-2">
                   <section className="overflow-hidden rounded-xl bg-white/[0.025] ring-1 ring-white/[0.06]">
                     <div className="border-b border-white/[0.06] px-4 py-3">
                       <h3 className="text-sm font-semibold">Trade completeness</h3>
@@ -895,12 +950,25 @@ function SettingsPage() {
                       </p>
                     </div>
                     <div className="divide-y divide-white/[0.06]">
-                      {appearsInPlacement(tracking, "r_performance", "quick_capture") && (
+                      {appearsInPlacement(tracking, "r_performance", "quick_capture") ? (
                         <RequirementToggle label="Risk & P/L" checked required />
+                      ) : tracking.r_performance === "hidden" ? (
+                        <LockedRequirementRow
+                          label="Risk & P/L"
+                          onTrack={() => openTrackingField("r_performance")}
+                        />
+                      ) : null}
+                      {TRADE_COMPLETENESS_ELIGIBLE_FIELDS.map((field) =>
+                        appearsInPlacement(tracking, field, "quick_capture") ? (
+                          tradeRequirementRow(field)
+                        ) : tracking[field] === "hidden" ? (
+                          <LockedRequirementRow
+                            key={field}
+                            label={JOURNAL_FIELD_META[field].label}
+                            onTrack={() => openTrackingField(field)}
+                          />
+                        ) : null,
                       )}
-                      {TRADE_COMPLETENESS_ELIGIBLE_FIELDS.filter((field) =>
-                        appearsInPlacement(tracking, field, "quick_capture"),
-                      ).map(tradeRequirementRow)}
                     </div>
                   </section>
                   <section className="overflow-hidden rounded-xl bg-white/[0.025] ring-1 ring-white/[0.06]">
@@ -918,12 +986,8 @@ function SettingsPage() {
                           ["category", "category", "Category / setup"],
                           ["grade", "grade", "Trade grade"],
                         ] as const
-                      )
-                        .filter(([, field]) =>
-                          appearsInPlacement(tracking, field, "detailed_review"),
-                        )
-                        .map(([requirement, field, label]) => {
-                        return (
+                      ).map(([requirement, field, label]) =>
+                        appearsInPlacement(tracking, field, "detailed_review") ? (
                           <RequirementToggle
                             key={requirement}
                             label={label}
@@ -936,15 +1000,19 @@ function SettingsPage() {
                               }));
                             }}
                           />
-                        );
-                      })}
+                        ) : tracking[field] === "hidden" ? (
+                          <LockedRequirementRow
+                            key={requirement}
+                            label={label}
+                            onTrack={() => openTrackingField(field)}
+                          />
+                        ) : null,
+                      )}
                       {JOURNAL_TRACKING_FIELDS.filter(
-                        (field) =>
-                          JOURNAL_FIELD_META[field].reviewable &&
-                          appearsInPlacement(tracking, field, "detailed_review"),
+                        (field) => JOURNAL_FIELD_META[field].reviewable,
                       ).map((field) => {
                         const meta = JOURNAL_FIELD_META[field];
-                        return (
+                        return appearsInPlacement(tracking, field, "detailed_review") ? (
                           <RequirementToggle
                             key={field}
                             label={meta.label}
@@ -957,17 +1025,27 @@ function SettingsPage() {
                               }));
                             }}
                           />
-                        );
+                        ) : tracking[field] === "hidden" ? (
+                          <LockedRequirementRow
+                            key={field}
+                            label={meta.label}
+                            onTrack={() => openTrackingField(field)}
+                          />
+                        ) : null;
                       })}
                     </div>
                   </section>
                 </div>
               )}
+              {!reviewRequirementsLoading && (
+                <div className="mt-4 flex max-w-4xl items-start gap-2 rounded-xl bg-primary/[0.035] px-3.5 py-3 text-xs leading-5 text-muted-foreground ring-1 ring-primary/10">
+                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+                  These rules apply going forward. Trades already marked Reviewed stay Reviewed.
+                </div>
+              )}
               <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <p aria-live="polite" className="text-xs text-muted-foreground">
-                  {reviewSaveState === "error"
-                    ? "Could not save requirements. Try again."
-                    : "These rules apply going forward. Trades already marked Reviewed stay Reviewed."}
+                <p aria-live="polite" className="text-xs text-destructive">
+                  {reviewSaveState === "error" ? "Could not save requirements. Try again." : ""}
                 </p>
                 <button
                   type="button"
@@ -985,26 +1063,26 @@ function SettingsPage() {
             </div>
           )}
 
-          {active === "journal" && (
-            <section className="mt-8 max-w-4xl rounded-xl bg-white/[0.025] p-4 ring-1 ring-white/[0.06]">
-              <div>
-                <h3 className="text-sm font-semibold">Journal setup</h3>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                  Manage the reusable setup options for capture and review.
-                </p>
+          {active === "journal" && journalTab === "sessions" && (
+            <div className="mt-6 max-w-4xl">
+              <p className="text-sm text-muted-foreground">
+                Maintain the reusable market sessions available in capture and review.
+              </p>
+              <div className="mt-4 rounded-xl bg-white/[0.025] p-4 ring-1 ring-white/[0.06]">
+                <SessionManagerButton label="Sessions" />
               </div>
-              <div className="mt-4 flex flex-wrap items-center gap-2.5">
-                <SessionManagerButton label="Manage sessions" />
-                <ScreenshotSlotSettingsButton label="Configure screenshots" />
-                <button
-                  type="button"
-                  onClick={() => setRestoreDefaultsOpen(true)}
-                  className="rounded-xl bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-muted-foreground ring-1 ring-white/[0.08] transition-colors hover:bg-white/[0.07] hover:text-foreground"
-                >
-                  Restore defaults
-                </button>
+            </div>
+          )}
+
+          {active === "journal" && journalTab === "screenshots" && (
+            <div className="mt-6 max-w-4xl">
+              <p className="text-sm text-muted-foreground">
+                Choose the screenshot slots used to organize trade evidence.
+              </p>
+              <div className="mt-4 rounded-xl bg-white/[0.025] p-4 ring-1 ring-white/[0.06]">
+                <ScreenshotSlotSettingsButton label="Screenshots" />
               </div>
-            </section>
+            </div>
           )}
 
           {active === "analytics" && (
@@ -1110,13 +1188,10 @@ function SettingsPage() {
                           ) : (
                             <button
                               type="button"
-                              onClick={() => {
-                                setActive("journal");
-                                setJournalTab("tracking");
-                              }}
+                              onClick={() => openTrackingField("r_performance")}
                               className="flex items-center gap-1.5 text-xs font-semibold text-primary"
                             >
-                              <Lock className="h-3.5 w-3.5" /> Track Risk & P/L
+                              <Lock className="h-3.5 w-3.5" /> Track Risk & P/L to enable
                             </button>
                           )}
                         </div>
@@ -1153,6 +1228,11 @@ function SettingsPage() {
                               tracking,
                               tracking.r_performance !== "hidden",
                             );
+                            const dependencyField: JournalTrackingField =
+                              availability.reason === "R Performance disabled" ||
+                              !section.trackingField
+                                ? "r_performance"
+                                : section.trackingField;
                             const visible = !analyticsReportHidden.includes(section.id);
                             return (
                               <div
@@ -1190,16 +1270,11 @@ function SettingsPage() {
                                 ) : (
                                   <button
                                     type="button"
-                                    onClick={() => {
-                                      setActive("journal");
-                                      setJournalTab("tracking");
-                                    }}
+                                    onClick={() => openTrackingField(dependencyField)}
                                     className="flex max-w-44 items-center gap-1.5 text-right text-xs font-semibold text-primary"
                                   >
                                     <Lock className="h-3.5 w-3.5 shrink-0" />
-                                    {section.trackingField
-                                      ? `Track ${JOURNAL_FIELD_META[section.trackingField].label} to enable`
-                                      : "Enable R Performance"}
+                                    {`Track ${JOURNAL_FIELD_META[dependencyField].label} to enable`}
                                   </button>
                                 )}
                               </div>
@@ -1336,11 +1411,7 @@ function SettingsPage() {
               <h2 className="text-lg font-bold">About</h2>
               <div className="rounded-xl bg-white/[0.03] p-5 ring-1 ring-white/[0.06]">
                 <div className="flex flex-col items-start gap-3">
-                  <img
-                    src={appLogoHorizontal.url}
-                    alt="EdgeScope"
-                    className="h-14 w-auto object-contain"
-                  />
+                  <EdgeScopeLogo tone="light" className="h-14 w-auto object-contain" />
                   <div className="text-xs text-muted-foreground">Version 1.0.0</div>
                 </div>
               </div>
@@ -1364,7 +1435,7 @@ function SettingsPage() {
               </div>
             </div>
           )}
-        </motion.div>
+        </div>
       </div>
       {deleteOpen && (
         <motion.div
@@ -1439,7 +1510,7 @@ function SettingsPage() {
         open={analyticsRestoreOpen}
         onOpenChange={setAnalyticsRestoreOpen}
         title="Restore Analytics defaults?"
-        description="Existing trades and screenshots are unchanged. This immediately restores the active Analytics tab."
+        description="Existing trades and screenshots are unchanged. This immediately restores canonical Analytics defaults."
         confirmLabel="Restore defaults"
         loading={restoreAnalyticsDefaults.isPending}
         onConfirm={() => restoreAnalyticsDefaults.mutate()}

@@ -17,8 +17,7 @@ import {
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import appLogo from "@/assets/edgescope-logo.png.asset.json";
-import appLogoHorizontal from "@/assets/edgescope-horizontal.png.asset.json";
+import { EdgeScopeLogo } from "@/components/brand/edgescope-logo";
 import { amIAdmin } from "@/lib/invites.functions";
 import { cn } from "@/lib/utils";
 
@@ -134,18 +133,14 @@ export function AppSidebar() {
 
   const Brand = (
     <div className="flex items-center px-5 py-5">
-      <img
-        src={appLogoHorizontal.url}
-        alt="EdgeScope"
-        className="h-12 w-auto max-w-full object-contain"
-      />
+      <EdgeScopeLogo tone="light" className="h-12 w-auto max-w-full object-contain" />
     </div>
   );
 
   return (
     <>
       <header className="md:hidden sticky top-0 z-40 flex items-center justify-between border-b border-white/[0.04] bg-[oklch(0.07_0.012_270/0.95)] px-4 py-3 backdrop-blur-xl">
-        <img src={appLogoHorizontal.url} alt="EdgeScope" className="h-9 w-auto object-contain" />
+        <EdgeScopeLogo tone="light" className="h-9 w-auto object-contain" />
         <button
           onClick={() => setMobileOpen(true)}
           aria-label="Open navigation menu"

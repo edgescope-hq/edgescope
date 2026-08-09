@@ -168,26 +168,41 @@ export function tradeSearchSuggestions(
       .map((row) => ({
         value: `#${row.num}`,
         label: `#${row.num}`,
-        detail: `${row.instrument || "â€”"} · ${formatTradeDateKey(row.tradeDate)}`,
+        detail: `${row.instrument || "—"} · ${formatTradeDateKey(row.tradeDate)}`,
       }));
   }
 
-  const candidates = rows.flatMap((row) => [
-    { value: row.instrument.trim(), detail: "Instrument" },
-    { value: row.category.trim(), detail: "Setup" },
-    { value: formatTradeDateKey(row.tradeDate), detail: "Date" },
-  ]);
+  const compactQuery = query.replace(/\s+/g, "");
+  const candidates = rows.flatMap((row) => {
+    const date = parseStoredDate(row.tradeDate);
+    const dateMatches = date
+      ? /^\d+$/.test(query)
+        ? matchesNumericDate(date, query)
+        : matchesFormattedDate(date, query)
+      : false;
+    return [
+      { value: row.instrument.trim(), detail: "Instrument", matches: false },
+      { value: row.category.trim(), detail: "Setup", matches: false },
+      { value: formatTradeDateKey(row.tradeDate), detail: "Date", matches: dateMatches },
+    ];
+  });
   const seen = new Set<string>();
   return candidates
-    .filter(({ value }) => {
+    .filter(({ value, matches }) => {
       const key = value.toLocaleLowerCase();
-      if (!value || seen.has(key) || !key.includes(query)) return false;
+      if (
+        !value ||
+        seen.has(key) ||
+        (!matches && !key.replace(/\s+/g, "").includes(compactQuery))
+      ) {
+        return false;
+      }
       seen.add(key);
       return true;
     })
     .sort((a, b) => {
-      const aExact = a.value.toLocaleLowerCase() === query ? 1 : 0;
-      const bExact = b.value.toLocaleLowerCase() === query ? 1 : 0;
+      const aExact = a.value.toLocaleLowerCase().replace(/\s+/g, "") === compactQuery ? 1 : 0;
+      const bExact = b.value.toLocaleLowerCase().replace(/\s+/g, "") === compactQuery ? 1 : 0;
       return bExact - aExact || a.value.localeCompare(b.value);
     })
     .slice(0, limit)

@@ -850,9 +850,6 @@ function TradesPage() {
             onSaved={() => {
               qc.invalidateQueries({ queryKey: ["trades"] });
             }}
-            onReviewNow={(savedId) => {
-              setDetail({ id: savedId, num: rows.length + 1 });
-            }}
           />
         )}
         {catManagerOpen && (

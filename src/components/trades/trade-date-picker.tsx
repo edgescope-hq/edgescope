@@ -159,9 +159,9 @@ export function TradeDatePicker({
           {headerMenu === "month" && (
             <div
               aria-label="Choose month"
-              className="absolute left-9 top-0 z-10 w-36 rounded-xl border border-white/[0.08] bg-popover p-1 shadow-[var(--shadow-elevated)]"
+              className="absolute left-1/2 top-0 z-10 w-[min(18rem,calc(100%-1rem))] -translate-x-1/2 rounded-xl border border-white/[0.08] bg-popover p-2 shadow-[var(--shadow-elevated)]"
             >
-              <div className="max-h-60 space-y-0.5 overflow-y-auto">
+              <div className="grid grid-cols-3 gap-1">
                 {Array.from({ length: 12 }, (_, index) => {
                   const future = month.getFullYear() === currentYear && index > today.getMonth();
                   const selectedMonth = month.getMonth() === index;
@@ -176,7 +176,7 @@ export function TradeDatePicker({
                         setHeaderMenu(null);
                       }}
                       className={cn(
-                        "flex min-h-8 w-full items-center justify-between rounded-md px-2.5 text-left text-xs font-medium text-muted-foreground hover:bg-white/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 disabled:opacity-35",
+                        "flex min-h-9 w-full items-center justify-between rounded-md px-2.5 text-left text-xs font-medium text-muted-foreground hover:bg-white/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 disabled:opacity-35",
                         selectedMonth && "bg-primary/12 text-foreground",
                       )}
                     >

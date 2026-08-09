@@ -17,7 +17,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { bootstrapFirstAdmin, checkBootstrap } from "@/lib/invites.functions";
-import logo from "@/assets/edgescope-horizontal.png.asset.json";
+import { EdgeScopeLogo } from "@/components/brand/edgescope-logo";
 import { Premium3DBackground } from "@/components/landing/premium-3d-background";
 
 const searchSchema = z.object({
@@ -136,7 +136,7 @@ function AuthPage() {
               aria-label="EdgeScope home"
               className="inline-flex cursor-pointer items-center"
             >
-              <img src={logo.url} alt="EdgeScope" className="h-12 w-auto object-contain" />
+              <EdgeScopeLogo tone="light" className="h-12 w-auto object-contain" />
             </Link>
           </motion.header>
 

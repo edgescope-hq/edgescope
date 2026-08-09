@@ -94,7 +94,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       },
       { name: "twitter:card", content: "summary" },
       { property: "og:type", content: "website" },
-      { name: "theme-color", content: "#0F0A1F" },
+      { name: "theme-color", content: "#0B0D12" },
       { name: "application-name", content: "EdgeScope" },
       { name: "apple-mobile-web-app-title", content: "EdgeScope" },
     ],
@@ -102,7 +102,21 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { rel: "stylesheet", href: appCss },
       { rel: "icon", type: "image/x-icon", href: "/favicon.ico" },
       { rel: "icon", type: "image/png", sizes: "32x32", href: "/favicon-32x32.png" },
+      {
+        rel: "icon",
+        type: "image/png",
+        sizes: "32x32",
+        href: "/favicon-light-32x32.png",
+        media: "(prefers-color-scheme: dark)",
+      },
       { rel: "icon", type: "image/png", sizes: "16x16", href: "/favicon-16x16.png" },
+      {
+        rel: "icon",
+        type: "image/png",
+        sizes: "16x16",
+        href: "/favicon-light-16x16.png",
+        media: "(prefers-color-scheme: dark)",
+      },
       { rel: "apple-touch-icon", sizes: "180x180", href: "/apple-touch-icon.png" },
       { rel: "manifest", href: "/site.webmanifest" },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
@@ -121,7 +135,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <HeadContent />
       </head>
