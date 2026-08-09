@@ -48,3 +48,5 @@ build
 __pycache__/
 *.pyc
 supabase/.temp/
+
+graphify-out/
