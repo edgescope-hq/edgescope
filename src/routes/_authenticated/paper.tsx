@@ -19,12 +19,9 @@ function PaperPage() {
         <Info className="mt-0.5 h-4 w-4 shrink-0 text-info" />
         <div className="text-xs leading-relaxed text-muted-foreground">
           <span className="font-semibold text-foreground">Paper Trading is coming soon.</span> For
-          now,{" "}
-          <Link to="/trades" className="font-medium text-primary hover:text-primary-glow">
-            log paper trades manually in My Trades
-          </Link>{" "}
-          (filter by Paper). Live charts, auto-execution and a native order engine are planned for a
-          later release.
+          now, real-trade capture and evidence remain separate from this future workspace. Any
+          historical paper rows are preserved privately but quarantined from My Trades, Dashboard,
+          Analytics, and Scope.
         </div>
       </div>
       <div className="mt-8 grid place-items-center py-20">
@@ -34,14 +31,14 @@ function PaperPage() {
           </div>
           <h2 className="mt-5 text-lg font-bold">Paper Trading</h2>
           <p className="mt-2 text-sm text-muted-foreground max-w-md">
-            Live chart integration, order management, and auto-execution are in development. Track
-            your practice trades in the meantime using My Trades with the Paper filter.
+            Live chart integration, order management, and auto-execution are outside the launch
+            product. EdgeScope will not mix practice results into your real trading evidence.
           </p>
           <Link
             to="/trades"
             className="mt-6 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] transition-all duration-200 hover:brightness-110"
           >
-            Go to My Trades
+            Return to My Trades
           </Link>
         </div>
       </div>

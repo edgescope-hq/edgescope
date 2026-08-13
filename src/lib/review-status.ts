@@ -1,12 +1,6 @@
-// Single source of truth for trade review status across the app.
-//
-// A trade moves through three display states:
-//   "incomplete"   — a core field or the realised-R data pair is invalid
-//   "needs_review" — essentials are logged, but the detailed-review minimum
-//                    (at least one screenshot + trade reasoning) is missing
-//   "reviewed"     — essentials + screenshot + reasoning are all present
-//
-// Derived from existing trade fields only — no schema changes.
+// Single source of truth for the durable trade-review lifecycle. A completed
+// review remains a historical fact when preferences or optional evidence later
+// change; only corruption of the trade's identity or outcome invalidates it.
 
 export type ReviewStatus = "incomplete" | "needs_review" | "reviewed";
 
@@ -108,9 +102,28 @@ function hasTradeCompletenessRequirements(t: ReviewStatusInput): boolean {
   return true;
 }
 
+/**
+ * Essential identity/outcome facts whose later deletion can invalidate even a
+ * historically completed review. Preference and optional-field changes are
+ * intentionally excluded so they cannot rewrite completed history.
+ */
+export function hasDurableReviewEssentials(t: ReviewStatusInput): boolean {
+  return (
+    hasText(t.instrument) &&
+    (t.direction === "long" || t.direction === "short") &&
+    (t.result === "win" || t.result === "loss" || t.result === "breakeven")
+  );
+}
+
 export function getReviewStatus(t: ReviewStatusInput): ReviewStatus {
+  if (!hasDurableReviewEssentials(t)) return "incomplete";
+
+  // Completion is a historical fact. Enabling R tracking or adding new review /
+  // completeness requirements later must never downgrade it.
+  if (t.review_completed_at) return "reviewed";
+
   if (!hasQuickCaptureEssentials(t) || !hasTradeCompletenessRequirements(t)) return "incomplete";
-  return t.review_completed_at ? "reviewed" : "needs_review";
+  return "needs_review";
 }
 
 export const REVIEW_STATUS_LABEL: Record<ReviewStatus, string> = {

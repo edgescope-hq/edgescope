@@ -1,63 +1,77 @@
-export const DASHBOARD_CHART_MIN_VALID_R_TRADES = 3;
+import { realizedR, realizedRContract } from "@/lib/trade-mappers";
 
 type RiskPnlTrade = {
+  status?: string | null;
   result?: string | null;
   risk_amount?: number | string | null;
   pnl_amount?: number | string | null;
   reward_amount?: number | string | null;
+  achieved_rr?: number | string | null;
   trade_date?: string | null;
   id?: string | null;
   trade_number?: number | null;
   created_at?: string | null;
 };
 
-function finiteNumber(value: number | string | null | undefined): number | null {
-  if (value == null || value === "") return null;
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
-}
-
 export function hasValidRiskPnlPair(trade: RiskPnlTrade): boolean {
-  if (trade.result !== "win" && trade.result !== "loss" && trade.result !== "breakeven") {
-    return false;
-  }
-  const risk = finiteNumber(trade.risk_amount);
-  const pnl = finiteNumber(trade.pnl_amount ?? trade.reward_amount);
-  return risk !== null && risk > 0 && pnl !== null;
+  return realizedRContract(trade).eligible;
 }
 
 export function qualifyingRValue(trade: RiskPnlTrade): number | null {
-  if (!hasValidRiskPnlPair(trade)) return null;
-  const risk = finiteNumber(trade.risk_amount)!;
-  const rawPnl = finiteNumber(trade.pnl_amount ?? trade.reward_amount)!;
-  const pnl =
-    trade.result === "loss" ? -Math.abs(rawPnl) : trade.result === "win" ? Math.abs(rawPnl) : 0;
-  const value = pnl / risk;
-  return Number.isFinite(value) ? value : null;
+  return realizedR(trade);
 }
 
-export function dashboardChartEligibility(
-  trades: readonly RiskPnlTrade[],
-  required = DASHBOARD_CHART_MIN_VALID_R_TRADES,
-) {
+export function dashboardChartEligibility(trades: readonly RiskPnlTrade[]) {
   const validTradeCount = trades.filter(hasValidRiskPnlPair).length;
   return {
-    eligible: validTradeCount >= required,
+    eligible: validTradeCount > 0,
     validTradeCount,
-    missingTradeCount: Math.max(0, required - validTradeCount),
   };
-}
-
-export function missingRTradeHeadline(missingTradeCount: number): string {
-  return `${missingTradeCount} more trade${missingTradeCount === 1 ? "" : "s"} with R data needed`;
 }
 
 export type DashboardChartPoint = {
   /** A stable categorical key; never a synthetic zero-origin point. */
   point: string;
   date: string;
-  cumulativeR: number;
+  value: number;
+  tradeCount: number;
 };
+
+export type DashboardChartDomain = {
+  start: number;
+  end: number;
+};
+
+export function dashboardChartTime(date: string): number {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!match) return Date.parse(date);
+  return Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+}
+
+export function dashboardChartDateDomain(
+  points: readonly DashboardChartPoint[],
+): DashboardChartDomain | null {
+  const times = points.map((point) => dashboardChartTime(point.date)).filter(Number.isFinite);
+  if (times.length === 0) return null;
+  return { start: Math.min(...times), end: Math.max(...times) };
+}
+
+export function dashboardChartDateTicks(
+  points: readonly DashboardChartPoint[],
+  maxCount: number,
+): number[] {
+  if (maxCount <= 0) return [];
+  const times = [
+    ...new Set(points.map((point) => dashboardChartTime(point.date)).filter(Number.isFinite)),
+  ].sort((a, b) => a - b);
+  if (times.length <= maxCount) return times;
+  if (maxCount === 1) return [times[0]!];
+
+  return Array.from({ length: maxCount }, (_, index) => {
+    const candidateIndex = Math.round((index * (times.length - 1)) / (maxCount - 1));
+    return times[candidateIndex]!;
+  }).filter((tick, index, ticks) => index === 0 || tick !== ticks[index - 1]);
+}
 
 export type DashboardMovementTone = "rising" | "falling" | "flat";
 
@@ -88,7 +102,9 @@ export function dashboardMovementStops(
   const hasTimeSpan =
     times.every(Number.isFinite) && Number.isFinite(lastTime) && lastTime > firstTime;
   const positions = points.map((_, index) =>
-    hasTimeSpan ? (times[index]! - firstTime) / (lastTime - firstTime) : index / (points.length - 1),
+    hasTimeSpan
+      ? (times[index]! - firstTime) / (lastTime - firstTime)
+      : index / (points.length - 1),
   );
   const movementTone = (from: number, to: number): DashboardMovementTone =>
     to > from ? "rising" : to < from ? "falling" : "flat";
@@ -100,10 +116,10 @@ export function dashboardMovementStops(
     stops.push({ offset: normalizedOffset, tone });
   };
 
-  let priorTone = movementTone(points[0]!.cumulativeR, points[1]!.cumulativeR);
+  let priorTone = movementTone(points[0]!.value, points[1]!.value);
   append(positions[0]!, priorTone);
   for (let index = 1; index < points.length; index += 1) {
-    const tone = movementTone(points[index - 1]!.cumulativeR, points[index]!.cumulativeR);
+    const tone = movementTone(points[index - 1]!.value, points[index]!.value);
     const segmentStart = positions[index - 1]!;
     if (tone !== priorTone) {
       append(segmentStart, priorTone);
@@ -116,45 +132,48 @@ export function dashboardMovementStops(
 }
 
 /**
- * Builds the chart population from canonical realised-R inputs only.  The
- * persisted `achieved_rr` value is intentionally not used: a stale saved R
- * must never make a dashboard chart eligible or alter its cumulative line.
+ * Builds the chart population from the product-wide realized-R contract.
+ * Derived Risk + P/L takes precedence; a finite recorded legacy R remains
+ * eligible only when that pair is unavailable.
  */
-export function dashboardCumulativeRPoints(
-  trades: readonly RiskPnlTrade[],
-): DashboardChartPoint[] {
-  const valid = trades
-    .filter(hasValidRiskPnlPair)
-    .map((trade, index) => ({
-      trade,
-      index,
-      date: trade.trade_date ?? "",
-      stableOrder: trade.trade_number ?? trade.created_at ?? String(index).padStart(8, "0"),
-      id: trade.id ?? "",
-    }))
-    .sort(
-      (a, b) =>
-        a.date.localeCompare(b.date) ||
-        String(a.stableOrder).localeCompare(String(b.stableOrder), undefined, { numeric: true }) ||
-        a.id.localeCompare(b.id) ||
-        a.index - b.index,
-    );
+export function dashboardDailyRPoints(trades: readonly RiskPnlTrade[]): DashboardChartPoint[] {
+  const daily = new Map<string, { value: number; tradeCount: number }>();
+  for (const trade of trades) {
+    if (!hasValidRiskPnlPair(trade)) continue;
+    const date = trade.trade_date?.trim() ?? "";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    const current = daily.get(date) ?? { value: 0, tradeCount: 0 };
+    current.value += qualifyingRValue(trade)!;
+    current.tradeCount += 1;
+    daily.set(date, current);
+  }
 
-  let cumulativeR = 0;
-  return valid.map(({ trade, date }, index) => {
-    cumulativeR += qualifyingRValue(trade)!;
-    return {
-      point: `${date}|${String(index).padStart(4, "0")}`,
+  return [...daily.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, aggregate]) => ({
+      point: date,
       date,
-      cumulativeR,
+      value: aggregate.value,
+      tradeCount: aggregate.tradeCount,
+    }));
+}
+
+export function dashboardCumulativeRPoints(trades: readonly RiskPnlTrade[]): DashboardChartPoint[] {
+  let cumulativeR = 0;
+  return dashboardDailyRPoints(trades).map((point) => {
+    cumulativeR += point.value;
+    return {
+      ...point,
+      value: cumulativeR,
     };
   });
 }
 
 export function formatRAxisTick(value: number): string {
   if (!Number.isFinite(value)) return "";
+  if (Math.abs(value) < 0.005) return "";
   const decimals = Math.abs(value) > 0 && Math.abs(value) < 1 ? 2 : 1;
-  const rounded = Math.abs(value) < 0.005 ? 0 : Number(value.toFixed(decimals));
+  const rounded = Number(value.toFixed(decimals));
   return `${rounded > 0 ? "+" : ""}${rounded}R`;
 }
 

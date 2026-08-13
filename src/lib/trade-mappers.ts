@@ -3,6 +3,7 @@ import type { TradeRow } from "@/lib/analytics";
 // DB row from the `trades` table (shape returned by listTrades).
 export type DbTrade = {
   id: string;
+  status?: string | null;
   trade_date: string;
   trade_time: string | null;
   market: string;
@@ -30,11 +31,18 @@ export type DbTrade = {
   emotion_tags: string[] | null;
   mistake_tags: string[] | null;
   categories: string[] | null;
+  /** Explicit primary observational category. Legacy categories[] remains intact. */
+  primary_category?: string | null;
   subcategories: string[] | null;
   is_shared: boolean | null;
   is_paper?: boolean | null;
   in_killzone: boolean | null;
   review_completed_at?: string | null;
+  setup_intent_version_id?: string | null;
+  setup_intent_provenance?: "capture" | "retrospective_review" | null;
+  setup_intent_recorded_at?: string | null;
+  setup_adherence?: "followed" | "deviated" | "unassessable" | null;
+  setup_adherence_recorded_at?: string | null;
   entry_model?: string | null;
   market_condition?: string | null;
   entry_timeframe?: string | null;
@@ -49,6 +57,7 @@ export type DbTrade = {
 
 // Project a DB trade onto the analytics input shape.
 export function toAnalytics(t: DbTrade): TradeRow {
+  const category = primaryTradeCategory(t);
   return {
     id: t.id,
     result: t.result,
@@ -63,16 +72,13 @@ export function toAnalytics(t: DbTrade): TradeRow {
     emotion_before: t.emotion_before,
     emotion_during: t.emotion_during,
     emotion_after: t.emotion_after,
-    categories: t.categories ?? [],
+    // Analytics owns the current one-primary-Category contract. Additional
+    // legacy strings remain available on the source trade and in export, but
+    // are not silently promoted into multiple current classifications.
+    categories: category ? [category] : [],
     subcategories: t.subcategories ?? [],
     mistake_tags: t.mistake_tags ?? [],
   };
-}
-
-export function rrNum(v: number | string | null | undefined): number {
-  if (v == null) return 0;
-  const n = typeof v === "number" ? v : Number(v);
-  return Number.isFinite(n) ? n : 0;
 }
 
 function finiteNumber(v: number | string | null | undefined): number | null {
@@ -84,6 +90,35 @@ function finiteNumber(v: number | string | null | undefined): number | null {
 export function recordedR(v: number | string | null | undefined): number | null {
   return finiteNumber(v);
 }
+
+function recordedRForResult(
+  value: number | string | null | undefined,
+  result: "win" | "loss" | "breakeven",
+): number | null {
+  const recorded = recordedR(value);
+  if (recorded == null) return null;
+  if (result === "win" && recorded < 0) return null;
+  if (result === "loss" && recorded > 0) return null;
+  if (result === "breakeven" && recorded !== 0) return null;
+  return recorded;
+}
+
+export function primaryTradeCategory(t: {
+  primary_category?: string | null;
+  categories?: string[] | null;
+}): string | null {
+  const explicit = t.primary_category?.trim();
+  if (explicit) return explicit;
+  return (t.categories ?? []).find((value) => Boolean(value?.trim()))?.trim() || null;
+}
+
+export type RealizedRSource = "derived_risk_pnl" | "recorded_legacy" | "missing";
+
+export type RealizedRContract = {
+  value: number | null;
+  source: RealizedRSource;
+  eligible: boolean;
+};
 
 export function localDateKey(date = new Date()): string {
   const year = date.getFullYear();
@@ -101,6 +136,7 @@ export function localTimeKey(date = new Date()): string {
 }
 
 export function isResultComplete(t: {
+  status?: string | null;
   instrument?: string | null;
   session?: string | null;
   direction?: string | null;
@@ -114,24 +150,55 @@ export function isResultComplete(t: {
 }
 
 export function realizedR(t: {
+  status?: string | null;
   result?: string | null;
   risk_amount?: number | string | null;
   pnl_amount?: number | string | null;
   reward_amount?: number | string | null;
   achieved_rr?: number | string | null;
 }): number | null {
-  if (t.result !== "win" && t.result !== "loss" && t.result !== "breakeven") return null;
+  return realizedRContract(t).value;
+}
+
+/**
+ * Canonical realized-R evidence contract used everywhere in EdgeScope.
+ *
+ * - A known closed result plus positive Risk and finite P/L derives R.
+ * - A finite historical achieved R is a provenance-marked fallback only when
+ *   that source pair is unavailable.
+ * - Planned R:R never participates.
+ * - Missing or invalid evidence remains unknown.
+ */
+export function realizedRContract(t: {
+  status?: string | null;
+  result?: string | null;
+  risk_amount?: number | string | null;
+  pnl_amount?: number | string | null;
+  reward_amount?: number | string | null;
+  achieved_rr?: number | string | null;
+}): RealizedRContract {
+  if (t.status === "open") return { value: null, source: "missing", eligible: false };
+  if (t.result !== "win" && t.result !== "loss" && t.result !== "breakeven") {
+    return { value: null, source: "missing", eligible: false };
+  }
   const risk = finiteNumber(t.risk_amount);
-  const recordedPnl = finiteNumber(t.pnl_amount ?? t.reward_amount);
+  const recordedPnl = finiteNumber(t.pnl_amount) ?? finiteNumber(t.reward_amount);
   // Risk and P/L are the canonical source for live trades. The persisted value is
   // retained as a compatibility fallback for valid historical imports that did not
   // capture the pair. This keeps every Analytics consumer on one result invariant.
-  if (risk == null || risk <= 0 || recordedPnl == null) return recordedR(t.achieved_rr);
+  if (risk == null || risk <= 0 || recordedPnl == null) {
+    const legacy = recordedRForResult(t.achieved_rr, t.result);
+    return legacy == null
+      ? { value: null, source: "missing", eligible: false }
+      : { value: legacy, source: "recorded_legacy", eligible: true };
+  }
 
   const signedPnl =
     t.result === "loss" ? -Math.abs(recordedPnl) : t.result === "win" ? Math.abs(recordedPnl) : 0;
   const value = signedPnl / risk;
-  return Number.isFinite(value) ? Number(value.toFixed(2)) : null;
+  return Number.isFinite(value)
+    ? { value: Number(value.toFixed(2)), source: "derived_risk_pnl", eligible: true }
+    : { value: null, source: "missing", eligible: false };
 }
 
 export function isPaperTrade(t: { is_paper?: boolean | null }): boolean {
@@ -139,7 +206,9 @@ export function isPaperTrade(t: { is_paper?: boolean | null }): boolean {
 }
 
 export function tradeDollarPnl(t: {
+  status?: string | null;
   achieved_rr?: number | string | null;
+  risk_amount?: number | string | null;
   risk_percentage?: number | string | null;
   account_size?: number | string | null;
   result?: string | null;
@@ -156,7 +225,13 @@ export function tradeDollarPnl(t: {
     return actual;
   }
 
-  const r = recordedR(t.achieved_rr);
+  const r = realizedR(t);
+  const riskAmount = finiteNumber(t.risk_amount);
+  if (r != null && riskAmount != null && riskAmount > 0) {
+    const pnl = r * riskAmount;
+    return Number.isFinite(pnl) ? pnl : null;
+  }
+
   const riskPct = finiteNumber(t.risk_percentage);
   const accountSize = finiteNumber(t.account_size);
   if (r == null || riskPct == null || accountSize == null) return null;

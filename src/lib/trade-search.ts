@@ -48,15 +48,13 @@ function matchesNumericDate(parts: DateParts, query: string): boolean {
   if (query.length === 4) {
     return String(parts.year) === query;
   }
-  
+
   if (query.length <= 2) {
     const queryNum = Number(query);
     return parts.day === queryNum || parts.month === queryNum;
   }
 
-  return (
-    String(parts.year).startsWith(query)
-  );
+  return String(parts.year).startsWith(query);
 }
 
 function matchesFormattedDate(parts: DateParts, query: string): boolean {
@@ -112,7 +110,13 @@ export function matchesTradeSearch(row: TradeSearchRow, rawQuery: string): boole
   }
 
   const tokens = query.replace(/,/g, " ").split(/\s+/).filter(Boolean);
-  const textTokens = tokens.filter(t => monthFromToken(t) === null && !/^\d+$/.test(t) && !/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(t) && !/^\d{4}-\d{1,2}-\d{1,2}$/.test(t));
+  const textTokens = tokens.filter(
+    (t) =>
+      monthFromToken(t) === null &&
+      !/^\d+$/.test(t) &&
+      !/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(t) &&
+      !/^\d{4}-\d{1,2}-\d{1,2}$/.test(t),
+  );
   const textQuery = textTokens.join(" ");
 
   const compactQuery = textQuery.replace(/\s+/g, "");
@@ -182,7 +186,7 @@ export function tradeSearchSuggestions(
       : false;
     return [
       { value: row.instrument.trim(), detail: "Instrument", matches: false },
-      { value: row.category.trim(), detail: "Setup", matches: false },
+      { value: row.category.trim(), detail: "Category", matches: false },
       { value: formatTradeDateKey(row.tradeDate), detail: "Date", matches: dateMatches },
     ];
   });

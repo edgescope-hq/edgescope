@@ -19,7 +19,7 @@ import {
   createTradeCategory,
   listTradeCategories,
 } from "@/lib/trade-categories.functions";
-import { rrNum, type DbTrade } from "@/lib/trade-mappers";
+import { isPaperTrade, primaryTradeCategory, realizedR, type DbTrade } from "@/lib/trade-mappers";
 import {
   getReviewStatus,
   REVIEW_STATUS_BADGE,
@@ -36,11 +36,7 @@ import {
   tradeCompletenessRequirementsFromPreferences,
   type TradeCompletenessRequirements,
 } from "@/lib/journal-tracking";
-import {
-  formatTradeDateKey,
-  matchesTradeSearch,
-  tradeSearchSuggestions,
-} from "@/lib/trade-search";
+import { formatTradeDateKey, matchesTradeSearch, tradeSearchSuggestions } from "@/lib/trade-search";
 import { SearchInput } from "@/components/ui/search-input";
 
 export const Route = createFileRoute("/_authenticated/trades")({
@@ -60,9 +56,9 @@ type Row = {
   sym: string;
   date: string;
   rawDate: string;
-  side: "LONG" | "SHORT";
-  res: "WIN" | "LOSS" | "BE";
-  rr: number;
+  side: "LONG" | "SHORT" | null;
+  res: "WIN" | "LOSS" | "BE" | null;
+  rr: number | null;
   hasRR: boolean;
   plannedRR: string;
   category: string;
@@ -70,7 +66,7 @@ type Row = {
   session: string;
   reasoning: string;
   notes: string;
-  grade: Grade;
+  grade: Grade | null;
   emotionBefore: string;
   emotionDuring: string;
   emotionAfter: string;
@@ -167,26 +163,26 @@ function dbToRow(
         ? "LOSS"
         : t.result === "breakeven"
           ? "BE"
-          : "BE";
+          : null;
   const plannedRaw = t.planned_rr != null ? String(t.planned_rr).trim() : "";
-  const achievedNum = t.achieved_rr == null || t.achieved_rr === "" ? null : Number(t.achieved_rr);
+  const achievedNum = realizedR(t);
   return {
     id: t.id,
     num,
     sym: (t.instrument ?? "").trim(),
     date: formatTradeDateOnly(t.trade_date),
     rawDate: t.trade_date,
-    side: t.direction === "short" ? "SHORT" : "LONG",
+    side: t.direction === "short" ? "SHORT" : t.direction === "long" ? "LONG" : null,
     res,
-    rr: rrNum(t.achieved_rr),
-    hasRR: achievedNum !== null && Number.isFinite(achievedNum),
+    rr: achievedNum,
+    hasRR: achievedNum !== null,
     plannedRR: plannedRaw,
-    category: ((t.categories ?? []).find((c) => c && c.trim()) ?? "").trim(),
+    category: primaryTradeCategory(t) ?? "",
     subcategory: ((t.subcategories ?? []).find((s) => s && s.trim()) ?? "").trim(),
     session: t.session ?? "",
     reasoning: t.reasoning ?? "",
     notes: t.lessons_learned ?? "",
-    grade: (GRADES as readonly string[]).includes(t.grade ?? "") ? (t.grade as Grade) : "B",
+    grade: (GRADES as readonly string[]).includes(t.grade ?? "") ? (t.grade as Grade) : null,
     emotionBefore: t.emotion_before ?? "",
     emotionDuring: t.emotion_during ?? "",
     emotionAfter: t.emotion_after ?? "",
@@ -238,6 +234,10 @@ function TradesPage() {
     const account = new URLSearchParams(location.searchStr).get("account");
     return account || null;
   }, [location.searchStr]);
+  const tradeFromSearch = useMemo(
+    () => new URLSearchParams(location.searchStr).get("trade"),
+    [location.searchStr],
+  );
   const reviewFiltersFromSearch = useMemo<ReviewStatus[]>(() => {
     const requested = new URLSearchParams(location.searchStr).get("review")?.split(",") ?? [];
     const selected = requested.filter(
@@ -265,6 +265,7 @@ function TradesPage() {
   const dbRows = useMemo(
     () =>
       allDbRows.filter((t) => {
+        if (isPaperTrade(t)) return false;
         const isOpen = (t as DbTrade & { status?: string }).status === "open";
         if (isOpen) return false; // hide live open positions; they live on /paper
         return true;
@@ -311,6 +312,12 @@ function TradesPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
 
+  useEffect(() => {
+    if (!tradeFromSearch) return;
+    const row = rows.find((item) => item.id === tradeFromSearch);
+    if (row) setDetail({ id: row.id, num: row.num });
+  }, [rows, tradeFromSearch]);
+
   const editingDb = useMemo(
     () => (editingId ? (dbRows.find((t) => t.id === editingId) ?? null) : null),
     [editingId, dbRows],
@@ -337,7 +344,7 @@ function TradesPage() {
       accountFilter !== "ALL" &&
       allDbRows.some((trade) => {
         const isOpen = (trade as DbTrade & { status?: string }).status === "open";
-        return !isOpen && trade.account_id === accountFilter;
+        return !isPaperTrade(trade) && !isOpen && trade.account_id === accountFilter;
       }),
     [accountFilter, allDbRows],
   );
@@ -488,7 +495,9 @@ function TradesPage() {
                   }}
                   className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left hover:bg-white/[0.06]"
                 >
-                  <span className="min-w-0 truncate text-sm text-foreground">{suggestion.label}</span>
+                  <span className="min-w-0 truncate text-sm text-foreground">
+                    {suggestion.label}
+                  </span>
                   <span className="shrink-0 text-[11px] text-muted-foreground">
                     {suggestion.detail}
                   </span>
@@ -498,7 +507,7 @@ function TradesPage() {
           )}
         </div>
         <AccountFilterSelect
-          accounts={accounts.filter((account) => account.status !== "archived")}
+          accounts={accounts}
           value={accountFilter}
           onValueChange={setAccountFilter}
         />
@@ -550,7 +559,7 @@ function TradesPage() {
               </div>
               <div>
                 <label className="text-[10px] font-semibold tracking-wider text-muted-foreground">
-                  CATEGORY / SETUP
+                  CATEGORY
                 </label>
                 <div
                   role="combobox"
@@ -708,9 +717,9 @@ function TradesPage() {
                 </div>
                 <div role="rowgroup" className="divide-y divide-white/[0.04]">
                   {visibleRows.map((r, i) => {
-                    const positive = r.hasRR && r.rr > 0;
-                    const negative = r.hasRR && r.rr < 0;
-                    const breakeven = r.hasRR && r.rr === 0;
+                    const positive = r.rr != null && r.rr > 0;
+                    const negative = r.rr != null && r.rr < 0;
+                    const breakeven = r.rr === 0;
                     return (
                       <motion.button
                         key={r.id}
@@ -758,7 +767,7 @@ function TradesPage() {
                             (!r.hasRR || breakeven) && "text-muted-foreground",
                           )}
                         >
-                          {r.hasRR ? `${positive ? "+" : ""}${r.rr.toFixed(2)}R` : "—"}
+                          {r.rr != null ? `${positive ? "+" : ""}${r.rr.toFixed(2)}R` : "—"}
                         </div>
                         <div role="cell" className="px-3 py-4 text-center">
                           <span

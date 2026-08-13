@@ -7,12 +7,13 @@ import {
 } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { AppSidebar } from "@/components/app/sidebar";
 import { cancelAccountDeletion, getProfile } from "@/lib/account.functions";
 import { ActiveAccountProvider } from "@/components/active-account-provider";
+import { authTransitionResetsUserCache, resetUserSessionCache } from "@/lib/session-cache-boundary";
 
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
@@ -31,6 +32,7 @@ function AuthenticatedLayout() {
   const qc = useQueryClient();
   const getProfileFn = useServerFn(getProfile);
   const cancelAccountDeletionFn = useServerFn(cancelAccountDeletion);
+  const sessionUserIdRef = useRef<string | null>(user.id);
   const { data: profile } = useQuery({
     queryKey: ["profile"],
     queryFn: () => getProfileFn(),
@@ -56,9 +58,30 @@ function AuthenticatedLayout() {
     (profile as { deletion_scheduled_for?: string | null } | undefined)?.deletion_scheduled_for ??
     null;
 
+  useEffect(() => {
+    const { data } = supabase.auth.onAuthStateChange((event, session) => {
+      const previousUserId = sessionUserIdRef.current;
+      const nextUserId = session?.user.id ?? null;
+      const mustReset = authTransitionResetsUserCache(previousUserId, nextUserId, event);
+      sessionUserIdRef.current = nextUserId;
+      if (!mustReset) return;
+
+      void (async () => {
+        await resetUserSessionCache(qc);
+        if (!nextUserId) {
+          navigate({ to: "/auth", replace: true });
+          return;
+        }
+        // Re-enter the authenticated route so its context is rebuilt with the
+        // replacement user before any domain query can run.
+        window.location.replace("/dashboard");
+      })();
+    });
+    return () => data.subscription.unsubscribe();
+  }, [navigate, qc]);
+
   const signOutAndKeepDeletion = async () => {
-    await qc.cancelQueries();
-    qc.clear();
+    await resetUserSessionCache(qc);
     await supabase.auth.signOut();
     navigate({ to: "/auth", replace: true });
   };
@@ -87,12 +110,18 @@ function AuthenticatedLayout() {
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-4 backdrop-blur-md">
           <div className="glow-card w-full max-w-lg rounded-2xl p-6">
             <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-primary/85">
-              Account deletion pending review
+              Account deletion scheduled
             </div>
             <h2 className="mt-2 text-xl font-bold">Keep your EdgeScope account?</h2>
             <p className="mt-3 text-sm leading-6 text-muted-foreground">
-              This account is pending deletion review. Cancel the request to continue using
-              EdgeScope, or sign out to keep the request active.
+              Permanent deletion is scheduled for
+              {` ${new Date(deletionScheduledFor).toLocaleDateString("en-US", {
+                month: "long",
+                day: "numeric",
+                year: "numeric",
+              })}. `}
+              Cancel before processing begins to keep using EdgeScope, or sign out to leave the
+              schedule in place.
             </p>
             <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button

@@ -1,38 +1,25 @@
-// Scope discovery engine — deterministic, evidence-based pattern scanning
-// over REVIEWED trades only.
+// Deterministic, claim-specific Scope interpretation.
 //
-// Principles enforced here (not in the UI):
-//   - No discovery below MIN_MATCHING matching trades. Hidden, not "low confidence".
-//   - Every discovery compares against an explicit baseline (same-setup when
-//     possible, otherwise the rest of the reviewed sample).
-//   - Weak baseline differences are rejected, not shown.
-//   - Combination depth grows with the reviewed sample (2 → 3 → 4 factors)
-//     so tiny samples can never produce ultra-specific "patterns".
-//   - Same reviewed trades in → same discoveries out. No randomness, no dates.
-//
-// Scope prefers showing nothing over showing a weak or misleading discovery.
+// Evidence establishes; rules calculate; Scope interprets; the trader decides.
+// A claim is eligible from the particular fields it needs, never from a
+// universal Reviewed gate. Missing values remain unknown.
 
 import type { DbTrade } from "@/lib/trade-mappers";
-import { recordedR } from "@/lib/trade-mappers";
+import { isPaperTrade, primaryTradeCategory, realizedR } from "@/lib/trade-mappers";
+import { getReviewStatus } from "@/lib/review-status";
 import { sessionLabel } from "@/lib/trade-constants";
 import { parsePlannedRR, rrBucketLabel } from "@/lib/planned-rr";
 
-// ============ Public types ============
-
-export type DiscoveryCategory = "setup" | "risk" | "execution" | "journal";
-
-/** Matching-sample confidence. Anything below MIN_MATCHING is never shown. */
+export type DiscoveryCategory = "category" | "risk" | "execution";
 export type DiscoveryConfidence = "early" | "low" | "medium" | "good";
-
 export type DiscoveryDirection = "positive" | "negative";
-
 export type DiscoveryCondition = { key: string; label: string };
 
-export type DiscoveryBaseline = {
-  label: string;
-  sampleSize: number;
-  winRate: number | null;
-  avgR: number | null;
+export type BehavioralFocusCandidate = {
+  behavior: string;
+  triggerSituation: string;
+  intendedBehavior: string;
+  evidenceDefinition: string;
 };
 
 export type ScopeDiscovery = {
@@ -43,731 +30,568 @@ export type ScopeDiscovery = {
   description: string;
   conditionChips: DiscoveryCondition[];
   matchingTradeCount: number;
+  matchingResultCount: number;
+  matchingRCount: number;
   winRate: number | null;
   avgR: number | null;
-  baseline: DiscoveryBaseline;
+  baseline: {
+    label: string;
+    sampleSize: number;
+    resultCount: number;
+    rCount: number;
+    winRate: number | null;
+    avgR: number | null;
+  };
   deltaWinRate: number | null;
   deltaAvgR: number | null;
   confidence: DiscoveryConfidence;
   caution: string;
   matchingTradeIds: string[];
   rankScore: number;
-  dateRange?: string | null;
+  dateRange: string | null;
+  focusCandidate: BehavioralFocusCandidate | null;
 };
 
 export type ScopeScanResult = {
+  evidenceTradeCount: number;
+  resultEvidenceCount: number;
+  rEvidenceCount: number;
   reviewedCount: number;
-  /** Overall reviewed baseline, shown as context next to discoveries. */
   baselineWinRate: number | null;
   baselineAvgR: number | null;
   discoveries: ScopeDiscovery[];
 };
 
-// ============ Thresholds (all deterministic, tuned for honesty) ============
+export type StandardChallenge = {
+  id: string;
+  standardId: string;
+  standardVersionId: string;
+  standardTitle: string;
+  title: string;
+  description: string;
+  matchingTradeIds: string[];
+  sampleSize: number;
+  avgR: number;
+  baselineAvgR: number | null;
+};
 
-/** Below this many matching trades a pattern is hidden entirely. */
-const MIN_MATCHING = 10;
-/** A baseline with fewer trades than this cannot support a comparison. */
-const MIN_BASELINE = 10;
-/** Extra matching floor for deeper combinations (anti-overfitting). */
-const MIN_MATCHING_3F = 12;
-const MIN_MATCHING_4F = 16;
-/** Reviewed-sample size required to unlock deeper combination scanning. */
-const DEPTH_3_REVIEWED = 30;
-const DEPTH_4_REVIEWED = 80;
-/** Significance gates: reject weak baseline differences. */
-const MIN_ABS_DELTA_R = 0.3; // avg R difference that stands alone
-const MIN_ABS_DELTA_WIN = 12; // win-rate points, only counts with some R delta
-const MIN_DELTA_R_WITH_WIN = 0.15;
-/** Field-completeness below this share downgrades confidence one step. */
-const MIN_FIELD_COMPLETENESS = 0.6;
-/** Selection caps: Scope stays selective. */
-const MAX_PER_CATEGORY = 3;
-const MAX_TOTAL = 6;
+export const SCOPE_CAUTION =
+  "A review clue from your stored evidence, not a signal or instruction.";
 
-export const SCOPE_CAUTION = "Not a signal — a review clue from your past reviewed trades.";
-
-// ============ Internal trade projection ============
+const MIN_MATCHING = 6;
+const MIN_BASELINE = 6;
+const MIN_ABS_DELTA_R = 0.35;
+const MIN_ABS_DELTA_WIN_RATE = 15;
 
 type ScopeTrade = {
   id: string;
   result: "win" | "loss" | "breakeven" | null;
   r: number | null;
   session: string | null;
-  setup: string | null;
+  category: string | null;
   instrument: string | null;
-  direction: "long" | "short";
-  plannedRR: number | null;
-  rrBucket: string | null;
-  inKillzone: boolean | null;
-  riskAmount: number | null;
+  direction: "long" | "short" | null;
+  plannedRRBucket: string | null;
   riskPct: number | null;
   accountId: string | null;
-  mistakeTags: string[];
-  reasoningLength: number;
+  issueTags: string[];
   tradeDate: string;
   timeMs: number | null;
+  setupIntentVersionId: string | null;
+  setupIntentProvenance: "capture" | "retrospective_review" | null;
+  setupIntentRecordedAt: string | null;
+  setupAdherence: "followed" | "deviated" | "unassessable" | null;
 };
 
-function toScopeTrade(t: DbTrade): ScopeTrade {
-  const setup = ((t.categories ?? []).find((c) => c && c.trim()) ?? "").trim() || null;
-  const plannedRR = parsePlannedRR(t.planned_rr);
-  const timeMsRaw = t.trade_time ? new Date(`${t.trade_date}T${t.trade_time}`).getTime() : NaN;
-  const risk = t.risk_amount == null || t.risk_amount === "" ? NaN : Number(t.risk_amount);
-  const rpRaw =
-    t.risk_percentage == null || t.risk_percentage === "" ? NaN : Number(t.risk_percentage);
+function finite(value: number | string | null | undefined): number | null {
+  if (value == null || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function toScopeTrade(trade: DbTrade): ScopeTrade {
+  const planned = parsePlannedRR(trade.planned_rr);
+  const riskAmount = finite(trade.risk_amount);
+  const accountSize = finite(trade.account_size);
+  const storedRiskPct = finite(trade.risk_percentage);
   const riskPct =
-    Number.isFinite(rpRaw) && rpRaw > 0
-      ? rpRaw
-      : Number.isFinite(risk) && risk > 0
-        ? (() => {
-            const size =
-              t.account_size == null || t.account_size === "" ? NaN : Number(t.account_size);
-            return Number.isFinite(size) && size > 0 ? (risk / size) * 100 : NaN;
-          })()
-        : NaN;
+    storedRiskPct != null && storedRiskPct > 0
+      ? storedRiskPct
+      : riskAmount != null && riskAmount > 0 && accountSize != null && accountSize > 0
+        ? (riskAmount / accountSize) * 100
+        : null;
+  const time = trade.trade_time ? Date.parse(`${trade.trade_date}T${trade.trade_time}`) : NaN;
   return {
-    id: t.id,
-    result: t.result === "win" || t.result === "loss" || t.result === "breakeven" ? t.result : null,
-    r: recordedR(t.achieved_rr),
-    session: t.session?.trim() || null,
-    setup,
-    instrument: t.instrument?.trim() || null,
-    direction: t.direction === "short" ? "short" : "long",
-    plannedRR,
-    rrBucket: rrBucketLabel(plannedRR),
-    inKillzone: typeof t.in_killzone === "boolean" ? t.in_killzone : null,
-    riskAmount: Number.isFinite(risk) ? risk : null,
-    riskPct: Number.isFinite(riskPct) ? riskPct : null,
-    accountId: t.account_id ?? null,
-    mistakeTags: (t.mistake_tags ?? []).map((tag) => tag.trim()).filter(Boolean),
-    reasoningLength: (t.reasoning ?? "").trim().length,
-    tradeDate: t.trade_date,
-    timeMs: Number.isFinite(timeMsRaw) ? timeMsRaw : null,
+    id: trade.id,
+    result:
+      trade.status !== "open" &&
+      (trade.result === "win" || trade.result === "loss" || trade.result === "breakeven")
+        ? trade.result
+        : null,
+    r: realizedR(trade),
+    session: trade.session?.trim() || null,
+    category: primaryTradeCategory(trade),
+    instrument: trade.instrument?.trim() || null,
+    direction: trade.direction === "long" || trade.direction === "short" ? trade.direction : null,
+    plannedRRBucket: rrBucketLabel(planned),
+    riskPct,
+    accountId: trade.account_id ?? null,
+    issueTags: (trade.mistake_tags ?? []).map((tag) => tag.trim()).filter(Boolean),
+    tradeDate: trade.trade_date,
+    timeMs: Number.isFinite(time) ? time : null,
+    setupIntentVersionId: trade.setup_intent_version_id ?? null,
+    setupIntentProvenance: trade.setup_intent_provenance ?? null,
+    setupIntentRecordedAt: trade.setup_intent_recorded_at ?? null,
+    setupAdherence:
+      trade.setup_adherence === "followed" ||
+      trade.setup_adherence === "deviated" ||
+      trade.setup_adherence === "unassessable"
+        ? trade.setup_adherence
+        : null,
   };
 }
 
-// ============ Stats helpers ============
-
-type SampleStats = {
+type Stats = {
   sampleSize: number;
+  resultCount: number;
+  rCount: number;
   winRate: number | null;
   avgR: number | null;
   ids: string[];
 };
 
-function statsOf(trades: ScopeTrade[]): SampleStats {
-  const wins = trades.filter((t) => t.result === "win").length;
-  const losses = trades.filter((t) => t.result === "loss").length;
-  const breakeven = trades.filter((t) => t.result === "breakeven").length;
-  const decided = wins + losses + breakeven;
-  const rs = trades.map((t) => t.r).filter((r): r is number => r != null);
+function statsOf(trades: ScopeTrade[]): Stats {
+  const resultRows = trades.filter((trade) => trade.result !== null);
+  const wins = resultRows.filter((trade) => trade.result === "win").length;
+  const rValues = trades.map((trade) => trade.r).filter((value): value is number => value !== null);
   return {
     sampleSize: trades.length,
-    winRate: decided > 0 ? (wins / decided) * 100 : null,
-    avgR: rs.length > 0 ? rs.reduce((a, b) => a + b, 0) / rs.length : null,
-    ids: trades.map((t) => t.id),
+    resultCount: resultRows.length,
+    rCount: rValues.length,
+    winRate: resultRows.length ? (wins / resultRows.length) * 100 : null,
+    avgR: rValues.length ? rValues.reduce((sum, value) => sum + value, 0) / rValues.length : null,
+    ids: trades.map((trade) => trade.id),
   };
 }
 
-function confidenceFromMatching(count: number): DiscoveryConfidence {
-  if (count >= 80) return "good";
-  if (count >= 50) return "medium";
-  if (count >= 20) return "low";
+function confidenceFor(count: number): DiscoveryConfidence {
+  if (count >= 60) return "good";
+  if (count >= 30) return "medium";
+  if (count >= 15) return "low";
   return "early";
 }
 
-const CONFIDENCE_ORDER: DiscoveryConfidence[] = ["early", "low", "medium", "good"];
-
-function downgrade(c: DiscoveryConfidence, steps: number): DiscoveryConfidence {
-  const index = Math.max(0, CONFIDENCE_ORDER.indexOf(c) - steps);
-  return CONFIDENCE_ORDER[index];
+function dateRange(trades: ScopeTrade[]): string | null {
+  const dates = trades
+    .map((trade) => trade.tradeDate)
+    .filter(Boolean)
+    .sort();
+  if (!dates.length) return null;
+  const format = (value: string) =>
+    new Date(`${value}T00:00:00`).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  return dates[0] === dates.at(-1)
+    ? format(dates[0])
+    : `${format(dates[0])} – ${format(dates.at(-1)!)}`;
 }
 
-const CONFIDENCE_WEIGHT: Record<DiscoveryConfidence, number> = {
-  early: 0,
-  low: 0.2,
-  medium: 0.4,
-  good: 0.6,
-};
-
-// ============ Comparison core ============
-
-type ComparisonInput = {
+function compare(input: {
   id: string;
   category: DiscoveryCategory;
   matching: ScopeTrade[];
-  baselineTrades: ScopeTrade[];
+  baseline: ScopeTrade[];
   baselineLabel: string;
-  conditionChips: DiscoveryCondition[];
-  /** Human phrase for the condition, used in the title. */
+  condition: DiscoveryCondition;
   conditionLabel: string;
-  factorCount: number;
-  /** Share (0..1) of reviewed trades that have all fields this check uses. */
-  fieldCompleteness: number;
-  minMatching?: number;
-  /** Optional fixed title/description overrides for behavior-style checks. */
-  title?: (direction: DiscoveryDirection) => string;
-  description?: (direction: DiscoveryDirection) => string;
-};
-
-/**
- * Evaluate one condition against its baseline. Returns null when the evidence
- * does not clear the honesty bar (sample, baseline, or significance).
- */
-function evaluateComparison(input: ComparisonInput): ScopeDiscovery | null {
-  const minMatching = input.minMatching ?? MIN_MATCHING;
-  if (input.matching.length < minMatching) return null;
-  if (input.baselineTrades.length < MIN_BASELINE) return null;
-
-  const m = statsOf(input.matching);
-  const b = statsOf(input.baselineTrades);
-  if (m.avgR == null || b.avgR == null) return null;
-
-  const deltaAvgR = m.avgR - b.avgR;
-  const deltaWinRate = m.winRate != null && b.winRate != null ? m.winRate - b.winRate : null;
-
-  const isSmallSample = m.sampleSize < 20 || b.sampleSize < 20;
-  const reqDeltaR = isSmallSample ? 0.5 : MIN_ABS_DELTA_R;
-  const reqDeltaRWithWin = isSmallSample ? 0.25 : MIN_DELTA_R_WITH_WIN;
-  const reqDeltaWin = isSmallSample ? 15 : MIN_ABS_DELTA_WIN;
-
+  descriptionContext: string;
+  focusCandidate?: BehavioralFocusCandidate | null;
+  negativeOnly?: boolean;
+}): ScopeDiscovery | null {
+  if (input.matching.length < MIN_MATCHING || input.baseline.length < MIN_BASELINE) return null;
+  const matching = statsOf(input.matching);
+  const baseline = statsOf(input.baseline);
+  const deltaR =
+    matching.rCount >= MIN_MATCHING &&
+    baseline.rCount >= MIN_BASELINE &&
+    matching.avgR != null &&
+    baseline.avgR != null
+      ? matching.avgR - baseline.avgR
+      : null;
+  const deltaWin =
+    matching.resultCount >= MIN_MATCHING &&
+    baseline.resultCount >= MIN_BASELINE &&
+    matching.winRate != null &&
+    baseline.winRate != null
+      ? matching.winRate - baseline.winRate
+      : null;
   const significant =
-    Math.abs(deltaAvgR) >= reqDeltaR ||
-    (deltaWinRate != null &&
-      Math.abs(deltaWinRate) >= reqDeltaWin &&
-      Math.abs(deltaAvgR) >= reqDeltaRWithWin);
+    (deltaR != null && Math.abs(deltaR) >= MIN_ABS_DELTA_R) ||
+    (deltaWin != null && Math.abs(deltaWin) >= MIN_ABS_DELTA_WIN_RATE);
   if (!significant) return null;
-
-  const direction: DiscoveryDirection = deltaAvgR >= 0 ? "positive" : "negative";
-
-  let confidence = confidenceFromMatching(m.sampleSize);
-  if (input.factorCount >= 3 && m.sampleSize < 25) confidence = downgrade(confidence, 1);
-  if (input.fieldCompleteness < MIN_FIELD_COMPLETENESS) confidence = downgrade(confidence, 1);
-
-  const title =
-    input.title?.(direction) ??
-    `${input.conditionLabel} is ${direction === "positive" ? "outperforming" : "underperforming"} ${input.baselineLabel.toLowerCase()}`;
-  const description =
-    input.description?.(direction) ??
-    (direction === "positive"
-      ? "Your reviewed data suggests this condition is currently outperforming its baseline. Evidence can change as your sample grows."
-      : "Your reviewed data suggests this condition is currently underperforming its baseline. Consider reviewing the matching trades before changing any rules.");
-
-  const rankScore =
-    Math.abs(deltaAvgR) * 2 +
-    (deltaWinRate != null ? Math.abs(deltaWinRate) / 20 : 0) +
-    Math.min(m.sampleSize, 80) / 80 +
-    CONFIDENCE_WEIGHT[confidence] -
-    0.25 * Math.max(0, input.factorCount - 2) -
-    (input.fieldCompleteness < MIN_FIELD_COMPLETENESS ? 0.2 : 0);
-
-  const dates = input.matching.map((t) => t.tradeDate).filter(Boolean);
-  let dateRange: string | null = null;
-  if (dates.length > 0) {
-    const sortedDates = [...dates].sort();
-    const minDate = sortedDates[0];
-    const maxDate = sortedDates[sortedDates.length - 1];
-    const fmt = (dStr: string) => {
-      try {
-        return new Date(dStr + "T00:00:00").toLocaleDateString("en-US", {
-          month: "short",
-          day: "numeric",
-          year: "numeric",
-        });
-      } catch {
-        return dStr;
-      }
-    };
-    dateRange = minDate === maxDate ? fmt(minDate) : `${fmt(minDate)} – ${fmt(maxDate)}`;
-  }
-
+  const direction: DiscoveryDirection =
+    deltaR != null
+      ? deltaR >= 0
+        ? "positive"
+        : "negative"
+      : (deltaWin ?? 0) >= 0
+        ? "positive"
+        : "negative";
+  if (input.negativeOnly && direction !== "negative") return null;
+  const verb = direction === "positive" ? "outperforming" : "underperforming";
+  const description = `${input.descriptionContext} The stored outcomes differ from ${input.baselineLabel.toLowerCase()}; this establishes a correlation only.`;
   return {
     id: input.id,
     category: input.category,
     direction,
-    title,
+    title: `${input.conditionLabel} is ${verb} its comparison sample`,
     description,
-    conditionChips: input.conditionChips,
-    matchingTradeCount: m.sampleSize,
-    winRate: m.winRate,
-    avgR: m.avgR,
+    conditionChips: [input.condition],
+    matchingTradeCount: matching.sampleSize,
+    matchingResultCount: matching.resultCount,
+    matchingRCount: matching.rCount,
+    winRate: matching.winRate,
+    avgR: matching.avgR,
     baseline: {
       label: input.baselineLabel,
-      sampleSize: b.sampleSize,
-      winRate: b.winRate,
-      avgR: b.avgR,
+      sampleSize: baseline.sampleSize,
+      resultCount: baseline.resultCount,
+      rCount: baseline.rCount,
+      winRate: baseline.winRate,
+      avgR: baseline.avgR,
     },
-    deltaWinRate,
-    deltaAvgR,
-    confidence,
+    deltaWinRate: deltaWin,
+    deltaAvgR: deltaR,
+    confidence: confidenceFor(matching.sampleSize),
     caution: SCOPE_CAUTION,
-    matchingTradeIds: m.ids,
-    rankScore: Number(rankScore.toFixed(4)),
-    dateRange,
+    matchingTradeIds: matching.ids,
+    rankScore: Math.abs(deltaR ?? 0) * 2 + Math.abs(deltaWin ?? 0) / 20 + matching.sampleSize / 100,
+    dateRange: dateRange(input.matching),
+    focusCandidate: direction === "negative" ? (input.focusCandidate ?? null) : null,
   };
 }
 
-// ============ Setup Conditions: multi-factor combination scan ============
-
-type Dimension = {
-  key: string;
-  /** null → trade does not participate in combos using this dimension. */
-  valueOf: (t: ScopeTrade) => { value: string; label: string } | null;
-};
-
-const DIMENSIONS: Record<string, Dimension> = {
-  session: {
-    key: "session",
-    valueOf: (t) => (t.session ? { value: t.session, label: sessionLabel(t.session) } : null),
+function scanDimension(
+  trades: ScopeTrade[],
+  input: {
+    key: DiscoveryCategory | "session" | "instrument" | "direction";
+    category: DiscoveryCategory;
+    valueOf: (trade: ScopeTrade) => string | null;
+    labelOf?: (value: string) => string;
   },
-  setup: {
-    key: "setup",
-    valueOf: (t) => (t.setup ? { value: t.setup, label: t.setup } : null),
-  },
-  instrument: {
-    key: "instrument",
-    valueOf: (t) => (t.instrument ? { value: t.instrument, label: t.instrument } : null),
-  },
-  direction: {
-    key: "direction",
-    valueOf: (t) => ({ value: t.direction, label: t.direction === "short" ? "Short" : "Long" }),
-  },
-  rr: {
-    key: "rr",
-    valueOf: (t) => (t.rrBucket ? { value: t.rrBucket, label: t.rrBucket } : null),
-  },
-  killzone: {
-    key: "killzone",
-    valueOf: (t) =>
-      t.inKillzone == null
-        ? null
-        : t.inKillzone
-          ? { value: "in", label: "In killzone" }
-          : { value: "out", label: "Outside killzone" },
-  },
-};
-
-/** Meaningful combinations only — no exhaustive search over every pairing. */
-const COMBOS_2F: string[][] = [
-  ["session", "setup"],
-  ["setup", "rr"],
-  ["setup", "instrument"],
-  ["setup", "direction"],
-  ["setup", "killzone"],
-  ["instrument", "rr"],
-];
-const COMBOS_3F: string[][] = [
-  ["session", "setup", "rr"],
-  ["instrument", "setup", "rr"],
-  ["session", "setup", "instrument"],
-  ["session", "setup", "killzone"],
-];
-const COMBOS_4F: string[][] = [["session", "setup", "instrument", "rr"]];
-
-function scanSetupConditions(trades: ScopeTrade[]): ScopeDiscovery[] {
-  const reviewedCount = trades.length;
-  const combos: string[][] = [
-    ...COMBOS_2F,
-    ...(reviewedCount >= DEPTH_3_REVIEWED ? COMBOS_3F : []),
-    ...(reviewedCount >= DEPTH_4_REVIEWED ? COMBOS_4F : []),
-  ];
-
-  const discoveries: ScopeDiscovery[] = [];
-
-  for (const comboKeys of combos) {
-    const dims = comboKeys.map((k) => DIMENSIONS[k]);
-    const factorCount = dims.length;
-    const minMatching =
-      factorCount >= 4 ? MIN_MATCHING_4F : factorCount === 3 ? MIN_MATCHING_3F : MIN_MATCHING;
-
-    // Trades that have every field used by this combo.
-    const eligible: Array<{ trade: ScopeTrade; values: { value: string; label: string }[] }> = [];
-    for (const trade of trades) {
-      const values = dims.map((d) => d.valueOf(trade));
-      if (values.every((v) => v != null)) {
-        eligible.push({ trade, values: values as { value: string; label: string }[] });
-      }
-    }
-    const fieldCompleteness = reviewedCount > 0 ? eligible.length / reviewedCount : 0;
-
-    // Group eligible trades by their combined value key.
-    const groups = new Map<string, { labels: string[]; trades: ScopeTrade[] }>();
-    for (const { trade, values } of eligible) {
-      const groupKey = values.map((v) => v.value).join("|");
-      if (!groups.has(groupKey)) {
-        groups.set(groupKey, { labels: values.map((v) => v.label), trades: [] });
-      }
-      groups.get(groupKey)!.trades.push(trade);
-    }
-
-    for (const [groupKey, group] of groups) {
-      if (group.trades.length < minMatching) continue;
-
-      // Baseline: same setup excluding this combo when the combo includes a
-      // setup; otherwise the rest of the reviewed sample.
-      const setupIndex = comboKeys.indexOf("setup");
-      const matchingIds = new Set(group.trades.map((t) => t.id));
-      let baselineTrades: ScopeTrade[];
-      let baselineLabel: string;
-      if (setupIndex >= 0) {
-        const setupValue = groupKey.split("|")[setupIndex];
-        baselineTrades = trades.filter((t) => t.setup === setupValue && !matchingIds.has(t.id));
-        baselineLabel = `Your other ${group.labels[setupIndex]} trades`;
-      } else {
-        baselineTrades = trades.filter((t) => !matchingIds.has(t.id));
-        baselineLabel = "The rest of your reviewed trades";
-      }
-
-      const conditionLabel = group.labels.join(" + ");
-      const discovery = evaluateComparison({
-        id: `setup:${comboKeys.join("+")}:${groupKey}`,
-        category: "setup",
-        matching: group.trades,
-        baselineTrades,
-        baselineLabel,
-        conditionChips: comboKeys.map((key, i) => ({ key, label: group.labels[i] })),
-        conditionLabel,
-        factorCount,
-        fieldCompleteness,
-        minMatching,
-      });
-      if (discovery) discoveries.push(discovery);
-    }
+): ScopeDiscovery[] {
+  const eligible = trades.filter(
+    (trade) => input.valueOf(trade) !== null && (trade.result !== null || trade.r !== null),
+  );
+  const groups = new Map<string, ScopeTrade[]>();
+  for (const trade of eligible) {
+    const value = input.valueOf(trade)!;
+    groups.set(value, [...(groups.get(value) ?? []), trade]);
   }
-
-  return discoveries;
-}
-
-// ============ Risk Behavior ============
-
-function scanRiskBehavior(trades: ScopeTrade[]): ScopeDiscovery[] {
   const discoveries: ScopeDiscovery[] = [];
-  const reviewedCount = trades.length;
-
-  // 1) Planned RR bucket vs the other RR-known trades (RR-planning quality).
-  const rrKnown = trades.filter((t) => t.rrBucket != null);
-  const rrCompleteness = reviewedCount > 0 ? rrKnown.length / reviewedCount : 0;
-  const buckets = new Map<string, ScopeTrade[]>();
-  for (const t of rrKnown) {
-    if (!buckets.has(t.rrBucket!)) buckets.set(t.rrBucket!, []);
-    buckets.get(t.rrBucket!)!.push(t);
-  }
-  for (const [bucket, bucketTrades] of buckets) {
-    const rest = rrKnown.filter((t) => t.rrBucket !== bucket);
-    const discovery = evaluateComparison({
-      id: `risk:rr-bucket:${bucket}`,
-      category: "risk",
-      matching: bucketTrades,
-      baselineTrades: rest,
-      baselineLabel: "Your trades planned at other RR levels",
-      conditionChips: [{ key: "rr", label: bucket }],
-      conditionLabel: bucket,
-      factorCount: 2,
-      fieldCompleteness: rrCompleteness,
+  for (const [value, matching] of groups) {
+    const label = input.labelOf?.(value) ?? value;
+    const baseline = eligible.filter((trade) => input.valueOf(trade) !== value);
+    const discovery = compare({
+      id: `${input.category}:${input.key}:${value}`,
+      category: input.category,
+      matching,
+      baseline,
+      baselineLabel: `Other ${String(input.key)}-known trades`,
+      condition: { key: String(input.key), label },
+      conditionLabel: label,
+      descriptionContext:
+        input.category === "category"
+          ? "Category is observational context, not proof of Playbook intent or adherence."
+          : "This comparison uses only trades with the evidence required for this claim.",
     });
     if (discovery) discoveries.push(discovery);
   }
-
-  // 2) Losses that ran beyond planned risk (achieved R at or below -1.3R).
-  const losses = trades.filter((t) => t.result === "loss" && t.r != null);
-  const overruns = losses.filter((t) => (t.r ?? 0) <= -1.3);
-  if (losses.length >= 15 && overruns.length >= 10) {
-    const overrunShare = overruns.length / losses.length;
-    if (overrunShare >= 0.2) {
-      const sharePct = Math.round(overrunShare * 100);
-      const confidence = confidenceFromMatching(overruns.length);
-      const rankScore = 1.0 + overruns.length / 80 + CONFIDENCE_WEIGHT[confidence];
-
-      const dates = overruns.map((t) => t.tradeDate).filter(Boolean);
-      let dateRange: string | null = null;
-      if (dates.length > 0) {
-        const sortedDates = [...dates].sort();
-        const minDate = sortedDates[0];
-        const maxDate = sortedDates[sortedDates.length - 1];
-        const fmt = (dStr: string) => {
-          try {
-            return new Date(dStr + "T00:00:00").toLocaleDateString("en-US", {
-              month: "short",
-              day: "numeric",
-              year: "numeric",
-            });
-          } catch {
-            return dStr;
-          }
-        };
-        dateRange = minDate === maxDate ? fmt(minDate) : `${fmt(minDate)} – ${fmt(maxDate)}`;
-      }
-
-      const discovery: ScopeDiscovery = {
-        id: "risk:loss-overrun",
-        category: "risk",
-        direction: "negative",
-        title: "A meaningful share of your losses are exceeding planned risk",
-        description: `${sharePct}% of your reviewed losses (${overruns.length} of ${losses.length}) ran worse than -1.3R. Review how these stops were handled — this is a review clue, not an instruction.`,
-        conditionChips: [{ key: "loss", label: "Loss beyond -1.3R" }],
-        matchingTradeCount: overruns.length,
-        winRate: null,
-        avgR: statsOf(overruns).avgR,
-        baseline: {
-          label: "All reviewed losses",
-          sampleSize: losses.length,
-          winRate: null,
-          avgR: statsOf(losses).avgR,
-        },
-        deltaWinRate: null,
-        deltaAvgR: null,
-        confidence,
-        caution: SCOPE_CAUTION,
-        matchingTradeIds: overruns.map((t) => t.id),
-        rankScore: Number(rankScore.toFixed(4)),
-        dateRange,
-      };
-      discoveries.push(discovery);
-    }
-  }
-
-  // 3) Oversized risk vs normal risk — normalized by account, within same account only.
-  const riskPctKnown = trades.filter((t) => t.riskPct != null && t.riskPct! > 0);
-  const riskByAccount = new Map<string | null, ScopeTrade[]>();
-  for (const t of riskPctKnown) {
-    const key = t.accountId ?? "_none";
-    if (!riskByAccount.has(key)) riskByAccount.set(key, []);
-    riskByAccount.get(key)!.push(t);
-  }
-  for (const [accountKey, accountTrades] of riskByAccount) {
-    if (accountTrades.length < 20) continue;
-    const sortedPct = accountTrades.map((t) => t.riskPct!).sort((a, b) => a - b);
-    const median = sortedPct[Math.floor(sortedPct.length / 2)];
-    if (median > 0) {
-      const oversized = accountTrades.filter((t) => t.riskPct! > median * 1.5);
-      const normal = accountTrades.filter((t) => t.riskPct! <= median * 1.5);
-      if (oversized.length < 10) continue;
-      const discovery = evaluateComparison({
-        id: `risk:oversized-risk:${accountKey}`,
-        category: "risk",
-        matching: oversized,
-        baselineTrades: normal,
-        baselineLabel: "Your normal %-risk trades",
-        conditionChips: [{ key: "risk", label: "Risk% above 1.5× your median" }],
-        conditionLabel: "Oversized %-risk trades",
-        factorCount: 2,
-        fieldCompleteness: accountTrades.length / reviewedCount,
-      });
-      if (discovery && discovery.direction === "negative") discoveries.push(discovery);
-    }
-  }
-
   return discoveries;
 }
 
-// ============ Execution Behavior ============
-
-function scanExecutionBehavior(trades: ScopeTrade[]): ScopeDiscovery[] {
-  const discoveries: ScopeDiscovery[] = [];
-  const reviewedCount = trades.length;
-
-  // 1) Mistake-tagged trades vs clean trades (overall).
-  const tagged = trades.filter((t) => t.mistakeTags.length > 0);
-  const clean = trades.filter((t) => t.mistakeTags.length === 0);
-  const taggedOverall = evaluateComparison({
-    id: "execution:mistake-tagged",
-    category: "execution",
-    matching: tagged,
-    baselineTrades: clean,
-    baselineLabel: "Your trades without mistake tags",
-    conditionChips: [{ key: "mistake", label: "Any mistake tag" }],
-    conditionLabel: "Trades with mistake tags",
-    factorCount: 2,
-    fieldCompleteness: 1,
-  });
-  if (taggedOverall && taggedOverall.direction === "negative") discoveries.push(taggedOverall);
-
-  // 2) Per-tag checks against untagged trades.
-  const byTag = new Map<string, ScopeTrade[]>();
-  for (const t of tagged) {
-    for (const tag of t.mistakeTags) {
-      if (!byTag.has(tag)) byTag.set(tag, []);
-      byTag.get(tag)!.push(t);
-    }
+function scanPlannedTargets(trades: ScopeTrade[]): ScopeDiscovery[] {
+  const known = trades.filter(
+    (trade) => trade.plannedRRBucket && (trade.result !== null || trade.r !== null),
+  );
+  const buckets = new Map<string, ScopeTrade[]>();
+  for (const trade of known) {
+    buckets.set(trade.plannedRRBucket!, [...(buckets.get(trade.plannedRRBucket!) ?? []), trade]);
   }
-  for (const [tag, tagTrades] of byTag) {
-    const discovery = evaluateComparison({
-      id: `execution:tag:${tag}`,
-      category: "execution",
-      matching: tagTrades,
-      baselineTrades: clean,
-      baselineLabel: "Your trades without mistake tags",
-      conditionChips: [{ key: "mistake", label: tag }],
-      conditionLabel: `"${tag}" trades`,
-      factorCount: 2,
-      fieldCompleteness: 1,
+  const result: ScopeDiscovery[] = [];
+  for (const [bucket, matching] of buckets) {
+    const discovery = compare({
+      id: `risk:planned-target:${bucket}`,
+      category: "risk",
+      matching,
+      baseline: known.filter((trade) => trade.plannedRRBucket !== bucket),
+      baselineLabel: "Trades with other recorded planned targets",
+      condition: { key: "planned_rr", label: bucket },
+      conditionLabel: `${bucket} planned targets`,
+      descriptionContext:
+        "Planned R:R is target context only; this comparison does not establish execution adherence.",
     });
-    if (discovery && discovery.direction === "negative") discoveries.push(discovery);
+    if (discovery) result.push(discovery);
   }
+  return result;
+}
 
-  // 3) Fast re-entry after a loss (needs trade times).
+function scanRiskSizing(trades: ScopeTrade[]): ScopeDiscovery[] {
+  const byAccount = new Map<string, ScopeTrade[]>();
+  for (const trade of trades.filter((item) => item.accountId && item.riskPct != null)) {
+    byAccount.set(trade.accountId!, [...(byAccount.get(trade.accountId!) ?? []), trade]);
+  }
+  const result: ScopeDiscovery[] = [];
+  for (const [accountId, accountTrades] of byAccount) {
+    const ordered = accountTrades.map((trade) => trade.riskPct!).sort((a, b) => a - b);
+    if (ordered.length < MIN_MATCHING + MIN_BASELINE) continue;
+    const median = ordered[Math.floor(ordered.length / 2)];
+    if (!(median > 0)) continue;
+    const higher = accountTrades.filter((trade) => trade.riskPct! > median * 1.5);
+    const usual = accountTrades.filter((trade) => trade.riskPct! <= median * 1.5);
+    const discovery = compare({
+      id: `risk:sizing:${accountId}`,
+      category: "risk",
+      matching: higher,
+      baseline: usual,
+      baselineLabel: "Lower-risk trades in the same account",
+      condition: { key: "risk", label: "Risk above 1.5× account median" },
+      conditionLabel: "Higher relative risk",
+      descriptionContext:
+        "Risk is normalized within one account so unlike account contexts are not compared.",
+      negativeOnly: true,
+      focusCandidate: {
+        behavior: "Increasing risk above the account's usual range",
+        triggerSituation: "When a planned trade would exceed 1.5× this account's usual risk",
+        intendedBehavior: "Return to the pre-planned account risk instead of increasing size",
+        evidenceDefinition:
+          "Future higher-risk opportunities manually assessed for whether the trader returned to their chosen account risk before entry; P/L is not used.",
+      },
+    });
+    if (discovery) result.push(discovery);
+  }
+  return result;
+}
+
+function scanExplicitExecutionIssues(trades: ScopeTrade[]): ScopeDiscovery[] {
+  const explicitlyTagged = trades.filter(
+    (trade) => trade.issueTags.length > 0 && (trade.result !== null || trade.r !== null),
+  );
+  const byTag = new Map<string, ScopeTrade[]>();
+  for (const trade of explicitlyTagged) {
+    for (const tag of trade.issueTags) byTag.set(tag, [...(byTag.get(tag) ?? []), trade]);
+  }
+  const result: ScopeDiscovery[] = [];
+  for (const [tag, matching] of byTag) {
+    const matchingIds = new Set(matching.map((trade) => trade.id));
+    // Baseline contains other explicitly assessed issue-tagged trades. Untagged
+    // rows are unknown, never mislabeled as clean execution.
+    const baseline = explicitlyTagged.filter((trade) => !matchingIds.has(trade.id));
+    const discovery = compare({
+      id: `execution:issue:${tag}`,
+      category: "execution",
+      matching,
+      baseline,
+      baselineLabel: "Other explicitly issue-tagged trades",
+      condition: { key: "issue", label: tag },
+      conditionLabel: `"${tag}" occurrences`,
+      descriptionContext:
+        "Only explicit execution-issue evidence participates; no missing tag is treated as clean.",
+      negativeOnly: true,
+      focusCandidate: {
+        behavior: tag,
+        triggerSituation: `When the situation that usually precedes "${tag}" appears`,
+        intendedBehavior: `Pause and follow the chosen process instead of repeating "${tag}"`,
+        evidenceDefinition:
+          "Future genuinely relevant trades assessed by the trader as Followed, Deviated, or Unassessable.",
+      },
+    });
+    if (discovery) result.push(discovery);
+  }
+  return result;
+}
+
+function scanTimingAndVolume(trades: ScopeTrade[]): ScopeDiscovery[] {
+  const result: ScopeDiscovery[] = [];
   const timed = trades
-    .filter((t) => t.timeMs != null)
-    .sort((a, b) => (a.timeMs ?? 0) - (b.timeMs ?? 0) || a.id.localeCompare(b.id));
-  const reentries: ScopeTrade[] = [];
-  for (let i = 1; i < timed.length; i += 1) {
-    const prev = timed[i - 1];
-    const current = timed[i];
+    .filter((trade) => trade.timeMs != null && (trade.result !== null || trade.r !== null))
+    .sort((a, b) => a.timeMs! - b.timeMs! || a.id.localeCompare(b.id));
+  const fast: ScopeTrade[] = [];
+  for (let index = 1; index < timed.length; index += 1) {
+    const previous = timed[index - 1];
+    const current = timed[index];
     if (
-      prev.result === "loss" &&
-      current.timeMs! > prev.timeMs! &&
-      current.timeMs! - prev.timeMs! <= 20 * 60 * 1000
+      previous.result === "loss" &&
+      current.timeMs! > previous.timeMs! &&
+      current.timeMs! - previous.timeMs! <= 20 * 60 * 1000
     ) {
-      reentries.push(current);
+      fast.push(current);
     }
   }
-  const reentryIds = new Set(reentries.map((t) => t.id));
-  const reentryDiscovery = evaluateComparison({
-    id: "execution:fast-reentry",
+  const fastIds = new Set(fast.map((trade) => trade.id));
+  const fastDiscovery = compare({
+    id: "execution:timing-after-loss",
     category: "execution",
-    matching: reentries,
-    baselineTrades: timed.filter((t) => !reentryIds.has(t.id)),
-    baselineLabel: "Your other timed trades",
-    conditionChips: [{ key: "timing", label: "Within 20 min of a loss" }],
-    conditionLabel: "Re-entries within 20 minutes of a loss",
-    factorCount: 2,
-    fieldCompleteness: reviewedCount > 0 ? timed.length / reviewedCount : 0,
-    title: (d) =>
-      d === "negative"
-        ? "Fast re-entries after a loss are underperforming your baseline"
-        : "Fast re-entries after a loss differ from your baseline",
+    matching: fast,
+    baseline: timed.filter((trade) => !fastIds.has(trade.id)),
+    baselineLabel: "Other trades with recorded times",
+    condition: { key: "timing", label: "Within 20 minutes after a loss" },
+    conditionLabel: "Quick entries after a loss",
+    descriptionContext:
+      "Timing is observed; this does not infer revenge trading or the trader's emotional state.",
+    negativeOnly: true,
+    focusCandidate: {
+      behavior: "Entering again within 20 minutes after a loss",
+      triggerSituation: "When another opportunity appears within 20 minutes after a loss",
+      intendedBehavior: "Pause and deliberately reassess before choosing whether to enter",
+      evidenceDefinition:
+        "Future quick-entry opportunities manually assessed for whether the deliberate reset was followed.",
+    },
   });
-  if (reentryDiscovery && reentryDiscovery.direction === "negative")
-    discoveries.push(reentryDiscovery);
+  if (fastDiscovery) result.push(fastDiscovery);
 
-  // 4) Heavy trading days (5+ trades) vs measured days (1–3 trades).
   const byDay = new Map<string, ScopeTrade[]>();
-  for (const t of trades) {
-    if (!byDay.has(t.tradeDate)) byDay.set(t.tradeDate, []);
-    byDay.get(t.tradeDate)!.push(t);
+  for (const trade of trades.filter((item) => item.result !== null || item.r !== null)) {
+    byDay.set(trade.tradeDate, [...(byDay.get(trade.tradeDate) ?? []), trade]);
   }
-  const heavy: ScopeTrade[] = [];
+  const highVolume: ScopeTrade[] = [];
   const measured: ScopeTrade[] = [];
   for (const dayTrades of byDay.values()) {
-    if (dayTrades.length >= 5) heavy.push(...dayTrades);
+    if (dayTrades.length >= 5) highVolume.push(...dayTrades);
     else if (dayTrades.length <= 3) measured.push(...dayTrades);
   }
-  const overtrading = evaluateComparison({
-    id: "execution:heavy-days",
+  const volumeDiscovery = compare({
+    id: "execution:high-volume-days",
     category: "execution",
-    matching: heavy,
-    baselineTrades: measured,
-    baselineLabel: "Your 1–3 trade days",
-    conditionChips: [{ key: "volume", label: "5+ trades in a day" }],
-    conditionLabel: "Trades on 5+ trade days",
-    factorCount: 2,
-    fieldCompleteness: 1,
-    title: (d) =>
-      d === "negative"
-        ? "High-volume days are underperforming your normal days"
-        : "High-volume days differ from your normal days",
+    matching: highVolume,
+    baseline: measured,
+    baselineLabel: "One-to-three-trade days",
+    condition: { key: "volume", label: "Five or more trades in a day" },
+    conditionLabel: "Higher-volume days",
+    descriptionContext:
+      "Daily count is observed; the comparison does not automatically classify a day as overtrading.",
+    negativeOnly: true,
+    focusCandidate: {
+      behavior: "Continuing to trade after four entries in one day",
+      triggerSituation: "When considering a fifth trade in the same journal day",
+      intendedBehavior:
+        "Pause and require an explicit deliberate reason before taking another trade",
+      evidenceDefinition:
+        "Future fifth-or-later opportunities manually assessed for whether the deliberate pause was followed.",
+    },
   });
-  if (overtrading && overtrading.direction === "negative") discoveries.push(overtrading);
-
-  return discoveries;
+  if (volumeDiscovery) result.push(volumeDiscovery);
+  return result;
 }
 
-// ============ Journal Patterns (review quality) ============
-
-function scanJournalPatterns(trades: ScopeTrade[]): ScopeDiscovery[] {
-  const discoveries: ScopeDiscovery[] = [];
-  const reviewedCount = trades.length;
-
-  // 1) Brief reasoning vs detailed reasoning.
-  const brief = trades.filter((t) => t.reasoningLength > 0 && t.reasoningLength < 80);
-  const detailed = trades.filter((t) => t.reasoningLength >= 80);
-  const reasoningDiscovery = evaluateComparison({
-    id: "journal:brief-reasoning",
-    category: "journal",
-    matching: brief,
-    baselineTrades: detailed,
-    baselineLabel: "Your trades with detailed reasoning",
-    conditionChips: [{ key: "review", label: "Brief reasoning (under 80 chars)" }],
-    conditionLabel: "Trades with brief reasoning",
-    factorCount: 2,
-    fieldCompleteness: 1,
-    title: (d) =>
-      d === "negative"
-        ? "Trades with brief reasoning are underperforming your detailed reviews"
-        : "Trades with brief reasoning differ from your detailed reviews",
-    description: (d) =>
-      d === "negative"
-        ? "Reviews with short reasoning coincide with weaker results in your journal. This may reflect rushed decisions or rushed reviews — worth re-reading these trades."
-        : "Your briefly-reviewed trades currently differ from your detailed reviews. Worth re-reading a few to understand why.",
-  });
-  if (reasoningDiscovery) discoveries.push(reasoningDiscovery);
-
-  return discoveries;
+function dedupeAndRank(discoveries: ScopeDiscovery[]): ScopeDiscovery[] {
+  const signatures = new Set<string>();
+  return [...discoveries]
+    .sort((a, b) => b.rankScore - a.rankScore || a.id.localeCompare(b.id))
+    .filter((discovery) => {
+      const signature = [...discovery.matchingTradeIds].sort().join(",");
+      if (signatures.has(signature)) return false;
+      signatures.add(signature);
+      return true;
+    });
 }
 
-// ============ Selection: dedupe, rank, cap ============
-
-function signatureOf(d: ScopeDiscovery): string {
-  return [...d.matchingTradeIds].sort().join(",");
-}
-
-function selectDiscoveries(candidates: ScopeDiscovery[]): ScopeDiscovery[] {
-  // Deterministic order: rank desc, then id for stable ties.
-  const ranked = [...candidates].sort(
-    (a, b) => b.rankScore - a.rankScore || a.id.localeCompare(b.id),
-  );
-
-  const seenSignatures = new Set<string>();
-  const perCategory = new Map<DiscoveryCategory, number>();
-  const selected: ScopeDiscovery[] = [];
-
-  for (const discovery of ranked) {
-    if (selected.length >= MAX_TOTAL) break;
-    if (discovery.id.startsWith("risk:rr-bucket:")) {
-      const bucket = discovery.id.replace("risk:rr-bucket:", "");
-      const hasSetupCombo = candidates.some(
-        (c) =>
-          c.category === "setup" &&
-          c.conditionChips.some((chip) => chip.key === "rr" && chip.label === bucket),
-      );
-      if (hasSetupCombo) continue;
-    }
-    const signature = signatureOf(discovery);
-    if (seenSignatures.has(signature)) continue; // same trade set, keep strongest only
-    const count = perCategory.get(discovery.category) ?? 0;
-    if (count >= MAX_PER_CATEGORY) continue;
-    seenSignatures.add(signature);
-    perCategory.set(discovery.category, count + 1);
-    selected.push(discovery);
-  }
-
-  return selected;
-}
-
-// ============ Entry point ============
-
-/**
- * Scan reviewed trades for evidence-backed discoveries.
- * `reviewed` must already be filtered to fully-reviewed trades.
- */
-export function buildScopeDiscoveries(reviewed: DbTrade[]): ScopeScanResult {
-  const trades = reviewed.map(toScopeTrade);
-  const overall = statsOf(trades);
-
-  const candidates: ScopeDiscovery[] = [
-    ...scanSetupConditions(trades),
-    ...scanRiskBehavior(trades),
-    ...scanExecutionBehavior(trades),
-    ...scanJournalPatterns(trades),
-  ];
-
+export function buildScopeDiscoveries(source: DbTrade[]): ScopeScanResult {
+  const realSource = source.filter((trade) => !isPaperTrade(trade));
+  const trades = realSource.map(toScopeTrade);
+  const evidence = trades.filter((trade) => trade.result !== null || trade.r !== null);
+  const overall = statsOf(evidence);
+  const discoveries = dedupeAndRank([
+    ...scanDimension(evidence, {
+      key: "category",
+      category: "category",
+      valueOf: (trade) => trade.category,
+    }),
+    ...scanDimension(evidence, {
+      key: "session",
+      category: "category",
+      valueOf: (trade) => trade.session,
+      labelOf: sessionLabel,
+    }),
+    ...scanDimension(evidence, {
+      key: "instrument",
+      category: "category",
+      valueOf: (trade) => trade.instrument,
+    }),
+    ...scanDimension(evidence, {
+      key: "direction",
+      category: "category",
+      valueOf: (trade) => trade.direction,
+      labelOf: (value) => (value === "long" ? "Long" : "Short"),
+    }),
+    ...scanPlannedTargets(evidence),
+    ...scanRiskSizing(evidence),
+    ...scanExplicitExecutionIssues(evidence),
+    ...scanTimingAndVolume(evidence),
+  ]);
   return {
-    reviewedCount: trades.length,
+    evidenceTradeCount: evidence.length,
+    resultEvidenceCount: trades.filter((trade) => trade.result !== null).length,
+    rEvidenceCount: trades.filter((trade) => trade.r !== null).length,
+    reviewedCount: realSource.filter((trade) => getReviewStatus(trade) === "reviewed").length,
     baselineWinRate: overall.winRate,
     baselineAvgR: overall.avgR,
-    discoveries: selectDiscoveries(candidates),
+    discoveries,
   };
+}
+
+export function buildStandardChallenges(
+  source: DbTrade[],
+  standards: readonly {
+    id: string;
+    title: string;
+    status: string;
+    current_version: { id: string; effective_from: string } | null;
+  }[],
+): StandardChallenge[] {
+  const trades = source.filter((trade) => !isPaperTrade(trade)).map(toScopeTrade);
+  const allR = trades.filter((trade) => trade.r !== null);
+  const challenges: StandardChallenge[] = [];
+  for (const standard of standards) {
+    const version = standard.current_version;
+    if (standard.status !== "active" || !version) continue;
+    const matching = trades.filter(
+      (trade) =>
+        trade.setupIntentVersionId === version.id &&
+        trade.setupIntentProvenance === "capture" &&
+        Boolean(
+          trade.setupIntentRecordedAt &&
+          Date.parse(trade.setupIntentRecordedAt) >= Date.parse(version.effective_from),
+        ) &&
+        trade.setupAdherence === "followed" &&
+        trade.r !== null,
+    );
+    if (matching.length < 3) continue;
+    const ids = new Set(matching.map((trade) => trade.id));
+    const baseline = allR.filter((trade) => !ids.has(trade.id));
+    const matchingStats = statsOf(matching);
+    const baselineStats = statsOf(baseline);
+    if (matchingStats.avgR == null || matchingStats.avgR >= -0.2) continue;
+    if (baselineStats.avgR != null && matchingStats.avgR > baselineStats.avgR - MIN_ABS_DELTA_R) {
+      continue;
+    }
+    challenges.push({
+      id: `standard:${standard.id}:${version.id}`,
+      standardId: standard.id,
+      standardVersionId: version.id,
+      standardTitle: standard.title,
+      title: `Current standard “${standard.title}” warrants review`,
+      description:
+        "These trades explicitly referenced this current version and were assessed as followed, yet their realized-R evidence is materially weak. Scope is challenging the standard for trader review, not changing it.",
+      matchingTradeIds: matchingStats.ids,
+      sampleSize: matchingStats.sampleSize,
+      avgR: matchingStats.avgR,
+      baselineAvgR: baselineStats.avgR,
+    });
+  }
+  return challenges;
 }
 
 export const CONFIDENCE_LABEL: Record<DiscoveryConfidence, string> = {

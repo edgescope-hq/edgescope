@@ -56,7 +56,7 @@ const MODAL_TRANSITION = { duration: 0.22, ease: MOTION_EASE };
 export const Route = createFileRoute("/_authenticated/community")({
   head: () => ({
     meta: [
-      { title: "Community — EdgeScope" },
+      { title: "Network — EdgeScope" },
       { name: "description", content: "Private trader review circles." },
       { name: "robots", content: "noindex, nofollow" },
     ],
@@ -80,8 +80,8 @@ function CommunityPage() {
       <PageHeader
         icon={Users}
         eyebrow="Review circles"
-        title="Community"
-        description="Review trades with a trusted circle. Your journal stays private by default."
+        title="Network"
+        description="Share private trade context with a trusted circle. Peer reactions remain opinion, never authoritative evidence."
       />
       <Header />
       {activeGroup ? (
@@ -1085,10 +1085,10 @@ function TradeDetail({
 
   const REACTIONS = [
     { type: "reviewed", emoji: "👀", label: "Reviewed" },
-    { type: "good_execution", emoji: "✅", label: "Good execution" },
-    { type: "rule_break", emoji: "⚠️", label: "Rule break" },
+    { type: "good_execution", emoji: "✅", label: "Looks well-executed" },
+    { type: "rule_break", emoji: "⚠️", label: "Possible rule break" },
     { type: "useful_note", emoji: "💡", label: "Useful note" },
-    { type: "clean_setup", emoji: "🎯", label: "Clean setup" },
+    { type: "clean_setup", emoji: "🎯", label: "Looks like a clean setup" },
   ] as const;
 
   const upsertFn = useServerFn(upsertReaction);
@@ -1191,36 +1191,42 @@ function TradeDetail({
           )}
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          {REACTIONS.map((r) => {
-            const selected = localType === r.type;
-            const count = localCounts[r.type] ?? 0;
-            return (
-              <button
-                key={r.type}
-                type="button"
-                onClick={() => handleClick(r.type)}
-                className={cn(
-                  "inline-flex min-h-9 items-center gap-1.5 rounded-xl border px-3 py-1.5 text-sm transition-colors duration-150",
-                  selected
-                    ? "border-purple-400/30 bg-purple-500/[0.07] text-purple-300/90"
-                    : "border-transparent bg-white/[0.04] text-muted-foreground hover:bg-white/[0.07] hover:text-foreground",
-                )}
-              >
-                <span className="text-base leading-none">{r.emoji}</span>
-                <span className="text-xs font-medium">{r.label}</span>
-                <span
+        <div>
+          <div className="mb-2 text-[11px] leading-5 text-muted-foreground">
+            Peer reactions are personal opinions. They do not alter Analytics, Scope, review status,
+            or your Playbook.
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {REACTIONS.map((r) => {
+              const selected = localType === r.type;
+              const count = localCounts[r.type] ?? 0;
+              return (
+                <button
+                  key={r.type}
+                  type="button"
+                  onClick={() => handleClick(r.type)}
                   className={cn(
-                    "ml-0.5 min-w-3 text-right text-[11px] font-semibold tabular-nums text-muted-foreground/80 transition-opacity duration-150",
-                    count > 0 ? "opacity-100" : "opacity-0",
+                    "inline-flex min-h-9 items-center gap-1.5 rounded-xl border px-3 py-1.5 text-sm transition-colors duration-150",
+                    selected
+                      ? "border-purple-400/30 bg-purple-500/[0.07] text-purple-300/90"
+                      : "border-transparent bg-white/[0.04] text-muted-foreground hover:bg-white/[0.07] hover:text-foreground",
                   )}
-                  aria-hidden={count === 0}
                 >
-                  {count}
-                </span>
-              </button>
-            );
-          })}
+                  <span className="text-base leading-none">{r.emoji}</span>
+                  <span className="text-xs font-medium">{r.label}</span>
+                  <span
+                    className={cn(
+                      "ml-0.5 min-w-3 text-right text-[11px] font-semibold tabular-nums text-muted-foreground/80 transition-opacity duration-150",
+                      count > 0 ? "opacity-100" : "opacity-0",
+                    )}
+                    aria-hidden={count === 0}
+                  >
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
     </ModalShell>

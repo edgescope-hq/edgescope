@@ -1,12 +1,17 @@
 # Supabase Migration Notes
 
-The current `supabase/migrations` folder is production history, not a clean
-fresh-database replay set.
+`supabase/migrations` is the active clean replay and forward-migration set. It
+starts with the reviewed `20260710000000_launch_baseline.sql` snapshot and then
+contains only newer forward migrations.
 
-Before public launch, new Supabase environments should be created from a reviewed
-current-schema baseline as documented in
-`docs/launch/migration-replay-runbook.md`.
+Production records `20260710000000` as its baseline cutover version. The
+baseline SQL represents the schema that already existed at that cutover and
+must not be replayed against production.
 
-Do not run the legacy migration folder from zero for launch database creation.
-It contains duplicate schema snapshots and policy definitions that conflict when
-replayed together.
+The original pre-baseline migration history is preserved unchanged under
+`supabase/migrations_legacy_pre_baseline/`. Never combine that archive with the
+active baseline during replay.
+
+See `supabase/baseline/BOOTSTRAP.md` and
+`docs/launch/migration-replay-runbook.md` for the validated bootstrap and
+production-migration workflows.

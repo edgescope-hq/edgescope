@@ -16,6 +16,8 @@ import {
   Trash2,
   Pencil,
   Bell,
+  Archive,
+  RotateCcw,
 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -23,9 +25,10 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
   createTradingAccount,
+  archiveTradingAccount,
   deleteTradingAccount,
   listTradingAccounts,
-  setActiveTradingAccount,
+  setDefaultTradingAccount,
   updateTradingAccount,
   type TradingAccount,
 } from "@/lib/trading-accounts.functions";
@@ -34,10 +37,6 @@ import {
   upsertGuardrails,
   type AccountGuardrails,
 } from "@/lib/guardrails.functions";
-import {
-  getTradingPreferences,
-  upsertTradingPreferences,
-} from "@/lib/trading-preferences.functions";
 import { listTrades } from "@/lib/trades.functions";
 import type { Database } from "@/integrations/supabase/types";
 import {
@@ -52,6 +51,8 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PageHeader, PageShell, PremiumEmptyState } from "@/components/ui/premium";
 import { isPaperTrade } from "@/lib/trade-mappers";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
+import { accountTypePreservesEvidencePopulation } from "@/lib/evidence-population";
 
 export const Route = createFileRoute("/_authenticated/accounts")({
   head: () => ({
@@ -213,13 +214,12 @@ function AccountsPage() {
   const listFn = useServerFn(listTradingAccounts);
   const listTradesFn = useServerFn(listTrades);
   const createFn = useServerFn(createTradingAccount);
+  const archiveFn = useServerFn(archiveTradingAccount);
   const updateFn = useServerFn(updateTradingAccount);
   const deleteFn = useServerFn(deleteTradingAccount);
-  const setActiveFn = useServerFn(setActiveTradingAccount);
+  const setDefaultFn = useServerFn(setDefaultTradingAccount);
   const getGuardrailsFn = useServerFn(getGuardrails);
   const saveGuardrailsFn = useServerFn(upsertGuardrails);
-  const getPrefsFn = useServerFn(getTradingPreferences);
-  const savePrefsFn = useServerFn(upsertTradingPreferences);
 
   const { data: accounts = [], isLoading } = useQuery({
     queryKey: ["trading-accounts"],
@@ -229,10 +229,6 @@ function AccountsPage() {
     queryKey: ["trades"],
     queryFn: () => listTradesFn(),
   });
-  const { data: prefsData = null } = useQuery({
-    queryKey: ["trading-preferences"],
-    queryFn: () => getPrefsFn(),
-  });
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -241,6 +237,8 @@ function AccountsPage() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showRulesModal, setShowRulesModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+  const [discardEditor, setDiscardEditor] = useState<"create" | "edit" | "rules" | null>(null);
   // Form states
   const [createForm, setCreateForm] = useState({
     name: "",
@@ -274,6 +272,22 @@ function AccountsPage() {
     () => accounts.find((a) => a.id === selectedId) ?? null,
     [accounts, selectedId],
   );
+  const editAccountTypeOptions = useMemo(() => {
+    if (!selected) return [];
+    const options: { value: TradingAccount["account_type"]; label: string }[] = [
+      { value: "personal", label: "Personal" },
+      { value: "demo", label: "Demo · Practice" },
+      { value: "live", label: "Live" },
+      { value: "funded", label: "Funded" },
+      ...(selected.account_type === "challenge"
+        ? ([{ value: "challenge", label: "Challenge" }] as const)
+        : []),
+      { value: "backtest", label: "Backtest · Research" },
+    ];
+    return options.filter((option) =>
+      accountTypePreservesEvidencePopulation(selected.account_type, option.value),
+    );
+  }, [selected]);
   const createNameDuplicate = useMemo(() => {
     const nextName = normalizeName(createForm.name);
     return nextName ? accounts.some((account) => normalizeName(account.name) === nextName) : false;
@@ -307,24 +321,77 @@ function AccountsPage() {
 
   useEffect(() => {
     if (selected) {
-      setEditForm({
-        name: selected.name,
-        account_type: selected.account_type,
-        broker: selected.broker ?? "",
-      });
-      setRulesForm({
-        max_risk_per_trade_pct:
-          selected.max_risk_per_trade_pct != null ? String(selected.max_risk_per_trade_pct) : "",
-        daily_loss_limit_pct:
-          selected.daily_loss_limit_pct != null ? String(selected.daily_loss_limit_pct) : "",
-        max_trades_per_day:
-          prefsData?.max_trades_per_day != null ? String(prefsData.max_trades_per_day) : "",
-        daily_loss_reminder: guardrailsData?.daily_loss_reminder ?? true,
-        starting_balance:
-          selected.starting_balance != null ? String(selected.starting_balance) : "",
-      });
+      if (!showEditModal) {
+        setEditForm({
+          name: selected.name,
+          account_type: selected.account_type,
+          broker: selected.broker ?? "",
+        });
+      }
+      if (!showRulesModal) {
+        setRulesForm({
+          max_risk_per_trade_pct:
+            selected.max_risk_per_trade_pct != null ? String(selected.max_risk_per_trade_pct) : "",
+          daily_loss_limit_pct:
+            selected.daily_loss_limit_pct != null ? String(selected.daily_loss_limit_pct) : "",
+          max_trades_per_day:
+            selected.max_trades_per_day != null ? String(selected.max_trades_per_day) : "",
+          daily_loss_reminder: guardrailsData?.daily_loss_reminder ?? true,
+          starting_balance:
+            selected.starting_balance != null ? String(selected.starting_balance) : "",
+        });
+      }
     }
-  }, [selected, guardrailsData, prefsData]);
+  }, [guardrailsData, selected, showEditModal, showRulesModal]);
+
+  const createDirty =
+    createForm.name !== "" ||
+    createForm.account_type !== "personal" ||
+    createForm.broker !== "" ||
+    createForm.starting_balance !== "";
+  const editDirty = Boolean(
+    selected &&
+    (editForm.name !== selected.name ||
+      editForm.account_type !== selected.account_type ||
+      editForm.broker !== (selected.broker ?? "")),
+  );
+  const rulesDirty = Boolean(
+    selected &&
+    (rulesForm.max_risk_per_trade_pct !==
+      (selected.max_risk_per_trade_pct != null ? String(selected.max_risk_per_trade_pct) : "") ||
+      rulesForm.daily_loss_limit_pct !==
+        (selected.daily_loss_limit_pct != null ? String(selected.daily_loss_limit_pct) : "") ||
+      rulesForm.max_trades_per_day !==
+        (selected.max_trades_per_day != null ? String(selected.max_trades_per_day) : "") ||
+      rulesForm.daily_loss_reminder !== (guardrailsData?.daily_loss_reminder ?? true) ||
+      rulesForm.starting_balance !==
+        (selected.starting_balance != null ? String(selected.starting_balance) : "")),
+  );
+  useUnsavedChanges(
+    (showCreateModal && createDirty) ||
+      (showEditModal && editDirty) ||
+      (showRulesModal && rulesDirty),
+  );
+
+  const closeEditor = (kind: "create" | "edit" | "rules") => {
+    if (kind === "create") {
+      setShowCreateModal(false);
+      setCreateForm({ name: "", account_type: "personal", broker: "", starting_balance: "" });
+    } else if (kind === "edit") {
+      setShowEditModal(false);
+    } else {
+      setShowRulesModal(false);
+    }
+  };
+
+  const requestEditorClose = (kind: "create" | "edit" | "rules") => {
+    const isDirty = kind === "create" ? createDirty : kind === "edit" ? editDirty : rulesDirty;
+    if (isDirty) {
+      setDiscardEditor(kind);
+      return;
+    }
+    closeEditor(kind);
+  };
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["trading-accounts"] });
@@ -332,7 +399,6 @@ function AccountsPage() {
     if (selectedId) {
       qc.invalidateQueries({ queryKey: ["guardrails", selectedId] });
     }
-    qc.invalidateQueries({ queryKey: ["trading-preferences"] });
   };
 
   const createAccountM = useMutation({
@@ -359,11 +425,11 @@ function AccountsPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const setActiveM = useMutation({
-    mutationFn: (id: string) => setActiveFn({ data: { id } }),
+  const setDefaultM = useMutation({
+    mutationFn: (id: string) => setDefaultFn({ data: { id } }),
     onSuccess: () => {
       refresh();
-      toast.success("Active account switched");
+      toast.success("Default Trade Account updated");
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -400,41 +466,54 @@ function AccountsPage() {
           patch: {
             max_risk_per_trade_pct: numOrNull(rulesForm.max_risk_per_trade_pct),
             daily_loss_limit_pct: numOrNull(rulesForm.daily_loss_limit_pct),
+            max_trades_per_day: intOrNull(rulesForm.max_trades_per_day),
             starting_balance: numOrNull(rulesForm.starting_balance) ?? 0,
           },
         },
       });
-      await saveGuardrailsFn({
-        data: {
-          account_id: selected!.id,
-          patch: { daily_loss_reminder: rulesForm.daily_loss_reminder },
-        },
-      });
-      const nextMaxTrades = intOrNull(rulesForm.max_trades_per_day);
-      if (prefsData || nextMaxTrades != null) {
-        await savePrefsFn({
+      try {
+        await saveGuardrailsFn({
           data: {
-            starting_balance: prefsData?.starting_balance ?? null,
-            account_type: prefsData?.account_type ?? null,
-            default_risk_pct: prefsData?.default_risk_pct ?? null,
-            max_trades_per_day: nextMaxTrades,
-            max_daily_loss: prefsData?.max_daily_loss ?? null,
-            max_daily_profit: prefsData?.max_daily_profit ?? null,
-            primary_market: prefsData?.primary_market ?? null,
-            primary_session: prefsData?.primary_session ?? null,
-            require_screenshot: prefsData?.require_screenshot ?? false,
-            require_setup_selection: prefsData?.require_setup_selection ?? false,
-            require_post_trade_reflection: prefsData?.require_post_trade_reflection ?? false,
+            account_id: selected!.id,
+            patch: { daily_loss_reminder: rulesForm.daily_loss_reminder },
           },
         });
+        return { guardrailError: null as string | null };
+      } catch (error) {
+        return {
+          guardrailError:
+            error instanceof Error ? error.message : "The journal reminder could not be saved.",
+        };
       }
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
+      refresh();
+      if (result.guardrailError) {
+        toast.error(
+          `Account risk rules were saved, but the journal reminder failed: ${result.guardrailError} Your selection remains open to retry.`,
+        );
+        return;
+      }
       toast.success("Risk rules and guardrails updated");
       setShowRulesModal(false);
-      refresh();
     },
     onError: (e: Error) => toast.error(e.message),
+  });
+
+  const archiveM = useMutation({
+    mutationFn: (status: "active" | "archived") =>
+      archiveFn({ data: { id: selected!.id, status } }),
+    onSuccess: (_result, status) => {
+      setShowArchiveConfirm(false);
+      refresh();
+      toast.success(
+        status === "archived" ? "Trading account archived" : "Trading account restored",
+      );
+    },
+    onError: (e: Error) => {
+      refresh();
+      toast.error(e.message);
+    },
   });
 
   const deleteM = useMutation({
@@ -450,7 +529,12 @@ function AccountsPage() {
 
   const canDelete = selectedTradesForDeletion.length === 0;
   const createAccountDialog = (
-    <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
+    <Dialog
+      open={showCreateModal}
+      onOpenChange={(open) => {
+        if (!open) requestEditorClose("create");
+      }}
+    >
       <DialogContent className="rounded-2xl border-white/[0.08] bg-[oklch(0.09_0.015_270)] max-w-md p-6">
         <DialogHeader>
           <DialogTitle className="text-base font-bold flex items-center gap-2 text-foreground">
@@ -458,7 +542,8 @@ function AccountsPage() {
           </DialogTitle>
         </DialogHeader>
         <p className="text-[11px] leading-relaxed text-muted-foreground">
-          Create separate journals for personal, demo, funded, or backtest trading.
+          Create separate journals for actual trading, Demo practice, or Backtest research. Practice
+          and research evidence stay outside default live measurement.
         </p>
         <div className="mt-4 space-y-4">
           <Field
@@ -478,13 +563,13 @@ function AccountsPage() {
             }
             options={[
               { value: "personal", label: "Personal" },
-              { value: "demo", label: "Demo" },
+              { value: "demo", label: "Demo · Practice" },
               { value: "live", label: "Live" },
               { value: "funded", label: "Funded" },
               ...(editForm.account_type === "challenge"
                 ? [{ value: "challenge", label: "Challenge" }]
                 : []),
-              { value: "backtest", label: "Backtest" },
+              { value: "backtest", label: "Backtest · Research" },
             ]}
           />
           <Field
@@ -503,7 +588,7 @@ function AccountsPage() {
         </div>
         <div className="mt-6 flex justify-end gap-2">
           <button
-            onClick={() => setShowCreateModal(false)}
+            onClick={() => requestEditorClose("create")}
             className="rounded-xl bg-white/[0.04] px-4 py-2.5 text-xs font-semibold text-muted-foreground hover:text-foreground border border-white/[0.06]"
           >
             Cancel
@@ -569,7 +654,7 @@ function AccountsPage() {
                   No trading accounts yet
                 </h3>
                 <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                  Create one to separate personal, demo, funded, or backtest trades.
+                  Create one to keep actual, practice, and backtest evidence distinct.
                 </p>
                 <button
                   onClick={() => setShowCreateModal(true)}
@@ -615,6 +700,7 @@ function AccountsPage() {
                         isSel
                           ? "bg-gradient-to-br from-primary/[0.1] to-primary/[0.03] ring-1 ring-primary/30 text-foreground shadow-[var(--shadow-glow)]"
                           : "bg-white/[0.025] ring-1 ring-white/[0.06] text-muted-foreground/80 hover:bg-white/[0.04] hover:text-foreground hover:ring-white/[0.1]",
+                        a.status === "archived" && "opacity-70",
                       )}
                     >
                       <div className="flex min-w-0 items-start gap-4">
@@ -633,7 +719,12 @@ function AccountsPage() {
                             </span>
                             {a.is_active && (
                               <span className="shrink-0 rounded-full bg-success/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-success">
-                                Active
+                                Default
+                              </span>
+                            )}
+                            {a.status === "archived" && (
+                              <span className="shrink-0 rounded-full bg-white/[0.06] px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted-foreground ring-1 ring-white/[0.08]">
+                                Archived
                               </span>
                             )}
                           </div>
@@ -729,8 +820,8 @@ function AccountsPage() {
                               Max Trades Per Day
                             </div>
                             <div className="mt-1.5 text-lg font-bold tracking-tight text-foreground">
-                              {prefsData?.max_trades_per_day != null
-                                ? prefsData.max_trades_per_day
+                              {selected.max_trades_per_day != null
+                                ? selected.max_trades_per_day
                                 : "Not set"}
                             </div>
                           </div>
@@ -757,6 +848,37 @@ function AccountsPage() {
                       Account Actions
                     </h4>
                     <div className="rounded-2xl bg-white/[0.025] p-4 sm:p-5 ring-1 ring-white/[0.06]">
+                      <button
+                        onClick={() =>
+                          selected.status === "archived"
+                            ? archiveM.mutate("active")
+                            : setShowArchiveConfirm(true)
+                        }
+                        disabled={archiveM.isPending}
+                        className="mb-3 flex w-full items-center gap-4 rounded-xl bg-white/[0.025] px-4 py-3.5 text-left text-muted-foreground ring-1 ring-white/[0.06] transition hover:bg-white/[0.045] hover:text-foreground hover:ring-white/[0.1] disabled:opacity-50"
+                      >
+                        <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-white/[0.08] to-white/[0.025] text-muted-foreground ring-1 ring-white/[0.08]">
+                          {selected.status === "archived" ? (
+                            <RotateCcw className="h-4 w-4" />
+                          ) : (
+                            <Archive className="h-4 w-4" />
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold text-foreground/90">
+                            {selected.status === "archived"
+                              ? "Restore trading account"
+                              : "Archive trading account"}
+                          </div>
+                          <div className="mt-0.5 text-[11px] leading-5">
+                            {selected.status === "archived"
+                              ? "Return this account to capture and selection lists."
+                              : "Retire this account from new-trade use while preserving all history."}
+                          </div>
+                        </div>
+                        <ChevronRight className="ml-auto h-4 w-4 shrink-0 text-current opacity-50" />
+                      </button>
+
                       <button
                         onClick={() => canDelete && setShowDeleteConfirm(true)}
                         disabled={!canDelete}
@@ -804,7 +926,12 @@ function AccountsPage() {
                     </div>
                   </div>
 
-                  <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
+                  <Dialog
+                    open={showEditModal}
+                    onOpenChange={(open) => {
+                      if (!open) requestEditorClose("edit");
+                    }}
+                  >
                     <DialogContent className="rounded-2xl border-white/[0.08] bg-[oklch(0.09_0.015_270)] max-w-md p-6">
                       <DialogHeader>
                         <DialogTitle className="text-base font-bold flex items-center gap-2 text-foreground">
@@ -832,14 +959,12 @@ function AccountsPage() {
                                 : "personal") as TradingAccount["account_type"],
                             }))
                           }
-                          options={[
-                            { value: "personal", label: "Personal" },
-                            { value: "demo", label: "Demo" },
-                            { value: "live", label: "Live" },
-                            { value: "funded", label: "Funded" },
-                            { value: "backtest", label: "Backtest" },
-                          ]}
+                          options={editAccountTypeOptions}
                         />
+                        <p className="text-[11px] leading-relaxed text-muted-foreground">
+                          Evidence type stays fixed so existing history is never reclassified.
+                          Create a separate account to move between actual, practice, and research.
+                        </p>
                         <Field
                           label="Broker (optional)"
                           value={editForm.broker}
@@ -849,14 +974,22 @@ function AccountsPage() {
                         <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
                           <button
                             type="button"
-                            onClick={() => !selected.is_active && setActiveM.mutate(selected.id)}
-                            disabled={selected.is_active || setActiveM.isPending}
+                            onClick={() =>
+                              !selected.is_active &&
+                              selected.status === "active" &&
+                              setDefaultM.mutate(selected.id)
+                            }
+                            disabled={
+                              selected.is_active ||
+                              selected.status === "archived" ||
+                              setDefaultM.isPending
+                            }
                             className={cn(
                               "flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-xs font-semibold transition",
                               selected.is_active
                                 ? "cursor-default bg-white/[0.025] text-foreground ring-1 ring-white/[0.06]"
                                 : "bg-white/[0.03] text-foreground ring-1 ring-white/[0.06] hover:bg-primary/10 hover:text-primary hover:ring-primary/20",
-                              setActiveM.isPending && "opacity-60",
+                              setDefaultM.isPending && "opacity-60",
                             )}
                           >
                             <span className="inline-flex items-center gap-2">
@@ -868,13 +1001,15 @@ function AccountsPage() {
                                     : "text-muted-foreground/70",
                                 )}
                               />
-                              {selected.is_active
-                                ? "Active trading account"
-                                : "Set as active account"}
+                              {selected.status === "archived"
+                                ? "Restore before making default"
+                                : selected.is_active
+                                  ? "Default Trade Account"
+                                  : "Set as Default Trade Account"}
                             </span>
                             {selected.is_active && (
                               <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-primary ring-1 ring-primary/15">
-                                Active
+                                Default
                               </span>
                             )}
                           </button>
@@ -882,7 +1017,7 @@ function AccountsPage() {
                       </div>
                       <div className="mt-6 flex justify-end gap-2">
                         <button
-                          onClick={() => setShowEditModal(false)}
+                          onClick={() => requestEditorClose("edit")}
                           className="rounded-xl bg-white/[0.04] px-4 py-2.5 text-xs font-semibold text-muted-foreground hover:text-foreground border border-white/[0.06]"
                         >
                           Cancel
@@ -900,7 +1035,12 @@ function AccountsPage() {
                     </DialogContent>
                   </Dialog>
 
-                  <Dialog open={showRulesModal} onOpenChange={setShowRulesModal}>
+                  <Dialog
+                    open={showRulesModal}
+                    onOpenChange={(open) => {
+                      if (!open) requestEditorClose("rules");
+                    }}
+                  >
                     <DialogContent className="rounded-2xl border-white/[0.08] bg-[oklch(0.09_0.015_270)] max-w-md p-6">
                       <DialogHeader>
                         <DialogTitle className="text-base font-bold flex items-center gap-2 text-foreground">
@@ -959,7 +1099,7 @@ function AccountsPage() {
                       </div>
                       <div className="mt-6 flex justify-end gap-2">
                         <button
-                          onClick={() => setShowRulesModal(false)}
+                          onClick={() => requestEditorClose("rules")}
                           className="rounded-xl bg-white/[0.04] px-4 py-2.5 text-xs font-semibold text-muted-foreground hover:text-foreground border border-white/[0.06]"
                         >
                           Cancel
@@ -974,6 +1114,16 @@ function AccountsPage() {
                       </div>
                     </DialogContent>
                   </Dialog>
+
+                  <ConfirmDialog
+                    open={showArchiveConfirm}
+                    onOpenChange={setShowArchiveConfirm}
+                    title={`Archive "${selected.name}"?`}
+                    description="This removes the account from new-trade use and preserves every attached trade and rule. You can restore it later."
+                    confirmLabel="Archive trading account"
+                    loading={archiveM.isPending}
+                    onConfirm={() => archiveM.mutate("archived")}
+                  />
 
                   <ConfirmDialog
                     open={showDeleteConfirm}
@@ -1001,6 +1151,21 @@ function AccountsPage() {
         )}
       </div>
       {createAccountDialog}
+      <ConfirmDialog
+        open={discardEditor !== null}
+        onOpenChange={(open) => {
+          if (!open) setDiscardEditor(null);
+        }}
+        title="Discard unsaved account changes?"
+        description="Your edits in this account form have not been saved."
+        confirmLabel="Discard changes"
+        destructive
+        onConfirm={() => {
+          const editor = discardEditor;
+          setDiscardEditor(null);
+          if (editor) closeEditor(editor);
+        }}
+      />
     </PageShell>
   );
 }

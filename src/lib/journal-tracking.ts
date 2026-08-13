@@ -140,7 +140,7 @@ export const JOURNAL_FIELD_META: Record<
     description: "",
   },
   category: {
-    label: "Category / setup",
+    label: "Category",
     allowed: ["quick_capture", "detailed_review", "both", "hidden"],
     description: "",
   },
@@ -202,7 +202,7 @@ export const JOURNAL_FIELD_META: Record<
     description: "",
   },
   community: {
-    label: "Community sharing",
+    label: "Network sharing",
     allowed: ["quick_capture", "detailed_review", "both", "hidden"],
     description: "",
   },
@@ -232,8 +232,7 @@ export function tradeCompletenessRequirementsFromPreferences(
   const values =
     stored && typeof stored === "object" && !Array.isArray(stored)
       ? ((stored as Record<string, unknown>).trade_completeness as
-          | Record<string, unknown>
-          | undefined)
+          Record<string, unknown> | undefined)
       : undefined;
   const requirements: TradeCompletenessRequirements = {};
   for (const field of TRADE_COMPLETENESS_ELIGIBLE_FIELDS) {

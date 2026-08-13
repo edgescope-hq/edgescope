@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import { Plus, Pin, Trash2, Play, Square, Sparkles } from "lucide-react";
@@ -23,6 +23,9 @@ export const Route = createFileRoute("/_authenticated/notes")({
       { name: "robots", content: "noindex, nofollow" },
     ],
   }),
+  beforeLoad: () => {
+    throw redirect({ to: "/playbook" });
+  },
   component: NotesPage,
 });
 

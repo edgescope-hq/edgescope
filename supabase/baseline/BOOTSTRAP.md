@@ -10,8 +10,10 @@ database — use the Supabase migration runner (`supabase migration up`) for tha
 
 | Artifact | Role |
 |----------|------|
-| `supabase/baseline/20260710000000_launch_baseline_schema.sql` | Clean-install foundation (current snapshot) |
-| `supabase/migrations/*.sql` | Forward-only changes; see post-baseline list below — pre-baseline files are legacy history |
+| `supabase/migrations/20260710000000_launch_baseline.sql` | Active clean-install foundation and production baseline-cutover version |
+| `supabase/baseline/20260710000000_launch_baseline_schema.sql` | Audited source snapshot retained for baseline provenance |
+| `supabase/migrations/*.sql` | The baseline followed by forward-only post-baseline changes |
+| `supabase/migrations_legacy_pre_baseline/*.sql` | Archived pre-baseline production history; never part of clean replay |
 | Generated types (`src/integrations/supabase/types.ts`) | Derived from the validated schema — must match baseline + migrations |
 
 ## Bootstrap Steps
@@ -22,7 +24,7 @@ export DISPOSABLE_DATABASE_URL='postgresql://...'
 
 # 1. Apply the baseline exactly once to the empty database.
 psql "$DISPOSABLE_DATABASE_URL" -v ON_ERROR_STOP=1 \
-  -f supabase/baseline/20260710000000_launch_baseline_schema.sql
+  -f supabase/migrations/20260710000000_launch_baseline.sql
 
 # 2. Apply post-baseline migrations (listed under Post-Baseline Migrations below)
 psql "$DISPOSABLE_DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20260710001000_create_private_trade_screenshots_bucket.sql
@@ -50,7 +52,8 @@ enums, and core functions** required by the current shipped app, including:
 
 ## Post-Baseline Migrations
 
-These six forward-only migrations must be applied **after** the baseline:
+All timestamped migrations newer than `20260710000000` must be applied in
+filename order after the baseline. The first six post-baseline migrations are:
 
 | Migration | Adds |
 |-----------|------|
@@ -74,7 +77,7 @@ done
 
 ## Historical Migrations
 
-Pre-baseline migrations (`20260615_*` through `20260709_*`) are **legacy history** — they use plain CREATE statements and will **fail** if replayed on top of the baseline. They exist only in the migration history for deployed environments and are **not** part of the clean-bootstrap path.
+Pre-baseline migrations (`20260615_*` through `20260709_*`) are **legacy history** — they use plain CREATE statements and will **fail** if replayed on top of the baseline. They are preserved under `supabase/migrations_legacy_pre_baseline/` for audit and are **not** part of the clean-bootstrap path.
 
 ## Validation
 
@@ -87,9 +90,12 @@ psql "$DISPOSABLE_DATABASE_URL" -v ON_ERROR_STOP=1 \
 
 ## Notes
 
-- The baseline is **not** deployed as a chronological migration — it lives
-  under `supabase/baseline/` and is used only for clean builds.
-- Historical migrations under `supabase/migrations/` are never deleted or
-  rewritten.
+- Production records `20260710000000` as the baseline cutover version. The
+  schema already existed there when the snapshot was captured, so the baseline
+  SQL must never be replayed against that deployed database.
+- The active baseline is identical to the audited snapshot retained under
+  `supabase/baseline/`.
+- Historical pre-baseline migrations are preserved, unchanged, outside the
+  active replay path.
 - Generated types should be regenerated after any schema change:
   `supabase gen types typescript --local > src/integrations/supabase/types.ts`

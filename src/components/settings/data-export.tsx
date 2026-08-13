@@ -1,5 +1,3 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { motion } from "framer-motion";
 import { useState } from "react";
 import { Download, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -45,13 +43,13 @@ export function DataExportSection() {
       const stamp = new Date().toISOString().slice(0, 10);
       if (format === "json") {
         download(
-          `edge-journal-export-${stamp}.json`,
+          `edgescope-core-data-${stamp}.json`,
           JSON.stringify(data, null, 2),
           "application/json",
         );
       } else {
         const csv = toCSV(data.trades as Record<string, unknown>[]);
-        download(`edge-journal-trades-${stamp}.csv`, csv, "text/csv");
+        download(`edgescope-trades-${stamp}.csv`, csv, "text/csv");
       }
       toast.success(`Exported ${data.trades.length} trades`);
     } catch (err) {
@@ -64,7 +62,7 @@ export function DataExportSection() {
   return (
     <div className="mt-8 border-t border-white/[0.06] pt-6">
       <h3 className="text-base font-bold">Data Export</h3>
-      <p className="text-xs text-muted-foreground">Download a complete copy of your trade data.</p>
+      <p className="text-xs text-muted-foreground">Download your core private EdgeScope record.</p>
       <div className="mt-4 flex flex-wrap gap-3">
         <button
           onClick={() => run("csv")}
@@ -92,7 +90,9 @@ export function DataExportSection() {
         </button>
       </div>
       <p className="mt-3 text-[11px] text-muted-foreground/60">
-        CSV contains your trades. JSON contains trades, screenshot metadata, and sticky notes.
+        CSV contains trades only. JSON includes trades, accounts and guardrails, preferences,
+        Playbook notes and versioned standards, categories, improvement history, legacy notes, and
+        screenshot metadata. Screenshot files and Network data are not included.
       </p>
     </div>
   );

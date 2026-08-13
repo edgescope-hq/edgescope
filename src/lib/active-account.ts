@@ -14,7 +14,7 @@ export function normalizeActiveAccountId(
   accounts: readonly ActiveAccountCandidate[],
 ): string {
   if (!value || value === ALL_ACCOUNTS) return ALL_ACCOUNTS;
-  return accounts.some((account) => account.id === value && account.status !== "archived")
-    ? value
-    : ALL_ACCOUNTS;
+  // Account View may deliberately inspect preserved history for a retired
+  // account. New-trade targeting applies the separate archived-account rule.
+  return accounts.some((account) => account.id === value) ? value : ALL_ACCOUNTS;
 }

@@ -64,6 +64,310 @@ export type Database = {
           },
         ];
       };
+      evidence_sources: {
+        Row: {
+          created_at: string;
+          display_name: string;
+          id: string;
+          metadata: Json;
+          provider_key: string | null;
+          source_kind: string;
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          created_at?: string;
+          display_name: string;
+          id?: string;
+          metadata?: Json;
+          provider_key?: string | null;
+          source_kind: string;
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          created_at?: string;
+          display_name?: string;
+          id?: string;
+          metadata?: Json;
+          provider_key?: string | null;
+          source_kind?: string;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
+      ingestion_runs: {
+        Row: {
+          accepted_event_count: number | null;
+          completed_at: string | null;
+          coverage_ended_at: string | null;
+          coverage_started_at: string | null;
+          created_at: string;
+          external_run_id: string | null;
+          id: string;
+          metadata: Json;
+          original_filename: string | null;
+          rejected_record_count: number | null;
+          source_account_id: string | null;
+          source_id: string;
+          source_record_count: number | null;
+          source_reference: string | null;
+          started_at: string;
+          status: string;
+          status_metadata: Json;
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          accepted_event_count?: number | null;
+          completed_at?: string | null;
+          coverage_ended_at?: string | null;
+          coverage_started_at?: string | null;
+          created_at?: string;
+          external_run_id?: string | null;
+          id?: string;
+          metadata?: Json;
+          original_filename?: string | null;
+          rejected_record_count?: number | null;
+          source_account_id?: string | null;
+          source_id: string;
+          source_record_count?: number | null;
+          source_reference?: string | null;
+          started_at?: string;
+          status?: string;
+          status_metadata?: Json;
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          accepted_event_count?: number | null;
+          completed_at?: string | null;
+          coverage_ended_at?: string | null;
+          coverage_started_at?: string | null;
+          created_at?: string;
+          external_run_id?: string | null;
+          id?: string;
+          metadata?: Json;
+          original_filename?: string | null;
+          rejected_record_count?: number | null;
+          source_account_id?: string | null;
+          source_id?: string;
+          source_record_count?: number | null;
+          source_reference?: string | null;
+          started_at?: string;
+          status?: string;
+          status_metadata?: Json;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "ingestion_runs_source_account_owner_fkey";
+            columns: ["source_account_id", "user_id", "source_id"];
+            isOneToOne: false;
+            referencedRelation: "source_accounts";
+            referencedColumns: ["id", "user_id", "source_id"];
+          },
+          {
+            foreignKeyName: "ingestion_runs_source_owner_fkey";
+            columns: ["source_id", "user_id"];
+            isOneToOne: false;
+            referencedRelation: "evidence_sources";
+            referencedColumns: ["id", "user_id"];
+          },
+        ];
+      };
+      source_accounts: {
+        Row: {
+          created_at: string;
+          display_name: string | null;
+          edgescope_account_id: string | null;
+          external_account_id: string | null;
+          id: string;
+          metadata: Json;
+          source_currency: string | null;
+          source_id: string;
+          source_timezone: string | null;
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          created_at?: string;
+          display_name?: string | null;
+          edgescope_account_id?: string | null;
+          external_account_id?: string | null;
+          id?: string;
+          metadata?: Json;
+          source_currency?: string | null;
+          source_id: string;
+          source_timezone?: string | null;
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          created_at?: string;
+          display_name?: string | null;
+          edgescope_account_id?: string | null;
+          external_account_id?: string | null;
+          id?: string;
+          metadata?: Json;
+          source_currency?: string | null;
+          source_id?: string;
+          source_timezone?: string | null;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "source_accounts_edgescope_account_owner_fkey";
+            columns: ["edgescope_account_id", "user_id"];
+            isOneToOne: false;
+            referencedRelation: "trading_accounts";
+            referencedColumns: ["id", "user_id"];
+          },
+          {
+            foreignKeyName: "source_accounts_source_owner_fkey";
+            columns: ["source_id", "user_id"];
+            isOneToOne: false;
+            referencedRelation: "evidence_sources";
+            referencedColumns: ["id", "user_id"];
+          },
+        ];
+      };
+      source_events: {
+        Row: {
+          commission: number | null;
+          created_at: string;
+          event_kind: string;
+          external_deal_id: string | null;
+          external_event_id: string | null;
+          external_id_kind: string | null;
+          external_order_id: string | null;
+          external_position_id: string | null;
+          external_transaction_id: string | null;
+          fees: number | null;
+          gross_pnl: number | null;
+          id: string;
+          ingested_at: string;
+          ingestion_run_id: string;
+          net_pnl: number | null;
+          normalization_metadata: Json;
+          normalized_instrument: string | null;
+          normalized_side: string | null;
+          occurred_at: string | null;
+          other_costs: number | null;
+          price: number | null;
+          quantity: number | null;
+          raw_payload: Json;
+          source_account_id: string | null;
+          source_currency: string | null;
+          source_event_type: string | null;
+          source_id: string;
+          source_side: string | null;
+          source_symbol: string | null;
+          source_timestamp: string | null;
+          source_timezone: string | null;
+          source_utc_offset_minutes: number | null;
+          swap: number | null;
+          user_id: string;
+        };
+        Insert: {
+          commission?: number | null;
+          created_at?: string;
+          event_kind: string;
+          external_deal_id?: string | null;
+          external_event_id?: string | null;
+          external_id_kind?: string | null;
+          external_order_id?: string | null;
+          external_position_id?: string | null;
+          external_transaction_id?: string | null;
+          fees?: number | null;
+          gross_pnl?: number | null;
+          id?: string;
+          ingested_at?: string;
+          ingestion_run_id: string;
+          net_pnl?: number | null;
+          normalization_metadata?: Json;
+          normalized_instrument?: string | null;
+          normalized_side?: string | null;
+          occurred_at?: string | null;
+          other_costs?: number | null;
+          price?: number | null;
+          quantity?: number | null;
+          raw_payload: Json;
+          source_account_id?: string | null;
+          source_currency?: string | null;
+          source_event_type?: string | null;
+          source_id: string;
+          source_side?: string | null;
+          source_symbol?: string | null;
+          source_timestamp?: string | null;
+          source_timezone?: string | null;
+          source_utc_offset_minutes?: number | null;
+          swap?: number | null;
+          user_id: string;
+        };
+        Update: {
+          commission?: number | null;
+          created_at?: string;
+          event_kind?: string;
+          external_deal_id?: string | null;
+          external_event_id?: string | null;
+          external_id_kind?: string | null;
+          external_order_id?: string | null;
+          external_position_id?: string | null;
+          external_transaction_id?: string | null;
+          fees?: number | null;
+          gross_pnl?: number | null;
+          id?: string;
+          ingested_at?: string;
+          ingestion_run_id?: string;
+          net_pnl?: number | null;
+          normalization_metadata?: Json;
+          normalized_instrument?: string | null;
+          normalized_side?: string | null;
+          occurred_at?: string | null;
+          other_costs?: number | null;
+          price?: number | null;
+          quantity?: number | null;
+          raw_payload?: Json;
+          source_account_id?: string | null;
+          source_currency?: string | null;
+          source_event_type?: string | null;
+          source_id?: string;
+          source_side?: string | null;
+          source_symbol?: string | null;
+          source_timestamp?: string | null;
+          source_timezone?: string | null;
+          source_utc_offset_minutes?: number | null;
+          swap?: number | null;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "source_events_run_owner_fkey";
+            columns: ["ingestion_run_id", "user_id", "source_id"];
+            isOneToOne: false;
+            referencedRelation: "ingestion_runs";
+            referencedColumns: ["id", "user_id", "source_id"];
+          },
+          {
+            foreignKeyName: "source_events_source_account_owner_fkey";
+            columns: ["source_account_id", "user_id", "source_id"];
+            isOneToOne: false;
+            referencedRelation: "source_accounts";
+            referencedColumns: ["id", "user_id", "source_id"];
+          },
+          {
+            foreignKeyName: "source_events_source_owner_fkey";
+            columns: ["source_id", "user_id"];
+            isOneToOne: false;
+            referencedRelation: "evidence_sources";
+            referencedColumns: ["id", "user_id"];
+          },
+        ];
+      };
       community_group_invitations: {
         Row: {
           created_at: string;
@@ -355,6 +659,7 @@ export type Database = {
           content: string;
           created_at: string;
           id: string;
+          legacy_sticky_note_id: string | null;
           note_type: string;
           tags: string[];
           title: string | null;
@@ -365,6 +670,7 @@ export type Database = {
           content?: string;
           created_at?: string;
           id?: string;
+          legacy_sticky_note_id?: string | null;
           note_type?: string;
           tags?: string[];
           title?: string | null;
@@ -375,9 +681,178 @@ export type Database = {
           content?: string;
           created_at?: string;
           id?: string;
+          legacy_sticky_note_id?: string | null;
           note_type?: string;
           tags?: string[];
           title?: string | null;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
+      playbook_standards: {
+        Row: {
+          created_at: string;
+          id: string;
+          source_entry_id: string | null;
+          status: string;
+          title: string;
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          created_at?: string;
+          id?: string;
+          source_entry_id?: string | null;
+          status?: string;
+          title: string;
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          created_at?: string;
+          id?: string;
+          source_entry_id?: string | null;
+          status?: string;
+          title?: string;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
+      playbook_standard_versions: {
+        Row: {
+          content: string;
+          created_at: string;
+          effective_from: string;
+          effective_to: string | null;
+          id: string;
+          standard_id: string;
+          title: string;
+          user_id: string;
+          version_number: number;
+        };
+        Insert: {
+          content?: string;
+          created_at?: string;
+          effective_from?: string;
+          effective_to?: string | null;
+          id?: string;
+          standard_id: string;
+          title: string;
+          user_id: string;
+          version_number: number;
+        };
+        Update: {
+          content?: string;
+          created_at?: string;
+          effective_from?: string;
+          effective_to?: string | null;
+          id?: string;
+          standard_id?: string;
+          title?: string;
+          user_id?: string;
+          version_number?: number;
+        };
+        Relationships: [];
+      };
+      improvement_focuses: {
+        Row: {
+          activated_at: string;
+          behavior: string;
+          closed_at: string | null;
+          closure_note: string | null;
+          created_at: string;
+          grounding: string;
+          id: string;
+          intended_behavior: string;
+          origin: string;
+          relevant_evidence_definition: string;
+          resolution: string | null;
+          source_discovery_id: string | null;
+          source_trade_ids: string[];
+          standard_version_id: string | null;
+          state: string;
+          trigger_situation: string;
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          activated_at?: string;
+          behavior: string;
+          closed_at?: string | null;
+          closure_note?: string | null;
+          created_at?: string;
+          grounding: string;
+          id?: string;
+          intended_behavior: string;
+          origin: string;
+          relevant_evidence_definition: string;
+          resolution?: string | null;
+          source_discovery_id?: string | null;
+          source_trade_ids?: string[];
+          standard_version_id?: string | null;
+          state?: string;
+          trigger_situation: string;
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          activated_at?: string;
+          behavior?: string;
+          closed_at?: string | null;
+          closure_note?: string | null;
+          created_at?: string;
+          grounding?: string;
+          id?: string;
+          intended_behavior?: string;
+          origin?: string;
+          relevant_evidence_definition?: string;
+          resolution?: string | null;
+          source_discovery_id?: string | null;
+          source_trade_ids?: string[];
+          standard_version_id?: string | null;
+          state?: string;
+          trigger_situation?: string;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
+      improvement_occurrences: {
+        Row: {
+          assessed_at: string;
+          assessment: string;
+          assessment_provenance: string;
+          created_at: string;
+          focus_id: string;
+          id: string;
+          note: string | null;
+          trade_id: string;
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          assessed_at?: string;
+          assessment: string;
+          assessment_provenance?: string;
+          created_at?: string;
+          focus_id: string;
+          id?: string;
+          note?: string | null;
+          trade_id: string;
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          assessed_at?: string;
+          assessment?: string;
+          assessment_provenance?: string;
+          created_at?: string;
+          focus_id?: string;
+          id?: string;
+          note?: string | null;
+          trade_id?: string;
           updated_at?: string;
           user_id?: string;
         };
@@ -527,6 +1002,42 @@ export type Database = {
         };
         Relationships: [];
       };
+      trade_source_events: {
+        Row: {
+          linked_at: string;
+          source_event_id: string;
+          trade_id: string;
+          user_id: string;
+        };
+        Insert: {
+          linked_at?: string;
+          source_event_id: string;
+          trade_id: string;
+          user_id: string;
+        };
+        Update: {
+          linked_at?: string;
+          source_event_id?: string;
+          trade_id?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "trade_source_events_event_owner_fkey";
+            columns: ["source_event_id", "user_id"];
+            isOneToOne: true;
+            referencedRelation: "source_events";
+            referencedColumns: ["id", "user_id"];
+          },
+          {
+            foreignKeyName: "trade_source_events_trade_owner_fkey";
+            columns: ["trade_id", "user_id"];
+            isOneToOne: false;
+            referencedRelation: "trades";
+            referencedColumns: ["id", "user_id"];
+          },
+        ];
+      };
       trade_screenshots: {
         Row: {
           annotations: Json;
@@ -604,11 +1115,17 @@ export type Database = {
           notes: string | null;
           opened_at: string | null;
           planned_rr: string | null;
+          primary_category: string | null;
           pnl_amount: number | null;
           position_size: number | null;
           private_notes: string | null;
           reasoning: string | null;
           review_completed_at: string | null;
+          setup_adherence: "followed" | "deviated" | "unassessable" | null;
+          setup_adherence_recorded_at: string | null;
+          setup_intent_provenance: "capture" | "retrospective_review" | null;
+          setup_intent_recorded_at: string | null;
+          setup_intent_version_id: string | null;
           result: Database["public"]["Enums"]["trade_result"] | null;
           reward_amount: number | null;
           risk_amount: number | null;
@@ -662,11 +1179,17 @@ export type Database = {
           notes?: string | null;
           opened_at?: string | null;
           planned_rr?: string | null;
+          primary_category?: string | null;
           pnl_amount?: number | null;
           position_size?: number | null;
           private_notes?: string | null;
           reasoning?: string | null;
           review_completed_at?: string | null;
+          setup_adherence?: "followed" | "deviated" | "unassessable" | null;
+          setup_adherence_recorded_at?: string | null;
+          setup_intent_provenance?: "capture" | "retrospective_review" | null;
+          setup_intent_recorded_at?: string | null;
+          setup_intent_version_id?: string | null;
           result?: Database["public"]["Enums"]["trade_result"] | null;
           reward_amount?: number | null;
           risk_amount?: number | null;
@@ -720,11 +1243,17 @@ export type Database = {
           notes?: string | null;
           opened_at?: string | null;
           planned_rr?: string | null;
+          primary_category?: string | null;
           pnl_amount?: number | null;
           position_size?: number | null;
           private_notes?: string | null;
           reasoning?: string | null;
           review_completed_at?: string | null;
+          setup_adherence?: "followed" | "deviated" | "unassessable" | null;
+          setup_adherence_recorded_at?: string | null;
+          setup_intent_provenance?: "capture" | "retrospective_review" | null;
+          setup_intent_recorded_at?: string | null;
+          setup_intent_version_id?: string | null;
           result?: Database["public"]["Enums"]["trade_result"] | null;
           reward_amount?: number | null;
           risk_amount?: number | null;
@@ -1005,12 +1534,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals;
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals;
 }
@@ -1030,13 +1559,12 @@ export type Tables<
 
 export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
-    | keyof DefaultSchema["Tables"]
-    | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+    keyof DefaultSchema["Tables"] | { schema: keyof DatabaseWithoutInternals },
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals;
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals;
 }
@@ -1055,13 +1583,12 @@ export type TablesInsert<
 
 export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
-    | keyof DefaultSchema["Tables"]
-    | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+    keyof DefaultSchema["Tables"] | { schema: keyof DatabaseWithoutInternals },
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals;
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals;
 }
@@ -1080,13 +1607,12 @@ export type TablesUpdate<
 
 export type Enums<
   DefaultSchemaEnumNameOrOptions extends
-    | keyof DefaultSchema["Enums"]
-    | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+    keyof DefaultSchema["Enums"] | { schema: keyof DatabaseWithoutInternals },
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals;
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals;
 }
@@ -1097,13 +1623,12 @@ export type Enums<
 
 export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
-    | keyof DefaultSchema["CompositeTypes"]
-    | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+    keyof DefaultSchema["CompositeTypes"] | { schema: keyof DatabaseWithoutInternals },
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals;
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals;
 }

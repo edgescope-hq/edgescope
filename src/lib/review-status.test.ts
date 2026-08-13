@@ -46,23 +46,23 @@ describe("trade review status", () => {
     );
   });
 
-  it("temporarily becomes Incomplete when the R pair is removed and restores Reviewed", () => {
+  it("does not rewrite durable review history when R evidence later becomes unavailable", () => {
     const withoutRisk = { ...reviewedTrade, risk_amount: null };
     const withoutPnl = { ...reviewedTrade, pnl_amount: null };
 
-    assert.equal(getReviewStatus(withoutRisk), "incomplete");
-    assert.equal(getReviewStatus(withoutPnl), "incomplete");
+    assert.equal(getReviewStatus(withoutRisk), "reviewed");
+    assert.equal(getReviewStatus(withoutPnl), "reviewed");
     assert.equal(withoutRisk.reasoning, reviewedTrade.reasoning);
     assert.equal(withoutRisk.screenshot_count, reviewedTrade.screenshot_count);
     assert.equal(getReviewStatus({ ...withoutRisk, risk_amount: 100 }), "reviewed");
     assert.equal(getReviewStatus({ ...withoutPnl, pnl_amount: 200 }), "reviewed");
   });
 
-  it("treats malformed core fields and non-positive risk as Incomplete", () => {
+  it("treats malformed durable identity/result fields as Incomplete", () => {
     assert.equal(getReviewStatus({ ...reviewedTrade, instrument: "" }), "incomplete");
     assert.equal(getReviewStatus({ ...reviewedTrade, direction: "sideways" }), "incomplete");
     assert.equal(getReviewStatus({ ...reviewedTrade, result: "open" }), "incomplete");
-    assert.equal(getReviewStatus({ ...reviewedTrade, risk_amount: 0 }), "incomplete");
+    assert.equal(getReviewStatus({ ...reviewedTrade, risk_amount: 0 }), "reviewed");
   });
 
   it("keeps a valid but uncompleted trade in Needs review", () => {

@@ -2,12 +2,16 @@ import { safeError } from "@/lib/server-errors";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import {
+  accountTypePreservesEvidencePopulation,
+  type EvidenceAccountType,
+} from "@/lib/evidence-population";
 
 export type TradingAccount = {
   id: string;
   user_id: string;
   name: string;
-  account_type: "personal" | "funded" | "demo" | "live" | "challenge" | "backtest";
+  account_type: EvidenceAccountType;
   starting_balance: number;
   status: "active" | "archived";
   is_active: boolean;
@@ -20,6 +24,7 @@ export type TradingAccount = {
   monthly_loss_limit_pct: number | null;
   max_open_positions: number | null;
   max_correlated_positions: number | null;
+  max_trades_per_day: number | null;
   news_trading_allowed: boolean;
   weekend_holding_allowed: boolean;
   created_at: string;
@@ -41,6 +46,7 @@ const accountInputSchema = z.object({
   monthly_loss_limit_pct: z.number().min(0).max(100).nullable().optional(),
   max_open_positions: z.number().int().min(0).max(1000).nullable().optional(),
   max_correlated_positions: z.number().int().min(0).max(1000).nullable().optional(),
+  max_trades_per_day: z.number().int().min(0).max(1000).nullable().optional(),
   news_trading_allowed: z.boolean().optional(),
   weekend_holding_allowed: z.boolean().optional(),
 });
@@ -61,7 +67,7 @@ export const createTradingAccount = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) => accountInputSchema.parse(d))
   .handler(async ({ data, context }) => {
-    // If user has no active account yet, make this one active.
+    // If the user has no Default Trade Account yet, make this the default.
     const { count } = await context.supabase
       .from("trading_accounts")
       .select("id", { count: "exact", head: true })
@@ -77,6 +83,7 @@ export const createTradingAccount = createServerFn({ method: "POST" })
         .eq("user_id", context.userId)
         .eq("name", "Personal")
         .eq("account_type", "personal")
+        .eq("status", "active")
         .maybeSingle();
       if (existing) {
         if (!existing.is_active && shouldActivate) {
@@ -102,6 +109,7 @@ export const createTradingAccount = createServerFn({ method: "POST" })
         challenge_phase: data.challenge_phase ?? null,
         max_risk_per_trade_pct: data.max_risk_per_trade_pct ?? null,
         daily_loss_limit_pct: data.daily_loss_limit_pct ?? null,
+        max_trades_per_day: data.max_trades_per_day ?? null,
         is_active: shouldActivate,
       })
       .select()
@@ -121,6 +129,23 @@ export const updateTradingAccount = createServerFn({ method: "POST" })
       .parse(d),
   )
   .handler(async ({ data, context }) => {
+    const { data: current, error: currentError } = await context.supabase
+      .from("trading_accounts")
+      .select("id, account_type")
+      .eq("id", data.id)
+      .eq("user_id", context.userId)
+      .maybeSingle();
+    if (currentError) throw safeError(currentError);
+    if (!current) throw new Error("Trading account not found");
+    if (
+      data.patch.account_type &&
+      !accountTypePreservesEvidencePopulation(current.account_type, data.patch.account_type)
+    ) {
+      throw new Error(
+        "An account cannot change between actual, practice, and research evidence. Create a separate account so its history keeps its original meaning.",
+      );
+    }
+
     const { error } = await context.supabase
       .from("trading_accounts")
       .update(data.patch)
@@ -136,36 +161,73 @@ export const archiveTradingAccount = createServerFn({ method: "POST" })
     z.object({ id: z.string().uuid(), status: z.enum(["active", "archived"]) }).parse(d),
   )
   .handler(async ({ data, context }) => {
-    // If archiving the active one, unset is_active first.
-    if (data.status === "archived") {
-      await context.supabase
-        .from("trading_accounts")
-        .update({ is_active: false })
-        .eq("id", data.id)
-        .eq("user_id", context.userId);
-    }
+    const { data: target, error: targetError } = await context.supabase
+      .from("trading_accounts")
+      .select("id, is_active, status")
+      .eq("id", data.id)
+      .eq("user_id", context.userId)
+      .maybeSingle();
+    if (targetError) throw safeError(targetError);
+    if (!target) throw new Error("Trading account not found");
+
     const { error } = await context.supabase
       .from("trading_accounts")
-      .update({ status: data.status })
+      .update({ status: data.status, ...(data.status === "archived" ? { is_active: false } : {}) })
       .eq("id", data.id)
       .eq("user_id", context.userId);
     if (error) throw safeError(error);
+
+    // Keep the Default Trade Account invariant when the retired account was
+    // previously the default. Historical trades remain attached to the archive.
+    if (data.status === "archived" && target.is_active) {
+      const restoreTarget = async () => {
+        await context.supabase
+          .from("trading_accounts")
+          .update({ status: target.status, is_active: true })
+          .eq("id", target.id)
+          .eq("user_id", context.userId);
+      };
+      const { data: replacement, error: replacementError } = await context.supabase
+        .from("trading_accounts")
+        .select("id")
+        .eq("user_id", context.userId)
+        .eq("status", "active")
+        .neq("id", data.id)
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (replacementError) {
+        await restoreTarget();
+        throw safeError(replacementError);
+      }
+      if (replacement) {
+        const { error: defaultError } = await context.supabase
+          .from("trading_accounts")
+          .update({ is_active: true })
+          .eq("id", replacement.id)
+          .eq("user_id", context.userId);
+        if (defaultError) {
+          await restoreTarget();
+          throw safeError(defaultError);
+        }
+      }
+    }
     return { ok: true };
   });
 
-export const setActiveTradingAccount = createServerFn({ method: "POST" })
+export const setDefaultTradingAccount = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     const { data: target, error: targetErr } = await context.supabase
       .from("trading_accounts")
-      .select("id, is_active")
+      .select("id, is_active, status")
       .eq("id", data.id)
       .eq("user_id", context.userId)
       .maybeSingle();
     if (targetErr) throw safeError(targetErr);
     if (!target) throw new Error("Trading account not found");
-    if (target.is_active) return { ok: true };
+    if (target.is_active && target.status === "active") return { ok: true };
 
     const { data: previousActive, error: prevErr } = await context.supabase
       .from("trading_accounts")
@@ -203,6 +265,10 @@ export const setActiveTradingAccount = createServerFn({ method: "POST" })
     }
     return { ok: true };
   });
+
+/** @deprecated Internal compatibility alias. Product copy calls this the
+ * Default Trade Account; Account View is the separate saved filter. */
+export const setActiveTradingAccount = setDefaultTradingAccount;
 
 export const deleteTradingAccount = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])

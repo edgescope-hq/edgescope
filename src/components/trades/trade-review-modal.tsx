@@ -21,7 +21,7 @@ import { validateScreenshotFile } from "@/lib/file-validation";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 type AnnotationShape = unknown;
 import { GRADES, type Grade } from "@/lib/trade-constants";
-import { rrNum, type DbTrade } from "@/lib/trade-mappers";
+import { primaryTradeCategory, realizedR, type DbTrade } from "@/lib/trade-mappers";
 import { sessionLabel } from "@/lib/trade-constants";
 import { createTradeCategory, listTradeCategories } from "@/lib/trade-categories.functions";
 import { parsePlannedRR } from "@/lib/planned-rr";
@@ -49,6 +49,22 @@ import { ScreenshotSlot } from "@/components/trades/screenshot-slot";
 import { CreatableCombobox, DarkSelect, TagInput } from "@/components/trades/trade-field-controls";
 import { QUICK_CAPTURE_EMOTIONS } from "@/lib/emotions";
 import { parseDateKey } from "@/lib/trade-date-picker";
+import {
+  listPlaybookStandards,
+  type PlaybookStandard,
+  type PlaybookStandardVersion,
+} from "@/lib/playbook.functions";
+import {
+  assessImprovementOccurrence,
+  getActiveImprovementFocus,
+} from "@/lib/improvement.functions";
+import { isTradeEligibleForFocus, type ImprovementAssessment } from "@/lib/improvement";
+import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
+import { listTradingAccounts } from "@/lib/trading-accounts.functions";
+import {
+  evidencePopulationLabel,
+  journalEvidencePopulationForTrade,
+} from "@/lib/evidence-population";
 
 const DEFAULT_MISTAKE_TAGS = [
   "FOMO",
@@ -141,6 +157,10 @@ export function TradeReviewModal({
   const listCategoriesFn = useServerFn(listTradeCategories);
   const createCategoryFn = useServerFn(createTradeCategory);
   const getPreferencesFn = useServerFn(getTradingPreferences);
+  const listStandardsFn = useServerFn(listPlaybookStandards);
+  const listAccountsFn = useServerFn(listTradingAccounts);
+  const getActiveFocusFn = useServerFn(getActiveImprovementFocus);
+  const assessFocusFn = useServerFn(assessImprovementOccurrence);
 
   const { data } = useQuery({
     queryKey: ["trade", tradeId],
@@ -165,6 +185,18 @@ export function TradeReviewModal({
   const { data: preferences } = useQuery({
     queryKey: ["trading-preferences"],
     queryFn: () => getPreferencesFn(),
+  });
+  const { data: standardsData = [] } = useQuery({
+    queryKey: ["playbook-standards"],
+    queryFn: () => listStandardsFn(),
+  });
+  const { data: accountData } = useQuery({
+    queryKey: ["trading-accounts"],
+    queryFn: () => listAccountsFn(),
+  });
+  const { data: activeFocusData } = useQuery({
+    queryKey: ["active-improvement-focus"],
+    queryFn: () => getActiveFocusFn(),
   });
   const tracking = journalTrackingFromPreferences(preferences?.journal_tracking);
   const configuredSessions = journalSessionsFromPreferences(preferences?.journal_tracking);
@@ -224,6 +256,11 @@ export function TradeReviewModal({
   const [exitReason, setExitReason] = useState("");
   const [tradeManagement, setTradeManagement] = useState<string[]>([]);
   const [customTags, setCustomTags] = useState<string[]>([]);
+  const [setupIntentVersionId, setSetupIntentVersionId] = useState("");
+  const [setupAdherence, setSetupAdherence] = useState<ImprovementAssessment | null>(null);
+  const [focusAssessment, setFocusAssessment] = useState<ImprovementAssessment | null>(null);
+  const [focusAssessmentNote, setFocusAssessmentNote] = useState("");
+  const [focusHydrated, setFocusHydrated] = useState(false);
   const closeInitiatorRef = useRef<HTMLElement | null>(null);
   const initialReviewRef = useRef<string | null>(null);
 
@@ -247,8 +284,13 @@ export function TradeReviewModal({
     exitReason,
     tradeManagement: [...tradeManagement].sort(),
     customTags: [...customTags].sort(),
+    setupIntentVersionId,
+    setupAdherence,
+    focusAssessment,
+    focusAssessmentNote,
   });
   const dirty = initialReviewRef.current !== null && initialReviewRef.current !== reviewSnapshot;
+  useUnsavedChanges(dirty);
 
   const requestClose = useCallback(
     (initiator?: HTMLElement | null) => {
@@ -265,6 +307,7 @@ export function TradeReviewModal({
   useEffect(() => {
     setHydrated(false);
     setSharesHydrated(false);
+    setFocusHydrated(false);
   }, [tradeId]);
 
   useEffect(() => {
@@ -278,7 +321,7 @@ export function TradeReviewModal({
   useEffect(() => {
     if (!trade || hydrated) return;
     setReasoning(trade.reasoning ?? "");
-    setCategory((trade.categories ?? [])[0] ?? "");
+    setCategory(primaryTradeCategory(trade) ?? "");
     const g = GRADES.includes((trade.grade ?? "") as Grade) ? (trade.grade as Grade) : "";
     setGrade(g);
     setMistakeTags(trade.mistake_tags ?? []);
@@ -300,6 +343,8 @@ export function TradeReviewModal({
     setExitReason(trade.exit_reason ?? "");
     setTradeManagement(trade.trade_management ?? []);
     setCustomTags(trade.custom_tags ?? []);
+    setSetupIntentVersionId(trade.setup_intent_version_id ?? "");
+    setSetupAdherence(trade.setup_adherence ?? null);
     setHydrated(true);
   }, [trade, hydrated]);
 
@@ -311,10 +356,18 @@ export function TradeReviewModal({
   }, [initialShares, sharesHydrated]);
 
   useEffect(() => {
-    if (hydrated && sharesHydrated && initialReviewRef.current === null) {
+    if (activeFocusData === undefined || focusHydrated) return;
+    const occurrence = activeFocusData.occurrences.find((item) => item.trade_id === tradeId);
+    setFocusAssessment(occurrence?.assessment ?? null);
+    setFocusAssessmentNote(occurrence?.note ?? "");
+    setFocusHydrated(true);
+  }, [activeFocusData, focusHydrated, tradeId]);
+
+  useEffect(() => {
+    if (hydrated && sharesHydrated && focusHydrated && initialReviewRef.current === null) {
       initialReviewRef.current = reviewSnapshot;
     }
-  }, [hydrated, reviewSnapshot, sharesHydrated]);
+  }, [focusHydrated, hydrated, reviewSnapshot, sharesHydrated]);
 
   // Escape closes the review modal itself only when nothing is layered above it —
   // the screenshot viewer (handled above, capture phase), a confirm dialog, or
@@ -345,22 +398,42 @@ export function TradeReviewModal({
     () => [...new Set(allTrades.flatMap((item) => item.custom_tags ?? []))],
     [allTrades],
   );
-  const similar = useMemo(() => {
-    if (!trade) return { wins: [] as DbTrade[], losses: [] as DbTrade[] };
-    const matches = allTrades.filter((t) => {
-      if (t.id === trade.id) return false;
-      let score = 0;
-      if (category && (t.categories ?? []).includes(category)) score += 2;
-      if (trade.session && t.session === trade.session) score += 1;
-      if (grade && t.grade === grade) score += 1;
-      return score >= 2;
-    });
-    return {
-      wins: matches.filter((t) => t.result === "win"),
-      losses: matches.filter((t) => t.result === "loss"),
-    };
-  }, [trade, allTrades, category, grade]);
-
+  const setupIntentOptions = useMemo(() => {
+    const standards = standardsData as PlaybookStandard[];
+    const options: { version: PlaybookStandardVersion; label: string }[] = standards
+      .filter((standard) => standard.status === "active" && standard.current_version)
+      .map((standard) => ({
+        version: standard.current_version!,
+        label: `${standard.title} · current v${standard.current_version!.version_number}`,
+      }));
+    if (
+      setupIntentVersionId &&
+      !options.some((option) => option.version.id === setupIntentVersionId)
+    ) {
+      for (const standard of standards) {
+        const historical = standard.versions.find((version) => version.id === setupIntentVersionId);
+        if (historical) {
+          options.push({
+            version: historical,
+            label: `${historical.title} · historical v${historical.version_number}`,
+          });
+          break;
+        }
+      }
+    }
+    return options;
+  }, [setupIntentVersionId, standardsData]);
+  const activeFocus = activeFocusData?.focus ?? null;
+  const tradePopulation = trade
+    ? journalEvidencePopulationForTrade(trade, accountData ?? [])
+    : "unknown";
+  const focusEligible = Boolean(
+    trade &&
+    activeFocus &&
+    accountData &&
+    tradePopulation === "actual" &&
+    isTradeEligibleForFocus(trade, activeFocus),
+  );
   const firstTradeYear = useMemo(() => {
     const years = allTrades
       .map((item) => Number(item.trade_date?.slice(0, 4)))
@@ -387,61 +460,87 @@ export function TradeReviewModal({
       ) {
         await createCategoryFn({ data: category.trim() });
       }
-      const [reviewResult] = await Promise.all([
-        saveDetailedReviewFn({
-          data: {
-            id: trade.id,
-            patch: {
-              reasoning: reasoning || null,
-              grade: grade || null,
-              mistake_tags: mistakeTags,
-              in_killzone: inKillzone,
-              categories: category.trim() ? [category.trim()] : [],
-              entry_model: entryModel || null,
-              market_condition: marketCondition || null,
-              entry_timeframe: entryTimeframe || null,
-              news_involvement: newsInvolvement || null,
-              exit_reason: exitReason || null,
-              trade_management: normalizeTradeManagement(tradeManagement),
-              custom_tags: normalizeTags(customTags),
-              emotion_tags: appearsInPlacement(tracking, "emotions", "detailed_review")
-                ? emotionTags
-                : (trade.emotion_tags ?? []),
-              risk_amount: appearsInPlacement(tracking, "r_performance", "detailed_review")
-                ? risk != null && Number.isFinite(risk) && risk > 0
-                  ? risk
-                  : null
-                : trade.risk_amount,
-              reward_amount: appearsInPlacement(tracking, "r_performance", "detailed_review")
-                ? signedPnl
-                : trade.reward_amount,
-              pnl_amount: appearsInPlacement(tracking, "r_performance", "detailed_review")
-                ? signedPnl
-                : trade.pnl_amount,
-              ...(tradeDate ? { trade_date: tradeDate } : {}),
-              session: appearsInPlacement(tracking, "session", "detailed_review")
-                ? session || null
-                : trade.session,
-              planned_rr: appearsInPlacement(tracking, "planned_rr", "detailed_review")
-                ? (() => {
-                    const parsed = parsePlannedRR(plannedRR);
-                    return parsed == null ? null : parsed.toFixed(2);
-                  })()
-                : trade.planned_rr,
-            },
+      const reviewResult = await saveDetailedReviewFn({
+        data: {
+          id: trade.id,
+          patch: {
+            reasoning: reasoning || null,
+            grade: grade || null,
+            mistake_tags: mistakeTags,
+            in_killzone: inKillzone,
+            primary_category: category.trim() || null,
+            entry_model: entryModel || null,
+            market_condition: marketCondition || null,
+            entry_timeframe: entryTimeframe || null,
+            news_involvement: newsInvolvement || null,
+            exit_reason: exitReason || null,
+            trade_management: normalizeTradeManagement(tradeManagement),
+            custom_tags: normalizeTags(customTags),
+            emotion_tags: appearsInPlacement(tracking, "emotions", "detailed_review")
+              ? emotionTags
+              : (trade.emotion_tags ?? []),
+            risk_amount: appearsInPlacement(tracking, "r_performance", "detailed_review")
+              ? risk != null && Number.isFinite(risk) && risk > 0
+                ? risk
+                : null
+              : trade.risk_amount,
+            reward_amount: appearsInPlacement(tracking, "r_performance", "detailed_review")
+              ? signedPnl
+              : trade.reward_amount,
+            pnl_amount: appearsInPlacement(tracking, "r_performance", "detailed_review")
+              ? signedPnl
+              : trade.pnl_amount,
+            ...(tradeDate ? { trade_date: tradeDate } : {}),
+            session: appearsInPlacement(tracking, "session", "detailed_review")
+              ? session || null
+              : trade.session,
+            planned_rr: appearsInPlacement(tracking, "planned_rr", "detailed_review")
+              ? (() => {
+                  const parsed = parsePlannedRR(plannedRR);
+                  return parsed == null ? null : parsed.toFixed(2);
+                })()
+              : trade.planned_rr,
+            ...(setupIntentVersionId !== (trade.setup_intent_version_id ?? "")
+              ? { setup_intent_version_id: setupIntentVersionId || null }
+              : {}),
+            ...(setupAdherence !== (trade.setup_adherence ?? null)
+              ? { setup_adherence: setupIntentVersionId ? setupAdherence : null }
+              : {}),
           },
-        }),
-        appearsInPlacement(tracking, "community", "detailed_review")
-          ? shareTradeFn({
-              data: {
-                tradeId: trade.id,
-                groupIds: sharedGroupIds,
-                includeReasoning: true,
-              },
-            })
-          : Promise.resolve(null),
-      ]);
-      return reviewResult;
+        },
+      });
+
+      let focusError: string | null = null;
+      if (activeFocus && focusEligible && focusAssessment) {
+        try {
+          await assessFocusFn({
+            data: {
+              focus_id: activeFocus.id,
+              trade_id: trade.id,
+              assessment: focusAssessment,
+              note: focusAssessmentNote.trim() || null,
+            },
+          });
+        } catch (error) {
+          focusError = error instanceof Error ? error.message : "Focus assessment failed";
+        }
+      }
+
+      let shareError: string | null = null;
+      if (appearsInPlacement(tracking, "community", "detailed_review")) {
+        try {
+          await shareTradeFn({
+            data: {
+              tradeId: trade.id,
+              groupIds: sharedGroupIds,
+              includeReasoning: true,
+            },
+          });
+        } catch (error) {
+          shareError = error instanceof Error ? error.message : "Network sharing failed";
+        }
+      }
+      return { reviewResult, focusError, shareError };
     },
     onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ["trades"] });
@@ -450,8 +549,19 @@ export function TradeReviewModal({
       qc.invalidateQueries({ queryKey: ["shared-trades-count"] });
       qc.invalidateQueries({ queryKey: ["account-stats"] });
       qc.invalidateQueries({ queryKey: ["trade-categories"] });
+      qc.invalidateQueries({ queryKey: ["active-improvement-focus"] });
+      qc.invalidateQueries({ queryKey: ["improvement-focuses"] });
+
+      const missing = result?.reviewResult?.missingRequirements ?? [];
+      const ancillaryErrors = [result?.focusError, result?.shareError].filter(Boolean);
+      if (ancillaryErrors.length) {
+        toast.error(
+          `Review saved, but ${ancillaryErrors.join(" ")} Your unsaved selections remain available to retry.`,
+        );
+        return;
+      }
+
       initialReviewRef.current = reviewSnapshot;
-      const missing = result?.missingRequirements ?? [];
       toast.success(missing.length ? "Review saved — completion still needed" : "Review saved");
     },
     onError: (e: Error) => {
@@ -576,9 +686,9 @@ export function TradeReviewModal({
           ? "BE"
           : "—";
   const side = trade.direction === "short" ? "SHORT" : trade.direction === "long" ? "LONG" : null;
-  const r = rrNum(trade.achieved_rr);
-  const positive = r > 0;
-  const negative = r < 0;
+  const r = realizedR(trade);
+  const positive = r != null && r > 0;
+  const negative = r != null && r < 0;
   const when = displayHeaderDate(trade.trade_date);
   const shotSlots = TIMEFRAMES.filter(
     (timeframe) =>
@@ -718,7 +828,7 @@ export function TradeReviewModal({
             },
             {
               label: "ACHIEVED R",
-              value: trade.achieved_rr != null ? `${positive ? "+" : ""}${r.toFixed(2)}R` : "—",
+              value: r != null ? `${positive ? "+" : ""}${r.toFixed(2)}R` : "—",
               className: cn(
                 "text-sm font-bold tabular-nums",
                 positive && "text-success",
@@ -911,7 +1021,7 @@ export function TradeReviewModal({
               {appearsInPlacement(tracking, "category", "detailed_review") && (
                 <div>
                   <label className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground">
-                    CATEGORY / SETUP
+                    CATEGORY
                   </label>
                   <CreatableCombobox
                     value={category}
@@ -923,6 +1033,68 @@ export function TradeReviewModal({
                   />
                 </div>
               )}
+              <div className="rounded-xl bg-white/[0.018] p-3 ring-1 ring-white/[0.05]">
+                <label className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground">
+                  INTENDED PLAYBOOK SETUP
+                </label>
+                <select
+                  value={setupIntentVersionId}
+                  onChange={(event) => {
+                    setSetupIntentVersionId(event.target.value);
+                    setSetupAdherence(null);
+                  }}
+                  className={cn(inputClass, "mt-1.5")}
+                >
+                  <option value="">Unknown / not recorded</option>
+                  {setupIntentOptions.map((option) => (
+                    <option key={option.version.id} value={option.version.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-2 text-[11px] leading-5 text-muted-foreground">
+                  This is a versioned standard snapshot. It is separate from the trade category;
+                  selecting it during review is recorded as retrospective context.
+                </p>
+
+                {setupIntentVersionId && (
+                  <div className="mt-3 border-t border-white/[0.05] pt-3">
+                    <div className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground">
+                      MANUAL SETUP ADHERENCE
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {(["followed", "deviated", "unassessable"] as const).map((assessment) => {
+                        const active = setupAdherence === assessment;
+                        const label =
+                          assessment === "followed"
+                            ? "Followed"
+                            : assessment === "deviated"
+                              ? "Deviated"
+                              : "Unassessable";
+                        return (
+                          <button
+                            key={assessment}
+                            type="button"
+                            aria-pressed={active}
+                            onClick={() => setSetupAdherence(assessment)}
+                            className={cn(
+                              "min-h-9 rounded-full px-3 text-xs font-medium ring-1 transition-colors",
+                              active
+                                ? "bg-primary/15 text-primary ring-primary/35"
+                                : "bg-white/[0.03] text-muted-foreground ring-white/[0.07] hover:text-foreground",
+                            )}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="mt-2 text-[11px] leading-5 text-muted-foreground">
+                      Assess the process manually. Profit or loss never determines adherence.
+                    </p>
+                  </div>
+                )}
+              </div>
               {appearsInPlacement(tracking, "entry_model", "detailed_review") && (
                 <label>
                   <span className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground">
@@ -1090,7 +1262,9 @@ export function TradeReviewModal({
                         key={String(label)}
                         type="button"
                         aria-pressed={inKillzone === value}
-                        onClick={() => setInKillzone((current) => (current === value ? null : value))}
+                        onClick={() =>
+                          setInKillzone((current) => (current === value ? null : value))
+                        }
                         className={cn(
                           "min-h-9 flex-1 rounded-lg text-xs font-semibold transition-colors duration-150",
                           inKillzone === value
@@ -1188,25 +1362,92 @@ export function TradeReviewModal({
           </div>
         )}
 
-        {/* Similar */}
-        {(similar.wins.length > 0 || similar.losses.length > 0) && (
+        {activeFocus && (
           <div className="mt-3">
-            <Section title="SIMILAR TRADES">
-              <p className="-mt-1 text-xs text-muted-foreground">
-                Resembles{" "}
-                <span className="font-semibold text-success">{similar.wins.length} wins</span> and{" "}
-                <span className="font-semibold text-destructive">
-                  {similar.losses.length} losses
-                </span>
-                .
-              </p>
+            <Section title="ACTIVE IMPROVEMENT FOCUS">
+              <div className="space-y-3">
+                <div>
+                  <div className="text-sm font-semibold text-foreground">
+                    {activeFocus.behavior}
+                  </div>
+                  <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                    When: {activeFocus.trigger_situation}
+                  </div>
+                  <div className="text-xs leading-5 text-muted-foreground">
+                    Intended behavior: {activeFocus.intended_behavior}
+                  </div>
+                </div>
+
+                {focusEligible ? (
+                  <>
+                    <div>
+                      <div className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground">
+                        MANUAL OCCURRENCE ASSESSMENT
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {(["followed", "deviated", "unassessable"] as const).map((assessment) => {
+                          const active = focusAssessment === assessment;
+                          const label =
+                            assessment === "followed"
+                              ? "Followed"
+                              : assessment === "deviated"
+                                ? "Deviated"
+                                : "Unassessable";
+                          return (
+                            <button
+                              key={assessment}
+                              type="button"
+                              aria-pressed={active}
+                              onClick={() => setFocusAssessment(assessment)}
+                              className={cn(
+                                "min-h-9 rounded-full px-3 text-xs font-medium ring-1 transition-colors",
+                                active
+                                  ? "bg-primary/15 text-primary ring-primary/35"
+                                  : "bg-white/[0.03] text-muted-foreground ring-white/[0.07] hover:text-foreground",
+                              )}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <textarea
+                      value={focusAssessmentNote}
+                      onChange={(event) => setFocusAssessmentNote(event.target.value)}
+                      rows={2}
+                      maxLength={1000}
+                      disabled={!focusAssessment}
+                      className={cn(
+                        inputClass,
+                        !focusAssessment && "cursor-not-allowed opacity-50",
+                      )}
+                      placeholder={
+                        focusAssessment ? "Optional evidence note" : "Choose an assessment first"
+                      }
+                    />
+                    <p className="text-[11px] leading-5 text-muted-foreground">
+                      Assess only this behavior in this trade. P/L is never used as a proxy for
+                      whether you followed the focus.
+                    </p>
+                  </>
+                ) : (
+                  <div className="rounded-lg bg-white/[0.025] px-3 py-2.5 text-xs leading-5 text-muted-foreground ring-1 ring-white/[0.05]">
+                    {accountData === undefined
+                      ? "Checking this trade's evidence type…"
+                      : tradePopulation !== "actual"
+                        ? `${evidencePopulationLabel(tradePopulation)} evidence remains available for review, but never counts toward live improvement measurement.`
+                        : "This trade predates the focus activation, so it remains context only and is not counted as an occurrence."}
+                  </div>
+                )}
+              </div>
             </Section>
           </div>
         )}
 
         {appearsInPlacement(tracking, "community", "detailed_review") && (
           <div className="mt-3">
-            <Section title="COMMUNITY SHARING">
+            <Section title="NETWORK SHARING">
               <div className="space-y-3">
                 {sharedTradesCount < 3 && (
                   <div className="text-xs leading-5 text-muted-foreground">
@@ -1215,7 +1456,7 @@ export function TradeReviewModal({
                 )}
                 {myGroups.length === 0 ? (
                   <div className="rounded-lg bg-white/[0.02] px-3 py-2.5 text-xs text-muted-foreground ring-1 ring-white/[0.04]">
-                    You haven't joined or created any community groups yet. Visit Community to get
+                    You haven't joined or created any network groups yet. Visit Network to get
                     started.
                   </div>
                 ) : (

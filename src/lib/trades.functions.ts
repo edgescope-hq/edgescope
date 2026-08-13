@@ -3,7 +3,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { checkRateLimitOrThrow } from "@/lib/rate-limiter";
-import { localDateKey, localTimeKey } from "@/lib/trade-mappers";
+import { localDateKey, localTimeKey, realizedRContract } from "@/lib/trade-mappers";
 import { isOwnedScreenshotPath } from "@/lib/screenshot-storage";
 import {
   missingReviewRequirements,
@@ -53,6 +53,12 @@ const tradeSchema = z.object({
   emotion_after: z.string().max(64).nullable().optional(),
   mistake_tags: z.array(z.string().max(64)).max(20).default([]),
   categories: z.array(z.string().max(64)).max(20).default([]),
+  primary_category: z.string().trim().max(64).nullable().optional(),
+  setup_intent_version_id: z.string().uuid().nullable().optional(),
+  setup_intent_provenance: z.enum(["capture", "retrospective_review"]).nullable().optional(),
+  setup_intent_recorded_at: z.string().datetime().nullable().optional(),
+  setup_adherence: z.enum(["followed", "deviated", "unassessable"]).nullable().optional(),
+  setup_adherence_recorded_at: z.string().datetime().nullable().optional(),
   subcategories: z.array(z.string().max(64)).max(20).default([]),
   // New journal/P&L fields (Phase 1 cleanup)
   risk_amount: z.number().nullable().optional(),
@@ -71,7 +77,9 @@ const tradeSchema = z.object({
   custom_tags: z.array(z.string().max(48)).max(12).optional(),
 });
 
-const createTradeSchema = tradeSchema;
+const createTradeSchema = tradeSchema.extend({
+  account_id: z.string().uuid().optional(),
+});
 
 const detailedReviewPatchSchema = z.object({
   reasoning: z.string().max(5000).nullable().optional(),
@@ -79,6 +87,10 @@ const detailedReviewPatchSchema = z.object({
   mistake_tags: z.array(z.string().max(64)).max(20).optional(),
   in_killzone: z.boolean().nullable().optional(),
   categories: z.array(z.string().max(64)).max(20).optional(),
+  primary_category: z.string().trim().max(64).nullable().optional(),
+  setup_intent_version_id: z.string().uuid().nullable().optional(),
+  setup_intent_provenance: z.literal("retrospective_review").nullable().optional(),
+  setup_adherence: z.enum(["followed", "deviated", "unassessable"]).nullable().optional(),
   entry_model: z.string().max(80).nullable().optional(),
   session: z.string().max(64).nullable().optional(),
   planned_rr: z.string().max(64).nullable().optional(),
@@ -139,8 +151,41 @@ async function getActiveAccountId(supabase: any, userId: string): Promise<string
     .select("id")
     .eq("user_id", userId)
     .eq("is_active", true)
+    .eq("status", "active")
     .maybeSingle();
   return data?.id ?? null;
+}
+
+async function assertOwnedStandardVersion(
+  supabase: any,
+  userId: string,
+  versionId: string | null | undefined,
+  requireCurrent = false,
+): Promise<void> {
+  if (!versionId) return;
+  const { data, error } = await supabase
+    .from("playbook_standard_versions")
+    .select("id, standard_id, effective_to")
+    .eq("id", versionId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throw safeError(error);
+  if (!data) throw new Error("The selected Playbook standard is unavailable.");
+  if (!requireCurrent) return;
+  if (data.effective_to !== null) {
+    throw new Error("Only a current Playbook standard can be selected for new intent.");
+  }
+  const { data: standard, error: standardError } = await supabase
+    .from("playbook_standards")
+    .select("id")
+    .eq("id", data.standard_id)
+    .eq("user_id", userId)
+    .eq("status", "active")
+    .maybeSingle();
+  if (standardError) throw safeError(standardError);
+  if (!standard) {
+    throw new Error("Only an active Playbook standard can be selected for new intent.");
+  }
 }
 
 export const createTrade = createServerFn({ method: "POST" })
@@ -149,7 +194,25 @@ export const createTrade = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     checkRateLimitOrThrow("create-trade", 60, 60_000);
     const { supabase, userId } = context;
-    let account_id = await getActiveAccountId(supabase, userId);
+    const { account_id: requestedAccountId, ...tradeData } = data;
+    let account_id: string | null = null;
+
+    if (requestedAccountId) {
+      const { data: requestedAccount, error: requestedAccountError } = await supabase
+        .from("trading_accounts")
+        .select("id, status")
+        .eq("id", requestedAccountId)
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (requestedAccountError) throw safeError(requestedAccountError);
+      if (!requestedAccount || requestedAccount.status === "archived") {
+        throw new Error("The selected trading account is unavailable.");
+      }
+      account_id = requestedAccount.id;
+    } else {
+      account_id = await getActiveAccountId(supabase, userId);
+    }
+
     if (!account_id) {
       // Idempotently get or create default account
       const { data: existing } = await supabase
@@ -158,6 +221,7 @@ export const createTrade = createServerFn({ method: "POST" })
         .eq("user_id", userId)
         .eq("name", "Personal")
         .eq("account_type", "personal")
+        .eq("status", "active")
         .limit(1)
         .maybeSingle();
 
@@ -190,11 +254,21 @@ export const createTrade = createServerFn({ method: "POST" })
       }
     }
 
-    const journalData = normalizeOptionalTracking(normalizeJournalPayload(data));
-    let calculatedAchievedRR = journalData.achieved_rr;
-    if (journalData.risk_amount && journalData.risk_amount > 0 && journalData.pnl_amount != null) {
-      calculatedAchievedRR = Number((journalData.pnl_amount / journalData.risk_amount).toFixed(2));
+    await assertOwnedStandardVersion(supabase, userId, tradeData.setup_intent_version_id, true);
+    const journalData = normalizeOptionalTracking(normalizeJournalPayload(tradeData));
+    if (journalData.setup_intent_version_id) {
+      journalData.setup_intent_provenance = "capture";
+      journalData.setup_intent_recorded_at = new Date().toISOString();
+      journalData.setup_adherence_recorded_at = journalData.setup_adherence
+        ? new Date().toISOString()
+        : null;
+    } else {
+      journalData.setup_intent_provenance = null;
+      journalData.setup_intent_recorded_at = null;
+      journalData.setup_adherence = null;
+      journalData.setup_adherence_recorded_at = null;
     }
+    const calculatedAchievedRR = realizedRContract(journalData).value ?? journalData.achieved_rr;
 
     const { data: row, error } = await supabase
       .from("trades")
@@ -211,25 +285,86 @@ export const updateTrade = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { data: currentTrade } = await context.supabase
       .from("trades")
-      .select("risk_amount, pnl_amount, reward_amount")
+      .select(
+        "status, result, achieved_rr, risk_amount, pnl_amount, reward_amount, setup_intent_version_id, setup_intent_provenance, setup_intent_recorded_at, setup_adherence, setup_adherence_recorded_at",
+      )
       .eq("id", data.id)
       .eq("user_id", context.userId)
       .maybeSingle();
+    if (!currentTrade) throw new Error("Not found");
+    if (
+      data.patch.setup_intent_version_id !== undefined &&
+      data.patch.setup_intent_version_id !== currentTrade.setup_intent_version_id
+    ) {
+      await assertOwnedStandardVersion(
+        context.supabase,
+        context.userId,
+        data.patch.setup_intent_version_id,
+        true,
+      );
+    }
 
     const mergedRisk =
       data.patch.risk_amount !== undefined
         ? data.patch.risk_amount
         : (currentTrade?.risk_amount ?? null);
     const normalizedPatch = normalizeOptionalTracking(normalizeJournalPayload(data.patch));
+    if (Object.hasOwn(normalizedPatch, "setup_intent_version_id")) {
+      if (normalizedPatch.setup_intent_version_id) {
+        const setupIntentChanged =
+          normalizedPatch.setup_intent_version_id !== currentTrade.setup_intent_version_id;
+        normalizedPatch.setup_intent_provenance = setupIntentChanged
+          ? "retrospective_review"
+          : currentTrade.setup_intent_provenance;
+        normalizedPatch.setup_intent_recorded_at = setupIntentChanged
+          ? new Date().toISOString()
+          : currentTrade.setup_intent_recorded_at;
+      } else {
+        normalizedPatch.setup_intent_provenance = null;
+        normalizedPatch.setup_intent_recorded_at = null;
+        normalizedPatch.setup_adherence = null;
+        normalizedPatch.setup_adherence_recorded_at = null;
+      }
+      if (
+        normalizedPatch.setup_intent_version_id !== currentTrade.setup_intent_version_id &&
+        !Object.hasOwn(normalizedPatch, "setup_adherence")
+      ) {
+        normalizedPatch.setup_adherence = null;
+        normalizedPatch.setup_adherence_recorded_at = null;
+      }
+    }
+    if (Object.hasOwn(normalizedPatch, "setup_adherence")) {
+      const nextSetupIntent = Object.hasOwn(normalizedPatch, "setup_intent_version_id")
+        ? normalizedPatch.setup_intent_version_id
+        : currentTrade.setup_intent_version_id;
+      if (normalizedPatch.setup_adherence && !nextSetupIntent) {
+        throw new Error("Setup adherence requires an explicit Playbook setup intent.");
+      }
+      normalizedPatch.setup_adherence_recorded_at = normalizedPatch.setup_adherence
+        ? new Date().toISOString()
+        : null;
+    }
     const mergedPnl =
       normalizedPatch.pnl_amount !== undefined
         ? normalizedPatch.pnl_amount
         : (currentTrade?.pnl_amount ?? currentTrade?.reward_amount ?? null);
-
-    let calculatedAchievedRR = normalizedPatch.achieved_rr;
-    if (mergedRisk && mergedRisk > 0 && mergedPnl != null) {
-      calculatedAchievedRR = Number((mergedPnl / mergedRisk).toFixed(2));
-    }
+    const mergedReward =
+      normalizedPatch.reward_amount !== undefined
+        ? normalizedPatch.reward_amount
+        : (currentTrade?.reward_amount ?? null);
+    const mergedAchievedRR =
+      normalizedPatch.achieved_rr !== undefined
+        ? normalizedPatch.achieved_rr
+        : currentTrade?.achieved_rr;
+    const rContract = realizedRContract({
+      status: currentTrade?.status,
+      result: normalizedPatch.result !== undefined ? normalizedPatch.result : currentTrade?.result,
+      risk_amount: mergedRisk,
+      pnl_amount: mergedPnl,
+      reward_amount: mergedReward,
+      achieved_rr: mergedAchievedRR,
+    });
+    const calculatedAchievedRR = rContract.value ?? normalizedPatch.achieved_rr;
 
     const { data: row, error } = await context.supabase
       .from("trades")
@@ -259,7 +394,7 @@ export const saveDetailedReview = createServerFn({ method: "POST" })
       context.supabase
         .from("trades")
         .select(
-          "instrument, direction, result, risk_amount, reward_amount, pnl_amount, session, planned_rr, reasoning, grade, categories, review_completed_at, emotion_tags, entry_model, market_condition, entry_timeframe, news_involvement, exit_reason, trade_management, custom_tags",
+          "status, instrument, direction, result, risk_amount, reward_amount, pnl_amount, achieved_rr, session, planned_rr, reasoning, grade, categories, primary_category, review_completed_at, emotion_tags, entry_model, market_condition, entry_timeframe, news_involvement, exit_reason, trade_management, custom_tags, setup_intent_version_id, setup_intent_provenance, setup_intent_recorded_at, setup_adherence, setup_adherence_recorded_at",
         )
         .eq("id", data.id)
         .eq("user_id", context.userId)
@@ -282,9 +417,34 @@ export const saveDetailedReview = createServerFn({ method: "POST" })
     if (preferenceError) throw safeError(preferenceError);
     if (!currentTrade) throw new Error("Not found");
 
-    const categories = (data.patch.categories ?? currentTrade.categories ?? [])
-      .map((category) => category.trim())
-      .filter(Boolean);
+    if (
+      data.patch.setup_intent_version_id !== undefined &&
+      data.patch.setup_intent_version_id !== currentTrade.setup_intent_version_id
+    ) {
+      await assertOwnedStandardVersion(
+        context.supabase,
+        context.userId,
+        data.patch.setup_intent_version_id,
+        true,
+      );
+    }
+    const primaryCategory =
+      data.patch.primary_category === undefined
+        ? currentTrade.primary_category?.trim() ||
+          currentTrade.categories?.find((category) => category.trim())?.trim() ||
+          null
+        : data.patch.primary_category?.trim() || null;
+    const nextSetupIntentVersionId =
+      data.patch.setup_intent_version_id === undefined
+        ? currentTrade.setup_intent_version_id
+        : data.patch.setup_intent_version_id;
+    const setupIntentChanged = nextSetupIntentVersionId !== currentTrade.setup_intent_version_id;
+    const nextSetupAdherence =
+      !nextSetupIntentVersionId || (setupIntentChanged && data.patch.setup_adherence === undefined)
+        ? null
+        : data.patch.setup_adherence === undefined
+          ? currentTrade.setup_adherence
+          : data.patch.setup_adherence;
     const patch = normalizeJournalPayload(
       normalizeOptionalTracking({
         ...data.patch,
@@ -293,7 +453,7 @@ export const saveDetailedReview = createServerFn({ method: "POST" })
             ? currentTrade.reasoning
             : data.patch.reasoning?.trim() || null,
         grade: data.patch.grade === undefined ? currentTrade.grade : data.patch.grade,
-        categories,
+        primary_category: primaryCategory,
         entry_model:
           data.patch.entry_model === undefined ? currentTrade.entry_model : data.patch.entry_model,
         market_condition:
@@ -329,21 +489,48 @@ export const saveDetailedReview = createServerFn({ method: "POST" })
         pnl_amount:
           data.patch.pnl_amount === undefined ? currentTrade.pnl_amount : data.patch.pnl_amount,
         result: currentTrade.result,
+        setup_intent_version_id: nextSetupIntentVersionId,
+        setup_intent_provenance:
+          data.patch.setup_intent_version_id === undefined || !setupIntentChanged
+            ? currentTrade.setup_intent_provenance
+            : data.patch.setup_intent_version_id
+              ? "retrospective_review"
+              : null,
+        setup_intent_recorded_at:
+          data.patch.setup_intent_version_id === undefined || !setupIntentChanged
+            ? currentTrade.setup_intent_recorded_at
+            : data.patch.setup_intent_version_id
+              ? new Date().toISOString()
+              : null,
+        setup_adherence: nextSetupAdherence,
+        setup_adherence_recorded_at:
+          !nextSetupIntentVersionId ||
+          (setupIntentChanged && data.patch.setup_adherence === undefined)
+            ? null
+            : data.patch.setup_adherence === undefined
+              ? currentTrade.setup_adherence_recorded_at
+              : data.patch.setup_adherence
+                ? new Date().toISOString()
+                : null,
       }),
     );
-    const calculatedAchievedRR =
-      patch.risk_amount != null &&
-      patch.risk_amount > 0 &&
-      patch.pnl_amount != null &&
-      Number.isFinite(patch.pnl_amount)
-        ? Number((patch.pnl_amount / patch.risk_amount).toFixed(2))
-        : null;
+    const rContract = realizedRContract({
+      status: currentTrade.status,
+      result: currentTrade.result,
+      risk_amount: patch.risk_amount,
+      pnl_amount: patch.pnl_amount,
+      reward_amount: patch.reward_amount,
+      achieved_rr: currentTrade.achieved_rr,
+    });
+    // Never erase a valid historical R merely because Detailed Review did not
+    // replace its source inputs.
+    const calculatedAchievedRR = rContract.value ?? currentTrade.achieved_rr;
     const requirements = requirementsFromPreferences(preferences);
     const missing = missingReviewRequirements(
       {
         screenshot_count: screenshotCount ?? 0,
         reasoning: patch.reasoning,
-        categories,
+        categories: primaryCategory ? [primaryCategory] : [],
         grade: patch.grade,
         entry_model: patch.entry_model,
         market_condition: patch.market_condition,
@@ -356,8 +543,8 @@ export const saveDetailedReview = createServerFn({ method: "POST" })
       requirements,
     );
 
-    if (requirements.category && !missing.includes("category") && categories.length > 0) {
-      const normalizedCategories = categories.map((category) => category.toLocaleLowerCase());
+    if (requirements.category && !missing.includes("category") && primaryCategory) {
+      const normalizedCategories = [primaryCategory.toLocaleLowerCase()];
       const { data: validCategories, error: categoryError } = await context.supabase
         .from("trade_categories")
         .select("normalized_name")

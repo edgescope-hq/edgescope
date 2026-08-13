@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, MotionConfig } from "framer-motion";
 import {
   Area,
   CartesianGrid,
@@ -12,24 +12,25 @@ import {
   YAxis,
 } from "recharts";
 import {
-  Flame,
   BriefcaseBusiness,
   CalendarDays,
+  ChartCandlestick,
+  ChartLine,
+  ChartNoAxesCombined,
+  ChartNoAxesColumn,
   Check,
+  CircleGauge,
   ClipboardCheck,
-  ClipboardList,
   Crosshair,
-  Goal,
+  Focus,
   History,
+  NotebookPen,
   Plus,
-  Scale,
-  Sparkles,
-  Target,
-  TrendingDown,
-  TrendingUp,
-  User,
+  Repeat2,
+  Route,
+  ScanSearch,
+  UserPen,
   ArrowRight,
-  Activity,
   PanelsTopLeft,
   type LucideIcon,
 } from "lucide-react";
@@ -56,23 +57,39 @@ import {
   isPaperTrade,
   localDateKey,
   numberTradesById,
-  recordedR,
   streaks,
   toAnalytics,
   type DbTrade,
 } from "@/lib/trade-mappers";
+import { actualJournalTrades } from "@/lib/evidence-population";
 import { getReviewStatus } from "@/lib/review-status";
+import { getTradingPreferences } from "@/lib/trading-preferences.functions";
+import {
+  journalTrackingFromPreferences,
+  tradeCompletenessRequirementsFromPreferences,
+} from "@/lib/journal-tracking";
 import { toast } from "sonner";
 import {
   dashboardChartEligibility,
+  dashboardChartDateDomain,
+  dashboardChartDateTicks,
+  dashboardChartTime,
   dashboardCumulativeRPoints,
+  dashboardDailyRPoints,
   formatRAxisTick,
-  missingRTradeHeadline,
   qualifyingRValue,
+  type DashboardChartDomain,
   type DashboardChartPoint,
 } from "@/lib/dashboard-charts";
+import {
+  dashboardExecutionFocusShowsRecentre,
+  dashboardExecutionFocusState,
+  dashboardTradesForAccount,
+} from "@/lib/dashboard-data";
+import { getActiveImprovementFocus } from "@/lib/improvement.functions";
 
 type Tone = "primary" | "info" | "success" | "warning" | "destructive";
+type StatIconIdentity = "trades" | "winRate" | "streak" | "netR" | "averageR" | "reviews";
 
 const toneStyles: Record<Tone, { icon: string; badge: string }> = {
   primary: {
@@ -94,11 +111,25 @@ const toneStyles: Record<Tone, { icon: string; badge: string }> = {
   },
 };
 
+const GRAPHITE_ICON_IDENTITY = "bg-white/[0.055] text-foreground/75 ring-white/[0.1]";
+const GUIDE_ICON_IDENTITY =
+  "bg-[oklch(0.17_0.026_225)] text-[oklch(0.75_0.055_225)] ring-[oklch(0.62_0.045_225/0.16)]";
+
+const statIconStyles: Record<StatIconIdentity, string> = {
+  trades: "bg-[oklch(0.18_0.04_240)] text-[oklch(0.77_0.105_240)] ring-[oklch(0.68_0.08_240/0.18)]",
+  winRate:
+    "bg-[oklch(0.18_0.036_190)] text-[oklch(0.79_0.095_190)] ring-[oklch(0.69_0.07_190/0.18)]",
+  streak: GRAPHITE_ICON_IDENTITY,
+  netR: "bg-[oklch(0.17_0.026_255)] text-[oklch(0.74_0.055_250)] ring-[oklch(0.63_0.045_250/0.16)]",
+  averageR: "bg-[oklch(0.18_0.03_80)] text-[oklch(0.78_0.075_80)] ring-[oklch(0.66_0.055_80/0.17)]",
+  reviews: "bg-warning/[0.07] text-warning/85 ring-warning/[0.13]",
+};
+
 const INTRO_WORKFLOW = [
   {
-    icon: ClipboardList,
+    icon: BriefcaseBusiness,
     title: "Create your trading account",
-    body: "Use it to organize live, demo, funded, or backtest journal work.",
+    body: "Keep actual, practice, and backtest evidence in distinct accounts.",
   },
   {
     icon: Crosshair,
@@ -106,7 +137,7 @@ const INTRO_WORKFLOW = [
     body: "Quick Capture records the essentials without slowing you down.",
   },
   {
-    icon: Target,
+    icon: ClipboardCheck,
     title: "Complete your first review",
     body: "Capture the chart context, reasoning, and review details for this trade.",
   },
@@ -163,29 +194,35 @@ function StatCard({
   value,
   decimals = 0,
   suffix = "",
-  tone,
+  iconIdentity,
   sub,
+  compact = false,
+  valueInset = false,
 }: {
   icon: LucideIcon;
   label: string;
   value: number | string;
   decimals?: number;
   suffix?: string;
-  tone: Tone;
+  iconIdentity: StatIconIdentity;
   sub?: string;
+  compact?: boolean;
+  valueInset?: boolean;
 }) {
-  const s = toneStyles[tone];
   return (
     <motion.div
       {...card}
       transition={motionTransition}
-      className="glow-card group relative overflow-hidden rounded-2xl p-5"
+      className={cn(
+        "glow-card group relative overflow-hidden rounded-2xl",
+        compact ? "px-5 pt-5 pb-4" : "p-5",
+      )}
     >
       <div className="flex items-start gap-4">
         <div
           className={cn(
-            "grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br ring-1 ring-white/[0.06]",
-            s.icon,
+            "grid h-11 w-11 shrink-0 place-items-center rounded-xl ring-1",
+            statIconStyles[iconIdentity],
           )}
         >
           <Icon className="h-5 w-5" />
@@ -194,7 +231,12 @@ function StatCard({
           <div className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground">
             {label}
           </div>
-          <div className="mt-1.5 text-3xl font-bold tracking-tight text-foreground">
+          <div
+            className={cn(
+              "mt-1.5 text-3xl font-bold tracking-tight text-foreground",
+              valueInset && "pl-1",
+            )}
+          >
             {typeof value === "number" ? (
               <AnimatedNumber value={value} decimals={decimals} suffix={suffix} />
             ) : (
@@ -300,22 +342,26 @@ function ProfileSetupModal({
           if (!canSave) return;
           onSave({ username: username.trim(), display_name: displayName.trim() });
         }}
-        className="relative w-full max-w-lg overflow-hidden rounded-2xl border border-white/[0.1] bg-[radial-gradient(circle_at_top_left,oklch(0.68_0.23_295/0.1),transparent_34%),linear-gradient(145deg,oklch(0.12_0.02_270/0.97),oklch(0.075_0.012_270/0.98))] p-7 shadow-[0_22px_70px_-34px_oklch(0_0_0/0.86),0_0_34px_-28px_oklch(0.68_0.23_295/0.46)]"
+        className="relative w-full max-w-lg overflow-hidden rounded-2xl border border-white/[0.1] bg-[linear-gradient(145deg,oklch(0.12_0.02_270/0.98),oklch(0.075_0.012_270/0.99))] p-7 shadow-[0_24px_72px_-36px_oklch(0_0_0/0.9)]"
       >
-        <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-primary/65 to-transparent" />
         <div className="flex items-start gap-4">
-          <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-primary/15 text-primary ring-1 ring-primary/30">
-            <User className="h-5 w-5" />
+          <div
+            className={cn(
+              "grid h-12 w-12 shrink-0 place-items-center rounded-xl ring-1",
+              GRAPHITE_ICON_IDENTITY,
+            )}
+          >
+            <UserPen className="h-5 w-5" />
           </div>
           <div>
-            <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-primary/88">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
               Profile setup
             </div>
             <h2 id="profile-setup-title" className="mt-1 text-2xl font-bold tracking-tight">
-              Set up your EdgeScope profile.
+              Set up your profile
             </h2>
             <p className="mt-2 text-sm leading-6 text-foreground/68">
-              Choose how EdgeScope should greet you and how your community handle should appear.
+              Choose how you&apos;ll appear in your journal and Network.
             </p>
           </div>
         </div>
@@ -329,27 +375,34 @@ function ProfileSetupModal({
               value={displayName}
               onChange={(event) => setDisplayName(event.target.value)}
               placeholder="Pavan"
+              autoComplete="name"
               className="mt-1.5 w-full rounded-xl bg-white/[0.045] px-3.5 py-2.5 text-sm text-foreground ring-1 ring-white/[0.08] transition-all duration-200 placeholder:text-muted-foreground/45 focus:outline-none focus:ring-2 focus:ring-primary/35"
             />
+            <span className="mt-1.5 block text-xs leading-5 text-muted-foreground">
+              Used in your journal and personal workspace.
+            </span>
           </label>
 
           <label className="block">
             <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground/60">
-              Username
+              Network Username
             </span>
             <input
               value={username}
               onChange={(event) => setUsername(event.target.value)}
               placeholder="trader_pavan"
+              autoComplete="username"
               className="mt-1.5 w-full rounded-xl bg-white/[0.045] px-3.5 py-2.5 text-sm text-foreground ring-1 ring-white/[0.08] transition-all duration-200 placeholder:text-muted-foreground/45 focus:outline-none focus:ring-2 focus:ring-primary/35"
             />
+            <span className="mt-1.5 block text-xs leading-5 text-muted-foreground">
+              Your unique name when you participate in Network.
+            </span>
             {!usernameValid && (
               <p className="mt-1.5 text-xs leading-5 text-warning">
                 Use 3-32 letters, numbers, or underscores.
               </p>
             )}
           </label>
-
         </div>
 
         <div className="mt-7 flex justify-end">
@@ -388,24 +441,14 @@ function formatTradeDateOnly(date: string): string {
 
 function formatCurrentStreak(s: { currentWin: number; currentLoss: number }): {
   value: string;
-  tone: Tone;
-  icon: LucideIcon;
 } {
   if (s.currentWin > 0) {
-    return {
-      value: `${s.currentWin} ${s.currentWin === 1 ? "Win" : "Wins"}`,
-      tone: "success",
-      icon: Flame,
-    };
+    return { value: `${s.currentWin} ${s.currentWin === 1 ? "Win" : "Wins"}` };
   }
   if (s.currentLoss > 0) {
-    return {
-      value: `${s.currentLoss} ${s.currentLoss === 1 ? "Loss" : "Losses"}`,
-      tone: "destructive",
-      icon: TrendingDown,
-    };
+    return { value: `${s.currentLoss} ${s.currentLoss === 1 ? "Loss" : "Losses"}` };
   }
-  return { value: "No streak yet", tone: "info", icon: Crosshair };
+  return { value: "No streak yet" };
 }
 
 export function DashboardView() {
@@ -416,27 +459,52 @@ export function DashboardView() {
   const [introMarkedLocal, setIntroMarkedLocal] = useState(false);
   const tradesFn = useServerFn(listTrades);
   const profileFn = useServerFn(getProfile);
+  const preferencesFn = useServerFn(getTradingPreferences);
   const updateProfileFn = useServerFn(updateProfile);
   const markIntroSeenFn = useServerFn(markIntroSeen);
   const markActivationGuideCompleteFn = useServerFn(markActivationGuideComplete);
   const accountsFn = useServerFn(listTradingAccounts);
+  const activeImprovementFocusFn = useServerFn(getActiveImprovementFocus);
   const qc = useQueryClient();
   const { data: trades } = useSuspenseQuery({ queryKey: ["trades"], queryFn: () => tradesFn() });
   const { data: profile } = useSuspenseQuery({ queryKey: ["profile"], queryFn: () => profileFn() });
-  const { data: accounts } = useQuery({
+  const { data: preferences } = useQuery({
+    queryKey: ["trading-preferences"],
+    queryFn: () => preferencesFn(),
+  });
+  const { data: accounts = [] } = useSuspenseQuery({
     queryKey: ["trading-accounts"],
     queryFn: () => accountsFn(),
   });
+  const { data: activeImprovementFocusData } = useQuery({
+    queryKey: ["active-improvement-focus"],
+    queryFn: () => activeImprovementFocusFn(),
+  });
+  const activeImprovementFocus = activeImprovementFocusData?.focus ?? null;
   const db = useMemo(() => (trades ?? []) as DbTrade[], [trades]);
-  const realDb = useMemo(() => db.filter((trade) => !isPaperTrade(trade)), [db]);
+  const journalDb = useMemo(() => db.filter((trade) => !isPaperTrade(trade)), [db]);
+  const actualDb = useMemo(() => actualJournalTrades(db, accounts), [accounts, db]);
 
   const { activeAccountId: selectedAccountId, setActiveAccountId: setSelectedAccountId } =
     useActiveAccount();
 
-  const dashboardDb = useMemo(() => {
-    if (selectedAccountId === "ALL") return realDb;
-    return realDb.filter((t) => t.account_id === selectedAccountId);
-  }, [realDb, selectedAccountId]);
+  const dashboardDb = useMemo(
+    () => dashboardTradesForAccount(db, accounts, selectedAccountId),
+    [accounts, db, selectedAccountId],
+  );
+  const reviewStatusOf = useMemo(() => {
+    const rPerformanceEnabled =
+      journalTrackingFromPreferences(preferences?.journal_tracking).r_performance !== "hidden";
+    const tradeCompletenessRequirements = tradeCompletenessRequirementsFromPreferences(
+      preferences?.journal_tracking,
+    );
+    return (trade: DbTrade) =>
+      getReviewStatus({
+        ...trade,
+        r_performance_enabled: rPerformanceEnabled,
+        trade_completeness_requirements: tradeCompletenessRequirements,
+      });
+  }, [preferences?.journal_tracking]);
 
   useEffect(() => {
     const updateGreeting = () => setDisplayGreeting(getBrowserLocalGreeting());
@@ -450,7 +518,7 @@ export function DashboardView() {
   const streak = useMemo(() => streaks(dashboardDb), [dashboardDb]);
 
   const recent = useMemo(() => [...dashboardDb].slice(0, 4), [dashboardDb]);
-  const tradeNumbersById = useMemo(() => numberTradesById(realDb), [realDb]);
+  const tradeNumbersById = useMemo(() => numberTradesById(journalDb), [journalDb]);
 
   // ------ Today snapshot (Phase 3: lighter daily-focused dashboard) ------
   const todayStr = localDateKey();
@@ -459,10 +527,7 @@ export function DashboardView() {
     [dashboardDb, todayStr],
   );
   const todayQualifyingR = useMemo(
-    () =>
-      todayTrades
-        .map(qualifyingRValue)
-        .filter((value): value is number => value !== null),
+    () => todayTrades.map(qualifyingRValue).filter((value): value is number => value !== null),
     [todayTrades],
   );
   const todayNetR = useMemo(
@@ -490,12 +555,13 @@ export function DashboardView() {
 
   // ------ Journal completeness reminder ------
   const journalGaps = useMemo(() => {
-    const incomplete = realDb.filter((t) => getReviewStatus(t) === "incomplete").length;
-    const needsReview = realDb.filter((t) => getReviewStatus(t) === "needs_review").length;
-    const reviewed = realDb.filter((t) => getReviewStatus(t) === "reviewed").length;
+    const incomplete = dashboardDb.filter((t) => reviewStatusOf(t) === "incomplete").length;
+    const needsReview = dashboardDb.filter((t) => reviewStatusOf(t) === "needs_review").length;
+    const reviewed = dashboardDb.filter((t) => reviewStatusOf(t) === "reviewed").length;
     return { incomplete, needsReview, reviewed };
-  }, [realDb]);
-  const hasJournalGaps = realDb.length > 0 && journalGaps.incomplete + journalGaps.needsReview > 0;
+  }, [dashboardDb, reviewStatusOf]);
+  const hasJournalGaps =
+    dashboardDb.length > 0 && journalGaps.incomplete + journalGaps.needsReview > 0;
 
   const now = new Date();
   const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -504,16 +570,8 @@ export function DashboardView() {
     () => dashboardDb.filter((t) => t.trade_date.startsWith(ym)),
     [dashboardDb, ym],
   );
-  const currentMonthClosedCount = useMemo(
-    () =>
-      currentMonthTrades.filter(
-        (trade) =>
-          trade.result === "win" || trade.result === "loss" || trade.result === "breakeven",
-      ).length,
-    [currentMonthTrades],
-  );
   const monthChart = useMemo(() => {
-    return dashboardCumulativeRPoints(currentMonthTrades);
+    return dashboardDailyRPoints(currentMonthTrades);
   }, [currentMonthTrades]);
   const monthEligibility = useMemo(
     () => dashboardChartEligibility(currentMonthTrades),
@@ -533,10 +591,7 @@ export function DashboardView() {
     [dashboardDb],
   );
   const qualifyingR = useMemo(
-    () =>
-      dashboardDb
-        .map(qualifyingRValue)
-        .filter((value): value is number => value !== null),
+    () => dashboardDb.map(qualifyingRValue).filter((value): value is number => value !== null),
     [dashboardDb],
   );
   const sumR = useMemo(() => qualifyingR.reduce((sum, value) => sum + value, 0), [qualifyingR]);
@@ -550,18 +605,18 @@ export function DashboardView() {
     ? `Based on ${resultCompleteCount} of ${closedCount} closed trades`
     : undefined;
 
-  const accountCount = accounts?.length ?? 0;
+  const accountCount = accounts.length;
   const profileIncomplete = isProfileIncomplete(profile);
   const hasSeenIntro = profile?.has_seen_intro ?? true;
-  const shouldShowIntroGuide = accounts !== undefined && accountCount === 0 && realDb.length === 0;
+  const shouldShowIntroGuide = accountCount === 0 && journalDb.length === 0;
   const displayName = profile?.display_name?.trim() || "Trader";
   const reviewedTradesCount = useMemo(
-    () => dashboardDb.filter((trade) => getReviewStatus(trade) === "reviewed").length,
-    [dashboardDb],
+    () => dashboardDb.filter((trade) => reviewStatusOf(trade) === "reviewed").length,
+    [dashboardDb, reviewStatusOf],
   );
   const globalReviewedTradesCount = useMemo(
-    () => realDb.filter((trade) => getReviewStatus(trade) === "reviewed").length,
-    [realDb],
+    () => actualDb.filter((trade) => reviewStatusOf(trade) === "reviewed").length,
+    [actualDb, reviewStatusOf],
   );
   const [scopeUnlockDismissed, setScopeUnlockDismissed] = useState(() => {
     try {
@@ -573,62 +628,53 @@ export function DashboardView() {
   const hasFirstReview =
     Boolean(profile?.activation_guide_completed_at) || globalReviewedTradesCount > 0;
   const scopeReady = globalReviewedTradesCount >= SCOPE_UNLOCK_THRESHOLD;
-  const clarifyTraderWideFocus = selectedAccountId !== "ALL";
   const executionFocus = useMemo(() => {
-    const allDb = realDb;
-    const s = streaks(allDb);
-    const latestTrade = [...allDb].sort((a, b) =>
-      (b.trade_date + (b.trade_time ?? "")).localeCompare(a.trade_date + (a.trade_time ?? "")),
-    )[0];
-    const latestR = latestTrade ? (qualifyingRValue(latestTrade) ?? 0) : 0;
-
-    const icon = Goal;
-    if (s.currentLoss >= 3) {
-      return {
-        icon,
-        headline: "Losing streak detected",
-        message: clarifyTraderWideFocus
-          ? `Across your recent trading, ${s.currentLoss} losses have occurred in a row. Slow down and make sure the next trade fits your plan.`
-          : `You've logged ${s.currentLoss} losses in a row. Slow down and make sure the next trade fits your plan.`,
-        secondary: "Loss streaks can happen. Keep risk steady.",
-        showRecentre: true,
-        recentreState: undefined,
-      };
-    }
-    if (s.currentWin >= 3) {
-      return {
-        icon,
-        headline: "Strong run detected",
-        message: clarifyTraderWideFocus
-          ? `Across your recent trading, ${s.currentWin} wins have occurred in a row. Keep the next trade planned and risk steady.`
-          : `You've logged ${s.currentWin} wins in a row. Keep the next trade planned and risk steady.`,
-        secondary: "Good results should not change your rules.",
-        showRecentre: true,
-        recentreState: "greed" as const,
-      };
-    }
-    if (latestTrade && latestR <= -2) {
+    const s = streaks(actualDb);
+    const latestValidTrade = actualDb.find((trade) => qualifyingRValue(trade) !== null);
+    const latestValidR = latestValidTrade ? qualifyingRValue(latestValidTrade) : null;
+    const state = dashboardExecutionFocusState({
+      latestValidR,
+      currentLoss: s.currentLoss,
+      currentWin: s.currentWin,
+    });
+    const showRecentre = dashboardExecutionFocusShowsRecentre(state, s.currentLoss);
+    const icon = Focus;
+    if (state === "large_loss") {
       return {
         icon,
         headline: "Large loss logged",
-        message: clarifyTraderWideFocus
-          ? "Across your recent trading, the latest trade was a larger loss. Review what happened before taking the next one."
-          : "Your latest trade was a larger loss. Review what happened before taking the next one.",
-        secondary: "Check whether it was normal setup risk or something to adjust.",
-        showRecentre: true,
-        recentreState: undefined,
+        message:
+          "A loss this large can carry into the next decision. Reset before looking for another trade.",
+        showRecentre,
+      };
+    }
+    if (state === "losing_streak") {
+      return {
+        icon,
+        headline: "Losing streak detected",
+        message:
+          "Losses are stacking up. Slow the pace, protect risk, and only take trades that fully meet your plan.",
+        showRecentre,
+      };
+    }
+    if (state === "strong_run") {
+      return {
+        icon,
+        headline: "Strong run detected",
+        message:
+          "A strong run can loosen standards. Keep your size, entry criteria, and risk unchanged.",
+        showRecentre,
       };
     }
     return {
       icon,
       headline: "Stay process-first",
-      message: "Wait for your plan, keep risk steady, and review the trade after execution.",
-      secondary: "Consistent records make your edge easier to see.",
-      showRecentre: false,
-      recentreState: undefined,
+      message: "Wait for your setup, keep risk defined, and review the trade after execution.",
+      showRecentre,
     };
-  }, [clarifyTraderWideFocus, realDb]);
+  }, [actualDb]);
   const currentStreakStat = useMemo(() => formatCurrentStreak(streak), [streak]);
+  const ExecutionFocusIcon = executionFocus.icon;
 
   // Guide stage — only show before first review is complete
   const activationGuide = useMemo(() => {
@@ -638,12 +684,12 @@ export function DashboardView() {
         stage: "account" as const,
         eyebrow: "SETUP",
         title: "Create a trading account",
-        body: "Separate live, demo, funded, or backtest work.",
+        body: "Keep actual, practice, and backtest evidence separate.",
         cta: "Create Trading Account",
         to: "/accounts" as const,
       };
     }
-    if (realDb.length === 0) {
+    if (actualDb.length === 0) {
       return {
         stage: "capture" as const,
         eyebrow: "CAPTURE",
@@ -656,12 +702,12 @@ export function DashboardView() {
     return {
       stage: "review" as const,
       eyebrow: "REVIEW",
-        title: "Complete your first review",
+      title: "Complete your first review",
       body: "Capture the chart context, reasoning, and review details for this trade.",
       cta: "Complete review",
       to: "/trades" as const,
     };
-  }, [accountCount, realDb.length, hasFirstReview]);
+  }, [accountCount, actualDb.length, hasFirstReview]);
 
   const saveProfileSetup = useMutation({
     mutationFn: (data: { username: string; display_name: string }) =>
@@ -704,11 +750,7 @@ export function DashboardView() {
       return;
     }
     markActivationGuideCompleteMutation.mutate();
-  }, [
-    globalReviewedTradesCount,
-    markActivationGuideCompleteMutation,
-    profile,
-  ]);
+  }, [globalReviewedTradesCount, markActivationGuideCompleteMutation, profile]);
 
   const closeIntro = () => {
     setIntroOpen(false);
@@ -718,641 +760,685 @@ export function DashboardView() {
   };
 
   return (
-    <PageShell>
-      <PageHeader
-        icon={PanelsTopLeft}
-        eyebrow="Dashboard"
-        title={`${displayGreeting}, ${displayName}`}
-        description="Your trading overview, journal gaps, account health, and review momentum."
-        className="sm:items-center"
-        actions={
-          <div className="flex items-center gap-2">
-            <AccountFilterSelect
-              accounts={(accounts ?? []).filter((account) => account.status !== "archived")}
-              value={selectedAccountId}
-              onValueChange={setSelectedAccountId}
-            />
-            <button
-              onClick={() => setNewOpen(true)}
-              className="group relative inline-flex items-center gap-2 rounded-xl bg-gradient-to-br from-primary to-primary/85 px-5 py-2.5 text-sm font-semibold text-primary-foreground whitespace-nowrap ring-1 ring-primary/40 shadow-[0_8px_24px_-12px_oklch(0.68_0.23_295/0.5)] transition-all duration-200 hover:-translate-y-px hover:brightness-110 hover:shadow-[0_10px_28px_-12px_oklch(0.68_0.23_295/0.62)]"
-            >
-              <span
-                aria-hidden
-                className="pointer-events-none absolute -inset-px rounded-xl bg-gradient-to-br from-white/15 to-transparent opacity-60 mix-blend-overlay"
+    <MotionConfig reducedMotion="user">
+      <PageShell>
+        <PageHeader
+          icon={PanelsTopLeft}
+          eyebrow="Dashboard"
+          title={`${displayGreeting}, ${displayName}`}
+          description="Your trading overview, journal gaps, account health, and review momentum."
+          className="sm:items-center"
+          actions={
+            <div className="flex items-center gap-2">
+              <AccountFilterSelect
+                accounts={accounts}
+                value={selectedAccountId}
+                onValueChange={setSelectedAccountId}
+                allLabel="Live evidence"
               />
-              <Plus className="relative h-4 w-4 transition-transform duration-200 group-hover:rotate-90" />
-              <span className="relative">New trade</span>
-            </button>
-          </div>
-        }
-      />
+              <button
+                onClick={() => setNewOpen(true)}
+                className="group relative inline-flex items-center gap-2 rounded-xl bg-gradient-to-br from-primary to-primary/85 px-5 py-2.5 text-sm font-semibold text-primary-foreground whitespace-nowrap ring-1 ring-primary/40 shadow-[0_8px_24px_-12px_oklch(0.68_0.23_295/0.5)] transition-all duration-200 hover:-translate-y-px hover:brightness-110 hover:shadow-[0_10px_28px_-12px_oklch(0.68_0.23_295/0.62)]"
+              >
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute -inset-px rounded-xl bg-gradient-to-br from-white/15 to-transparent opacity-60 mix-blend-overlay"
+                />
+                <Plus className="relative h-4 w-4 transition-transform duration-200 group-hover:rotate-90" />
+                <span className="relative">New trade</span>
+              </button>
+            </div>
+          }
+        />
 
-      {/* Activation guide — use only before first review */}
-      {accounts !== undefined && !profileIncomplete && activationGuide && (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={motionTransition}
-          className="mt-6 w-full overflow-hidden rounded-2xl border border-primary/18 bg-[radial-gradient(circle_at_top_left,oklch(0.68_0.23_295/0.08),transparent_32%),linear-gradient(145deg,oklch(0.14_0.022_270/0.9),oklch(0.09_0.014_270/0.86))] p-5 shadow-[0_18px_52px_-42px_oklch(0.68_0.23_295/0.36)] ring-1 ring-white/[0.05] backdrop-blur-xl sm:max-w-xl"
-        >
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-primary/15 text-primary ring-1 ring-primary/25 shadow-[0_0_28px_-12px_oklch(0.68_0.23_295/0.8)]">
-              <Sparkles className="h-5 w-5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-primary/85">
-                GETTING STARTED
-              </div>
-              <h2 className="mt-1 text-lg font-bold tracking-tight">
-                Set up your EdgeScope workflow
-              </h2>
-              <p className="mt-1.5 text-sm leading-6 text-foreground/68">
-                Create your workspace, capture a trade, and complete your first review.
-              </p>
-              <div className="mt-4 flex flex-wrap gap-2.5">
-                {activationGuide.to ? (
-                  <Link
-                    to={activationGuide.to}
-                    className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] transition-all duration-200 hover:-translate-y-px hover:brightness-110"
-                  >
-                    {activationGuide.cta}
-                  </Link>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setNewOpen(true)}
-                    className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] transition-all duration-200 hover:-translate-y-px hover:brightness-110"
-                  >
-                    {activationGuide.cta}
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setIntroOpen(true)}
-                  className="rounded-xl bg-white/[0.045] px-4 py-2.5 text-sm font-medium text-foreground/70 ring-1 ring-white/[0.08] transition-all duration-200 hover:-translate-y-px hover:bg-white/[0.07] hover:text-foreground"
-                >
-                  Open Guide
-                </button>
-              </div>
-            </div>
-          </div>
-        </motion.div>
-      )}
-
-      {/* Scope unlock prompt — after 10 reviewed trades */}
-      {scopeReady && !scopeUnlockDismissed && !activationGuide && (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={motionTransition}
-          className={`mt-6 w-full overflow-hidden rounded-2xl border border-primary/18 bg-[radial-gradient(circle_at_top_left,oklch(0.68_0.23_295/0.08),transparent_32%),linear-gradient(145deg,oklch(0.14_0.022_270/0.9),oklch(0.09_0.014_270/0.86))] p-5 shadow-[0_18px_52px_-42px_oklch(0.68_0.23_295/0.36)] ring-1 ring-white/[0.05] backdrop-blur-xl sm:max-w-xl ${INTRO_CARD_HOVER}`}
-        >
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-primary/15 text-primary ring-1 ring-primary/25 shadow-[0_0_28px_-12px_oklch(0.68_0.23_295/0.8)]">
-              <Sparkles className="h-5 w-5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-primary/85">
-                INSIGHTS UNLOCKED
-              </div>
-              <h2 className="mt-1 text-lg font-bold tracking-tight">Scope is ready</h2>
-              <p className="mt-1.5 text-sm leading-6 text-foreground/68">
-                You have enough reviewed trades to inspect early patterns.
-              </p>
-              <div className="mt-4 flex flex-wrap gap-2.5">
-                <Link
-                  to="/edge-discovery"
-                  className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] transition-all duration-200 hover:-translate-y-px hover:brightness-110"
-                >
-                  Open Scope
-                </Link>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setScopeUnlockDismissed(true);
-                    try {
-                      localStorage.setItem("edgescope.scopeUnlockDismissed", "true");
-                    } catch {
-                      // ignore
-                    }
-                  }}
-                  className="rounded-xl bg-white/[0.045] px-4 py-2.5 text-sm font-medium text-foreground/70 ring-1 ring-white/[0.08] transition-all duration-200 hover:-translate-y-px hover:bg-white/[0.07] hover:text-foreground"
-                >
-                  Not now
-                </button>
-              </div>
-            </div>
-          </div>
-        </motion.div>
-      )}
-
-      <AnimatePresence>
-        {profileIncomplete && profile && (
-          <ProfileSetupModal
-            profile={profile}
-            isSaving={saveProfileSetup.isPending}
-            onSave={(data) => saveProfileSetup.mutate(data)}
-          />
-        )}
-        {introOpen && !profileIncomplete && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-4 backdrop-blur-md"
-          >
+        {/* Activation guide — use only before first review */}
+        {accounts !== undefined &&
+          !profileIncomplete &&
+          selectedAccountId === "ALL" &&
+          activationGuide && (
             <motion.div
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="intro-guide-title"
-              initial={{ scale: 0.98, y: 8 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.98, y: 6 }}
-              transition={modalTransition}
-              className="relative w-full max-w-xl overflow-hidden rounded-2xl border border-white/[0.1] bg-[radial-gradient(circle_at_top_left,oklch(0.68_0.23_295/0.1),transparent_34%),linear-gradient(145deg,oklch(0.12_0.02_270/0.96),oklch(0.075_0.012_270/0.98))] p-7 shadow-[0_22px_70px_-34px_oklch(0_0_0/0.86),0_0_38px_-28px_oklch(0.68_0.23_295/0.46)]"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={motionTransition}
+              className="mt-6 w-full overflow-hidden rounded-2xl border border-white/[0.1] bg-[linear-gradient(145deg,oklch(0.14_0.022_270/0.94),oklch(0.09_0.014_270/0.9))] p-5 shadow-[0_18px_52px_-42px_oklch(0_0_0/0.78)] ring-1 ring-white/[0.04] backdrop-blur-xl sm:max-w-xl"
             >
-              <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-primary/70 to-transparent" />
-              <div className="flex items-start gap-4">
-                <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-primary/15 ring-1 ring-primary/30 shadow-[0_0_32px_-10px_oklch(0.68_0.23_295/0.85)]">
-                  <Sparkles className="h-5 w-5 text-primary" />
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div
+                  className={cn(
+                    "grid h-11 w-11 shrink-0 place-items-center rounded-xl ring-1",
+                    GUIDE_ICON_IDENTITY,
+                  )}
+                >
+                  <Route className="h-5 w-5" />
                 </div>
-                <div className="min-w-0">
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-primary/90">
+                <div className="min-w-0 flex-1">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                     GETTING STARTED
                   </div>
-                  <h2 id="intro-guide-title" className="mt-1 text-2xl font-bold tracking-tight">
-                    Set up your EdgeScope workflow
+                  <h2 className="mt-1 text-lg font-bold tracking-tight">
+                    Build your trading workflow
                   </h2>
-                  <p className="mt-2 text-sm leading-6 text-foreground/70">
-                    Create your workspace, capture a trade, and complete your first review.
+                  <p className="mt-1.5 text-sm leading-6 text-foreground/68">
+                    Set up an account, capture trades, and turn each review into useful evidence.
                   </p>
-                </div>
-              </div>
-
-              <div className="mt-7 grid gap-3">
-                {INTRO_WORKFLOW.map(({ icon: Icon, title, body }, index) => {
-                  const completed = (() => {
-                    if (index === 0) return accountCount > 0;
-                    if (index === 1) return realDb.length > 0;
-                    if (index === 2) return hasFirstReview;
-                    return false;
-                  })();
-                  const current = !completed && activationGuide?.title === title;
-                  const stepClassName = cn(
-                    "flex w-full items-start gap-3 rounded-xl border px-4 py-3.5 text-left ring-1",
-                    completed
-                      ? "border-success/18 bg-success/[0.045] ring-success/[0.08]"
-                      : current
-                        ? "border-primary/28 bg-white/[0.075] ring-primary/[0.18]"
-                        : "border-white/[0.08] bg-white/[0.045] ring-white/[0.04]",
-                    current &&
-                      "transition-colors hover:border-primary/40 hover:bg-white/[0.095] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45",
-                  );
-                  const stepContent = (
-                    <>
-                      <div
-                        className={cn(
-                          "grid h-9 w-9 shrink-0 place-items-center rounded-xl ring-1",
-                          completed
-                            ? "bg-success/15 text-success ring-success/25"
-                            : current
-                              ? "bg-primary/18 text-primary ring-primary/30"
-                              : "bg-primary/12 text-primary ring-primary/20",
-                        )}
-                      >
-                        {completed ? <Check className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h3
-                            className={cn(
-                              "text-sm font-semibold",
-                              current ? "text-white" : "text-foreground",
-                            )}
-                          >
-                            {title}
-                          </h3>
-                        </div>
-                        <p
-                          className={cn(
-                            "mt-1 text-sm leading-6",
-                            current ? "text-foreground/86" : "text-foreground/68",
-                          )}
-                        >
-                          {body}
-                        </p>
-                      </div>
-                    </>
-                  );
-                  if (current && activationGuide) {
-                    return activationGuide.to ? (
+                  <div className="mt-4 flex flex-wrap gap-2.5">
+                    {activationGuide.to ? (
                       <Link
-                        key={title}
                         to={activationGuide.to}
-                        onClick={closeIntro}
-                        aria-current="step"
-                        className={stepClassName}
+                        className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-all duration-200 hover:-translate-y-px hover:brightness-110"
                       >
-                        {stepContent}
+                        {activationGuide.cta}
                       </Link>
                     ) : (
                       <button
-                        key={title}
                         type="button"
-                        aria-current="step"
-                        onClick={() => {
-                          closeIntro();
-                          setNewOpen(true);
-                        }}
-                        className={stepClassName}
+                        onClick={() => setNewOpen(true)}
+                        className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-all duration-200 hover:-translate-y-px hover:brightness-110"
                       >
-                        {stepContent}
+                        {activationGuide.cta}
                       </button>
-                    );
-                  }
-                  return (
-                    <div key={title} className={stepClassName}>
-                      {stepContent}
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="mt-7 flex flex-wrap justify-end gap-2.5">
-                <button
-                  type="button"
-                  onClick={closeIntro}
-                  className="rounded-xl bg-white/[0.045] px-5 py-2.5 text-sm font-medium text-foreground/70 ring-1 ring-white/[0.08] transition-all duration-200 hover:-translate-y-px hover:bg-white/[0.07] hover:text-foreground hover:ring-white/[0.14]"
-                >
-                  Close
-                </button>
-                {activationGuide?.to ? (
-                  <Link
-                    onClick={closeIntro}
-                    to={activationGuide.to}
-                    className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] transition-all duration-200 hover:-translate-y-px hover:brightness-110 hover:shadow-[var(--shadow-glow-lg)]"
-                  >
-                    {activationGuide.cta}
-                  </Link>
-                ) : (
-                  <button
-                    onClick={() => {
-                      closeIntro();
-                      setNewOpen(true);
-                    }}
-                    className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] transition-all duration-200 hover:-translate-y-px hover:brightness-110 hover:shadow-[var(--shadow-glow-lg)]"
-                  >
-                    New trade
-                  </button>
-                )}
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setIntroOpen(true)}
+                      className="rounded-xl bg-white/[0.045] px-4 py-2.5 text-sm font-medium text-foreground/70 ring-1 ring-white/[0.08] transition-all duration-200 hover:-translate-y-px hover:bg-white/[0.07] hover:text-foreground"
+                    >
+                      Open Guide
+                    </button>
+                  </div>
+                </div>
               </div>
             </motion.div>
+          )}
+
+        {/* Scope unlock prompt — after 10 reviewed trades */}
+        {scopeReady && !scopeUnlockDismissed && !activationGuide && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={motionTransition}
+            className={`mt-6 w-full overflow-hidden rounded-2xl border border-primary/18 bg-[radial-gradient(circle_at_top_left,oklch(0.68_0.23_295/0.08),transparent_32%),linear-gradient(145deg,oklch(0.14_0.022_270/0.9),oklch(0.09_0.014_270/0.86))] p-5 shadow-[0_18px_52px_-42px_oklch(0.68_0.23_295/0.36)] ring-1 ring-white/[0.05] backdrop-blur-xl sm:max-w-xl ${INTRO_CARD_HOVER}`}
+          >
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-primary/15 text-primary ring-1 ring-primary/25">
+                <ScanSearch className="h-5 w-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-primary/85">
+                  INSIGHTS UNLOCKED
+                </div>
+                <h2 className="mt-1 text-lg font-bold tracking-tight">Scope is ready</h2>
+                <p className="mt-1.5 text-sm leading-6 text-foreground/68">
+                  You have enough reviewed trades to inspect early patterns.
+                </p>
+                <div className="mt-4 flex flex-wrap gap-2.5">
+                  <Link
+                    to="/edge-discovery"
+                    className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] transition-all duration-200 hover:-translate-y-px hover:brightness-110"
+                  >
+                    Open Scope
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setScopeUnlockDismissed(true);
+                      try {
+                        localStorage.setItem("edgescope.scopeUnlockDismissed", "true");
+                      } catch {
+                        // ignore
+                      }
+                    }}
+                    className="rounded-xl bg-white/[0.045] px-4 py-2.5 text-sm font-medium text-foreground/70 ring-1 ring-white/[0.08] transition-all duration-200 hover:-translate-y-px hover:bg-white/[0.07] hover:text-foreground"
+                  >
+                    Not now
+                  </button>
+                </div>
+              </div>
+            </div>
           </motion.div>
         )}
-        {newOpen && (
-          <TradeFormModal
-            nextNum={realDb.length + 1}
-            onClose={() => setNewOpen(false)}
-            onSaved={() => {}}
-          />
-        )}
-      </AnimatePresence>
 
-      {/* Today snapshot — daily-focused command center */}
-      <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <div className="glow-card rounded-2xl p-5">
-          <div className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground">
-            TRADES TODAY
-          </div>
-          <div className="mt-1.5 text-3xl font-bold tabular-nums">{todayTrades.length}</div>
-          <div className="mt-1 text-xs text-muted-foreground">Logged today</div>
-        </div>
-        <div className="glow-card flex flex-col items-start rounded-2xl p-5 text-left">
-          <div className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground">
-            TODAY NET R
-          </div>
-          <div
-            className={cn(
-              "mt-1.5 whitespace-nowrap text-left text-3xl font-bold tabular-nums",
-              todayNetR > 0 && "text-success",
-              todayNetR < 0 && "text-destructive",
-            )}
-          >
-            {todayQualifyingR.length === 0 ? (
-              "\u2014"
-            ) : (
-              <span className="relative inline-block">
-                {todayNetR !== 0 && (
-                  <span className="absolute right-full mr-[0.08ch]">
-                    {todayNetR > 0 ? "+" : "\u2212"}
-                  </span>
-                )}
-                {Math.abs(todayNetR).toFixed(2)}R
-              </span>
-            )}
-          </div>
-          <div className="mt-1 text-xs text-muted-foreground">{todayNetRContext}</div>
-        </div>
-      </div>
+        <AnimatePresence>
+          {profileIncomplete && profile && (
+            <ProfileSetupModal
+              profile={profile}
+              isSaving={saveProfileSetup.isPending}
+              onSave={(data) => saveProfileSetup.mutate(data)}
+            />
+          )}
+          {introOpen && !profileIncomplete && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 grid place-items-center bg-black/75 p-4 backdrop-blur-md"
+            >
+              <motion.div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="intro-guide-title"
+                initial={{ scale: 0.98, y: 8 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.98, y: 6 }}
+                transition={modalTransition}
+                className="relative w-full max-w-xl overflow-hidden rounded-2xl border border-white/[0.1] bg-[linear-gradient(145deg,oklch(0.12_0.02_270/0.98),oklch(0.075_0.012_270/0.99))] p-7 shadow-[0_24px_72px_-36px_oklch(0_0_0/0.9)]"
+              >
+                <div className="flex items-start gap-4">
+                  <div
+                    className={cn(
+                      "grid h-12 w-12 shrink-0 place-items-center rounded-xl ring-1",
+                      GUIDE_ICON_IDENTITY,
+                    )}
+                  >
+                    <Route className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                      GETTING STARTED
+                    </div>
+                    <h2 id="intro-guide-title" className="mt-1 text-2xl font-bold tracking-tight">
+                      Build your trading workflow
+                    </h2>
+                    <p className="mt-2 text-sm leading-6 text-foreground/70">
+                      Set up an account, capture trades, and turn each review into useful evidence.
+                    </p>
+                  </div>
+                </div>
 
-      <div className="mt-4 grid gap-3">
-        <div className="flex flex-col gap-4 rounded-2xl border border-primary/14 bg-[linear-gradient(135deg,oklch(0.15_0.035_295/0.64),oklch(0.09_0.014_270/0.9))] px-5 py-3.5 ring-1 ring-primary/[0.18] sm:min-h-[94px] sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex min-w-0 items-start gap-3">
-            <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-primary/25 to-primary/5 text-primary ring-1 ring-primary/20">
-              <ClipboardCheck className="h-5 w-5" />
+                <div className="mt-7 grid gap-3">
+                  {INTRO_WORKFLOW.map(({ icon: Icon, title, body }, index) => {
+                    const completed = (() => {
+                      if (index === 0) return accountCount > 0;
+                      if (index === 1) return actualDb.length > 0;
+                      if (index === 2) return hasFirstReview;
+                      return false;
+                    })();
+                    const current = !completed && activationGuide?.title === title;
+                    const stepClassName = cn(
+                      "flex w-full items-start gap-3 rounded-xl border px-4 py-3.5 text-left ring-1",
+                      completed
+                        ? "border-success/18 bg-success/[0.045] ring-success/[0.08]"
+                        : current
+                          ? "border-primary/28 bg-white/[0.075] ring-primary/[0.18]"
+                          : "border-white/[0.08] bg-white/[0.045] ring-white/[0.04]",
+                      current &&
+                        "transition-colors hover:border-primary/40 hover:bg-white/[0.095] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45",
+                    );
+                    const stepContent = (
+                      <>
+                        <div
+                          className={cn(
+                            "grid h-9 w-9 shrink-0 place-items-center rounded-xl ring-1",
+                            completed
+                              ? "bg-success/15 text-success ring-success/25"
+                              : current
+                                ? "bg-primary/18 text-primary ring-primary/30"
+                                : "bg-primary/12 text-primary ring-primary/20",
+                          )}
+                        >
+                          {completed ? <Check className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h3
+                              className={cn(
+                                "text-sm font-semibold",
+                                current ? "text-white" : "text-foreground",
+                              )}
+                            >
+                              {title}
+                            </h3>
+                          </div>
+                          <p
+                            className={cn(
+                              "mt-1 text-sm leading-6",
+                              current ? "text-foreground/86" : "text-foreground/68",
+                            )}
+                          >
+                            {body}
+                          </p>
+                        </div>
+                      </>
+                    );
+                    if (current && activationGuide) {
+                      return activationGuide.to ? (
+                        <Link
+                          key={title}
+                          to={activationGuide.to}
+                          onClick={closeIntro}
+                          aria-current="step"
+                          className={stepClassName}
+                        >
+                          {stepContent}
+                        </Link>
+                      ) : (
+                        <button
+                          key={title}
+                          type="button"
+                          aria-current="step"
+                          onClick={() => {
+                            closeIntro();
+                            setNewOpen(true);
+                          }}
+                          className={stepClassName}
+                        >
+                          {stepContent}
+                        </button>
+                      );
+                    }
+                    return (
+                      <div key={title} className={stepClassName}>
+                        {stepContent}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="mt-7 flex flex-wrap justify-end gap-2.5">
+                  <button
+                    type="button"
+                    onClick={closeIntro}
+                    className="rounded-xl bg-white/[0.045] px-5 py-2.5 text-sm font-medium text-foreground/70 ring-1 ring-white/[0.08] transition-all duration-200 hover:-translate-y-px hover:bg-white/[0.07] hover:text-foreground hover:ring-white/[0.14]"
+                  >
+                    Close
+                  </button>
+                  {activationGuide?.to ? (
+                    <Link
+                      onClick={closeIntro}
+                      to={activationGuide.to}
+                      className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition-all duration-200 hover:-translate-y-px hover:brightness-110"
+                    >
+                      {activationGuide.cta}
+                    </Link>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        closeIntro();
+                        setNewOpen(true);
+                      }}
+                      className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition-all duration-200 hover:-translate-y-px hover:brightness-110"
+                    >
+                      New trade
+                    </button>
+                  )}
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+          {newOpen && (
+            <TradeFormModal
+              nextNum={journalDb.length + 1}
+              onClose={() => setNewOpen(false)}
+              onSaved={() => {}}
+            />
+          )}
+        </AnimatePresence>
+
+        {/* Today snapshot — daily-focused command center */}
+        <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="glow-card rounded-2xl p-5">
+            <div className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground">
+              TRADES TODAY
             </div>
-            <div className="min-w-0">
-              <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground/85">
-                Execution Focus
-              </div>
-              <div className="mt-1 text-sm font-semibold text-foreground">
-                {executionFocus.headline}
-              </div>
-              <p className="mt-0.5 max-w-3xl text-sm leading-5 text-muted-foreground">
-                {executionFocus.message}
-              </p>
-            </div>
+            <div className="mt-1.5 text-3xl font-bold tabular-nums">{todayTrades.length}</div>
+            <div className="mt-1 text-xs text-muted-foreground">Logged today</div>
           </div>
-          <div className="flex w-full shrink-0 flex-col justify-center gap-2 sm:w-[18rem] sm:max-w-[34%] sm:self-stretch sm:items-end">
-            <div className="max-w-[18rem] text-pretty text-xs font-medium leading-5 text-muted-foreground sm:text-right">
-              {executionFocus.secondary}
+          <div className="glow-card flex flex-col items-start rounded-2xl p-5 text-left">
+            <div className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground">
+              TODAY NET R
+            </div>
+            <div
+              className={cn(
+                "mt-1.5 whitespace-nowrap pl-1 text-left text-3xl font-bold tabular-nums",
+                todayNetR > 0 && "text-success",
+                todayNetR < 0 && "text-destructive",
+              )}
+            >
+              {todayQualifyingR.length === 0 ? (
+                "\u2014"
+              ) : (
+                <span className="inline-block">
+                  {todayNetR > 0 ? "+" : todayNetR < 0 ? "\u2212" : ""}
+                  {Math.abs(todayNetR).toFixed(2)}R
+                </span>
+              )}
+            </div>
+            <div className="mt-1 text-xs text-muted-foreground">{todayNetRContext}</div>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3">
+          <div className="flex flex-col gap-4 rounded-2xl border border-primary/20 bg-[linear-gradient(135deg,oklch(0.17_0.05_292/0.72),oklch(0.09_0.018_275/0.94))] px-5 py-4 shadow-[inset_0_1px_0_oklch(1_0_0/0.035)] ring-1 ring-primary/[0.2] sm:min-h-[88px] sm:flex-row sm:items-center">
+            <div className="flex min-w-0 items-start gap-3">
+              <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[oklch(0.14_0.045_292/0.92)] text-primary/90 ring-1 ring-primary/[0.24]">
+                <ExecutionFocusIcon className="h-5 w-5" strokeWidth={2.25} />
+              </div>
+              <div className="min-w-0">
+                <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground/85">
+                  Execution Focus
+                </div>
+                <div className="mt-1 text-sm font-semibold text-foreground">
+                  {executionFocus.headline}
+                </div>
+                <p className="mt-0.5 max-w-3xl text-sm leading-5 text-muted-foreground">
+                  {executionFocus.message}
+                </p>
+              </div>
             </div>
             {executionFocus.showRecentre && (
               <Link
-                to={executionFocus.recentreState ? "/recentre/$state" : "/recentre"}
-                params={
-                  executionFocus.recentreState ? { state: executionFocus.recentreState } : undefined
-                }
-                className="inline-flex min-h-9 items-center justify-center gap-2 self-start rounded-lg bg-primary/14 px-3.5 text-xs font-semibold text-primary ring-1 ring-primary/24 transition-colors hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary sm:self-end"
+                to="/recentre"
+                className="inline-flex min-h-9 shrink-0 items-center justify-center gap-2 self-start rounded-lg bg-primary/14 px-3.5 text-xs font-semibold text-primary ring-1 ring-primary/24 transition-colors hover:bg-primary/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary sm:ml-auto sm:self-center"
               >
                 Open Recentre <ArrowRight className="h-3.5 w-3.5" />
               </Link>
             )}
           </div>
-        </div>
 
-        {hasJournalGaps && (
-          <Link
-            to="/trades"
-            search={{
-              account: "ALL",
-              review: "incomplete,needs_review",
-            }}
-            className="flex min-h-[76px] flex-col items-stretch justify-between gap-2 rounded-2xl bg-warning/[0.045] px-5 py-2.5 ring-1 ring-warning/16 transition-colors hover:bg-warning/[0.065] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning/35 sm:flex-row sm:items-center sm:gap-4"
-          >
-            <div className="flex min-w-0 items-center gap-3">
-              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-warning/10 text-warning ring-1 ring-warning/18">
-                <ClipboardList className="h-5 w-5" />
-              </span>
-              <div className="min-w-0">
-                <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground/85">
-                  Journal reminder
-                </div>
-                <div className="mt-0.5 text-sm font-semibold leading-5 text-foreground/90">
-                  {(() => {
-                    const inc = journalGaps.incomplete;
-                    const rev = journalGaps.needsReview;
-                    if (inc > 0 && rev > 0) {
-                      const reviewWord = rev === 1 ? "1 needs review" : `${rev} need review`;
-                      const capWord =
-                        inc === 1 ? "1 incomplete capture" : `${inc} incomplete captures`;
-                      return `${capWord} · ${reviewWord}`;
-                    }
-                    if (inc > 0) {
-                      return inc === 1 ? "1 incomplete capture" : `${inc} incomplete captures`;
-                    }
-                    if (rev > 0) {
-                      return rev === 1 ? "1 needs review" : `${rev} need review`;
-                    }
-                    return "";
-                  })()}
+          {activeImprovementFocus && (
+            <Link
+              to="/edge-discovery"
+              className="flex min-h-[76px] flex-col justify-between gap-3 rounded-2xl border border-info/[0.14] bg-info/[0.045] px-5 py-3 ring-1 ring-info/[0.05] transition-colors hover:bg-info/[0.065] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info/25 sm:flex-row sm:items-center"
+            >
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-info/[0.07] text-info/80 ring-1 ring-info/15">
+                  <Route className="h-5 w-5" />
+                </span>
+                <div className="min-w-0">
+                  <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground/85">
+                    Developmental focus
+                  </div>
+                  <div className="mt-0.5 truncate text-sm font-semibold text-foreground/90">
+                    {activeImprovementFocus.behavior}
+                  </div>
+                  <div className="truncate text-xs text-muted-foreground">
+                    When {activeImprovementFocus.trigger_situation} · Aim for{" "}
+                    {activeImprovementFocus.intended_behavior}
+                  </div>
                 </div>
               </div>
-            </div>
-            <span className="inline-flex min-h-9 shrink-0 items-center gap-1.5 self-end text-xs font-semibold text-warning sm:self-auto">
-              Complete journal <ArrowRight className="h-3.5 w-3.5" />
-            </span>
-          </Link>
-        )}
-      </div>
+              <span className="inline-flex min-h-9 shrink-0 items-center gap-1.5 self-end text-xs font-semibold text-info/85 sm:self-auto">
+                Open Scope <ArrowRight className="h-3.5 w-3.5" />
+              </span>
+            </Link>
+          )}
 
-      {/* KPI Cards */}
-      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 xl:auto-rows-fr">
-        <StatCard icon={BriefcaseBusiness} label="TOTAL TRADES" value={o.total} tone="info" />
-        <StatCard
-          icon={Target}
-          label="WIN RATE"
-          value={o.winRate == null ? "\u2014" : o.winRate}
-          decimals={1}
-          suffix="%"
-          tone="primary"
-          sub={o.winRate == null ? "No closed trades" : undefined}
-        />
-        <StatCard
-          icon={Scale}
-          label="AVERAGE R"
-          value={avgRR ?? "\u2014"}
-          decimals={2}
-          suffix="R"
-          tone={avgRR == null || avgRR === 0 ? "info" : avgRR > 0 ? "success" : "destructive"}
-          sub={
-            avgRR == null
-              ? closedCount > 0
-                ? "Add risk + P/L to see avg R"
-                : "No closed trades"
-              : resultNote
-          }
-        />
-        <StatCard
-          icon={TrendingUp}
-          label="NET R"
-          value={qualifyingR.length > 0 ? sumR : "\u2014"}
-          decimals={2}
-          suffix="R"
-          tone={
-            qualifyingR.length === 0 || sumR === 0
-              ? "info"
-              : sumR > 0
-                ? "success"
-                : "destructive"
-          }
-          sub={
-            qualifyingR.length === 0
-              ? closedCount > 0
-                ? "Add risk + P/L to calculate"
-                : "No closed trades"
-              : resultNote
-          }
-        />
-        <StatCard
-          icon={ClipboardCheck}
-          label="COMPLETED REVIEWS"
-          value={reviewedTradesCount}
-          tone="warning"
-          sub={o.total ? `${reviewedTradesCount} of ${o.total}` : "No trades yet"}
-        />
-        <StatCard
-          icon={currentStreakStat.icon}
-          label="CURRENT STREAK"
-          value={currentStreakStat.value === "No streak yet" ? "\u2014" : currentStreakStat.value}
-          tone={currentStreakStat.tone}
-          sub={
-            currentStreakStat.value === "No streak yet"
-              ? closedCount === 0
-                ? "No closed trades"
-                : "No active win/loss streak"
-              : undefined
-          }
-        />
-      </div>
-
-      {/* Recent trades + Monthly performance */}
-      <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-12">
-        <motion.div
-          {...card}
-          transition={{ ...motionTransition, delay: 0.04 }}
-          className="section-card relative flex h-full flex-col overflow-hidden rounded-2xl border border-white/[0.14] bg-[radial-gradient(ellipse_at_top,oklch(0.68_0.23_295/0.1),transparent_48%),linear-gradient(145deg,oklch(0.15_0.02_270/0.96),oklch(0.105_0.014_270/0.98))] p-5 shadow-[0_18px_44px_-34px_oklch(0_0_0/0.82)] ring-1 ring-white/[0.025] lg:col-span-5"
-        >
-          <div className="flex items-center justify-between">
-            <h3 className="flex items-center gap-2 text-sm font-semibold">
-              <History className="h-4 w-4 text-primary" /> Recent trades
-            </h3>
+          {hasJournalGaps && (
             <Link
               to="/trades"
-              search={{ account: selectedAccountId === "ALL" ? undefined : selectedAccountId }}
-              className="text-xs font-medium text-primary transition-colors duration-200 hover:text-primary-glow"
+              search={{
+                account: selectedAccountId === "ALL" ? undefined : selectedAccountId,
+                review: "incomplete,needs_review",
+              }}
+              className="flex min-h-[76px] flex-col items-stretch justify-between gap-2 rounded-2xl border border-warning/[0.14] bg-warning/[0.055] px-5 py-2.5 ring-1 ring-warning/[0.05] transition-colors hover:bg-warning/[0.07] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning/28 sm:flex-row sm:items-center sm:gap-4"
             >
-              View all →
-            </Link>
-          </div>
-          <div
-            className={cn(
-              "mt-5",
-              recent.length === 0
-                ? "flex h-[230px]"
-                : "grid flex-1 grid-rows-4 divide-y divide-white/[0.06] border-y border-white/[0.06]",
-            )}
-          >
-            {recent.length === 0 && (
-              <div className="flex h-full w-full items-center justify-center rounded-xl bg-white/[0.02] text-center ring-1 ring-white/[0.04]">
-                <div>
-                  <History className="mx-auto h-5 w-5 text-muted-foreground/60" aria-hidden="true" />
-                  <p className="mt-2 text-sm font-semibold">No trades logged yet</p>
-                  <p className="mt-1 text-xs text-muted-foreground">Log your first trade to begin.</p>
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-warning/[0.06] text-warning/80 ring-1 ring-warning/12">
+                  <NotebookPen className="h-5 w-5" />
+                </span>
+                <div className="min-w-0">
+                  <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground/85">
+                    Journal reminder
+                  </div>
+                  <div className="mt-0.5 text-sm font-semibold leading-5 text-foreground/90">
+                    {(() => {
+                      const inc = journalGaps.incomplete;
+                      const rev = journalGaps.needsReview;
+                      if (inc > 0 && rev > 0) {
+                        const reviewWord = rev === 1 ? "1 needs review" : `${rev} need review`;
+                        const capWord =
+                          inc === 1 ? "1 incomplete capture" : `${inc} incomplete captures`;
+                        return `${capWord} · ${reviewWord}`;
+                      }
+                      if (inc > 0) {
+                        return inc === 1 ? "1 incomplete capture" : `${inc} incomplete captures`;
+                      }
+                      if (rev > 0) {
+                        return rev === 1 ? "1 needs review" : `${rev} need review`;
+                      }
+                      return "";
+                    })()}
+                  </div>
                 </div>
               </div>
-            )}
-            {recent.map((t, index) => {
-              const displayR = recordedR(t.achieved_rr);
-              const rr = displayR ?? 0;
-              const tradeNumber = tradeNumbersById.get(t.id) ?? realDb.length - index;
-              const tone: Tone =
-                t.result === "win" ? "success" : t.result === "loss" ? "destructive" : "info";
-              const label =
-                t.result === "win"
-                  ? "WIN"
-                  : t.result === "loss"
-                    ? "LOSS"
-                    : t.result === "breakeven"
-                      ? "BE"
-                      : "\u2014";
-              return (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => setReviewTrade({ id: t.id, number: tradeNumber })}
-                  className="grid min-h-[60px] w-full grid-cols-[minmax(0,1fr)_58px_78px] items-center gap-3 px-1 py-3 text-left transition-colors duration-150 hover:bg-white/[0.025] focus:outline-none focus-visible:bg-white/[0.04] focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary/30"
-                >
-                  <div className="min-w-0">
-                    <div
-                      className="truncate text-sm font-semibold"
-                      title={t.instrument?.trim() || undefined}
-                    >
-                      {t.instrument?.trim() || "\u2014"}
-                    </div>
-                    <div className="mt-0.5 truncate text-xs tabular-nums text-muted-foreground">
-                      {formatRecentTradeDate(t.trade_date)}
-                    </div>
-                  </div>
-                  <span
-                    className={cn(
-                      "shrink-0 justify-self-start rounded-md px-2 py-0.5 text-[10px] font-bold tracking-wider",
-                      toneStyles[tone].badge,
-                    )}
-                  >
-                    {label}
-                  </span>
-                  <span
-                    className={cn(
-                      "w-full shrink-0 text-sm font-semibold tabular-nums",
-                      "justify-self-end text-right",
-                      displayR != null && rr > 0 && "text-success",
-                      displayR != null && rr < 0 && "text-destructive",
-                      (displayR == null || rr === 0) && "text-muted-foreground",
-                    )}
-                  >
-                    {displayR != null ? (rr > 0 ? "+" : "") + rr.toFixed(2) + "R" : "\u2014"}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </motion.div>
+              <span className="inline-flex min-h-9 shrink-0 items-center gap-1.5 self-end text-xs font-semibold text-warning/85 sm:self-auto">
+                Complete journal <ArrowRight className="h-3.5 w-3.5" />
+              </span>
+            </Link>
+          )}
+        </div>
 
-        <div className="lg:col-span-7">
-          <MonthlyPerformanceTabbed
-            monthChart={monthChart}
-            monthKey={ym}
-            monthLabel={monthLabel}
-            eligibility={monthEligibility}
-            tradeCount={currentMonthTrades.length}
-            closedTradeCount={currentMonthClosedCount}
+        {/* KPI Cards */}
+        <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <StatCard
+            icon={ChartCandlestick}
+            label="TOTAL TRADES"
+            value={o.total}
+            iconIdentity="trades"
+            compact
+          />
+          <StatCard
+            icon={CircleGauge}
+            label="WIN RATE"
+            value={o.winRate == null ? "\u2014" : o.winRate}
+            decimals={1}
+            suffix="%"
+            iconIdentity="winRate"
+            sub={o.winRate == null ? "No closed trades" : undefined}
+            compact
+          />
+          <StatCard
+            icon={Repeat2}
+            label="CURRENT STREAK"
+            value={currentStreakStat.value === "No streak yet" ? "\u2014" : currentStreakStat.value}
+            iconIdentity="streak"
+            sub={
+              currentStreakStat.value === "No streak yet"
+                ? closedCount === 0
+                  ? "No closed trades"
+                  : "No active win/loss streak"
+                : undefined
+            }
+            compact
+          />
+          <StatCard
+            icon={ChartNoAxesCombined}
+            label="NET R"
+            value={qualifyingR.length > 0 ? sumR : "\u2014"}
+            decimals={2}
+            suffix="R"
+            iconIdentity="netR"
+            valueInset
+            sub={
+              qualifyingR.length === 0
+                ? closedCount > 0
+                  ? "Add risk + P/L to calculate"
+                  : "No closed trades"
+                : resultNote
+            }
+          />
+          <StatCard
+            icon={ChartNoAxesColumn}
+            label="AVERAGE R"
+            value={avgRR ?? "\u2014"}
+            decimals={2}
+            suffix="R"
+            iconIdentity="averageR"
+            valueInset
+            sub={
+              avgRR == null
+                ? closedCount > 0
+                  ? "Add risk + P/L to see avg R"
+                  : "No closed trades"
+                : resultNote
+            }
+          />
+          <StatCard
+            icon={ClipboardCheck}
+            label="COMPLETED REVIEWS"
+            value={reviewedTradesCount}
+            iconIdentity="reviews"
+            sub={o.total ? `${reviewedTradesCount} of ${o.total}` : "No trades yet"}
           />
         </div>
-      </div>
 
-      {/* Overall Equity Curve */}
-      <OverallEquitySection
-        data={equityAll}
-        eligibility={equityEligibility}
-        tradeCount={dashboardDb.length}
-        closedTradeCount={closedCount}
-      />
+        {/* Recent trades + Monthly performance */}
+        <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-12">
+          <motion.div
+            {...card}
+            transition={{ ...motionTransition, delay: 0.04 }}
+            className="section-card relative flex h-full flex-col overflow-hidden rounded-2xl border border-white/[0.14] bg-[radial-gradient(ellipse_at_top,oklch(0.68_0.23_295/0.1),transparent_48%),linear-gradient(145deg,oklch(0.15_0.02_270/0.96),oklch(0.105_0.014_270/0.98))] p-5 shadow-[0_18px_44px_-34px_oklch(0_0_0/0.82)] ring-1 ring-white/[0.025] lg:col-span-5"
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="flex items-center gap-2 text-sm font-semibold">
+                <History className="h-4 w-4 text-primary" /> Recent trades
+              </h3>
+              <Link
+                to="/trades"
+                search={{ account: selectedAccountId === "ALL" ? undefined : selectedAccountId }}
+                className="text-xs font-medium text-primary transition-colors duration-200 hover:text-primary-glow"
+              >
+                View all →
+              </Link>
+            </div>
+            <div
+              className={cn(
+                "mt-5",
+                recent.length === 0
+                  ? "flex h-[230px]"
+                  : "grid flex-1 grid-rows-4 divide-y divide-white/[0.06] border-y border-white/[0.06]",
+              )}
+            >
+              {recent.length === 0 && (
+                <div className="flex h-full w-full items-center justify-center rounded-xl bg-white/[0.02] text-center ring-1 ring-white/[0.04]">
+                  <div>
+                    <History
+                      className="mx-auto h-5 w-5 text-muted-foreground/60"
+                      aria-hidden="true"
+                    />
+                    <p className="mt-2 text-sm font-semibold">No trades logged yet</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Log your first trade to begin.
+                    </p>
+                  </div>
+                </div>
+              )}
+              {recent.map((t, index) => {
+                const displayR = qualifyingRValue(t);
+                const rr = displayR ?? 0;
+                const tradeNumber = tradeNumbersById.get(t.id) ?? journalDb.length - index;
+                const tone: Tone =
+                  t.result === "win" ? "success" : t.result === "loss" ? "destructive" : "info";
+                const label =
+                  t.result === "win"
+                    ? "WIN"
+                    : t.result === "loss"
+                      ? "LOSS"
+                      : t.result === "breakeven"
+                        ? "BE"
+                        : "\u2014";
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setReviewTrade({ id: t.id, number: tradeNumber })}
+                    className="grid min-h-[60px] w-full grid-cols-[minmax(0,1fr)_64px_84px] items-center gap-4 px-1 py-3 text-left transition-colors duration-150 hover:bg-white/[0.025] focus:outline-none focus-visible:bg-white/[0.04] focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary/30"
+                  >
+                    <div className="min-w-0 pr-5">
+                      <div
+                        className="truncate text-sm font-semibold"
+                        title={t.instrument?.trim() || undefined}
+                      >
+                        {t.instrument?.trim() || "\u2014"}
+                      </div>
+                      <div className="mt-0.5 truncate text-xs tabular-nums text-muted-foreground">
+                        {formatRecentTradeDate(t.trade_date)}
+                      </div>
+                    </div>
+                    <span
+                      className={cn(
+                        "shrink-0 justify-self-start rounded-md px-2 py-0.5 text-[10px] font-bold tracking-wider",
+                        toneStyles[tone].badge,
+                      )}
+                    >
+                      {label}
+                    </span>
+                    <div className="flex w-full shrink-0 justify-end text-sm font-semibold tabular-nums">
+                      <div className="grid w-[3.25rem] place-items-center">
+                        {displayR == null ? (
+                          <>
+                            <span className="sr-only">R unavailable</span>
+                            <span
+                              aria-hidden="true"
+                              className="h-px w-3.5 rounded-full bg-muted-foreground/80"
+                            />
+                          </>
+                        ) : (
+                          <span
+                            className={cn(
+                              "w-full text-right",
+                              rr > 0 && "text-success",
+                              rr < 0 && "text-destructive",
+                              rr === 0 && "text-muted-foreground",
+                            )}
+                          >
+                            {(rr > 0 ? "+" : "") + rr.toFixed(2) + "R"}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </motion.div>
 
-      <AnimatePresence>
-        {reviewTrade && (
-          <TradeReviewModal
-            tradeId={reviewTrade.id}
-            number={reviewTrade.number}
-            onClose={() => setReviewTrade(null)}
-          />
-        )}
-      </AnimatePresence>
-    </PageShell>
+          <div className="lg:col-span-7">
+            <MonthlyPerformanceTabbed
+              monthChart={monthChart}
+              monthLabel={monthLabel}
+              eligibility={monthEligibility}
+              tradeCount={currentMonthTrades.length}
+            />
+          </div>
+        </div>
+
+        {/* Overall Equity Curve */}
+        <OverallEquitySection
+          data={equityAll}
+          eligibility={equityEligibility}
+          tradeCount={dashboardDb.length}
+        />
+
+        <AnimatePresence>
+          {reviewTrade && (
+            <TradeReviewModal
+              tradeId={reviewTrade.id}
+              number={reviewTrade.number}
+              onClose={() => setReviewTrade(null)}
+            />
+          )}
+        </AnimatePresence>
+      </PageShell>
+    </MotionConfig>
   );
 }
 
 function formatRecentTradeDate(date: string): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
   if (!match) return date;
-  return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]))).toLocaleDateString(
-    "en-US",
-    { month: "short", day: "numeric", timeZone: "UTC" },
-  );
+  return new Date(
+    Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])),
+  ).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const DASHBOARD_CHART_MARGIN = { top: 18, right: 20, left: 0, bottom: 14 };
+const DASHBOARD_CHART_X_PADDING = { left: 8, right: 8 };
+const DASHBOARD_CHART_Y_WIDTH = 48;
 
 type DashboardPlotPoint = DashboardChartPoint & {
   time: number;
 };
-
-type ChartDomain = { start: number; end: number };
-
-function chartTime(date: string): number {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
-  if (!match) return Date.parse(date);
-  return Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-}
 
 function chartTimeTick(time: number): string {
   return new Date(time).toLocaleDateString("en-US", {
@@ -1362,69 +1448,13 @@ function chartTimeTick(time: number): string {
   });
 }
 
-function chartTimeTickForDomain(time: number, domain: ChartDomain): string {
+function chartTimeTickForDomain(time: number, domain: DashboardChartDomain): string {
   if (domain.end - domain.start < 330 * DAY_MS) return chartTimeTick(time);
   return new Date(time).toLocaleDateString("en-US", {
     month: "short",
     year: "2-digit",
     timeZone: "UTC",
   });
-}
-
-function monthChartBounds(monthKey: string): ChartDomain {
-  const [year, month] = monthKey.split("-").map(Number);
-  const start = Date.UTC(year, month - 1, 1);
-  return { start, end: Date.UTC(year, month, 0) };
-}
-
-function chartDataDomain(data: DashboardChartPoint[], bounds?: ChartDomain): ChartDomain {
-  const times = data.map((point) => chartTime(point.date)).filter(Number.isFinite);
-  if (times.length === 0) return bounds ?? { start: 0, end: DAY_MS };
-
-  const first = Math.min(...times);
-  const last = Math.max(...times);
-  const span = last - first;
-  const padding = span > 0 ? Math.max(DAY_MS * 0.75, span * 0.08) : DAY_MS;
-  let start = first - padding;
-  let end = last + padding;
-
-  if (bounds) {
-    start = Math.max(bounds.start, start);
-    end = Math.min(bounds.end, end);
-  }
-
-  const minimumSpan = 2 * DAY_MS;
-  if (end - start < minimumSpan) {
-    const missing = minimumSpan - (end - start);
-    start -= missing / 2;
-    end += missing / 2;
-    if (bounds && start < bounds.start) {
-      end = Math.min(bounds.end, end + (bounds.start - start));
-      start = bounds.start;
-    }
-    if (bounds && end > bounds.end) {
-      start = Math.max(bounds.start, start - (end - bounds.end));
-      end = bounds.end;
-    }
-  }
-
-  return { start, end };
-}
-
-function chartTimeTicks(domain: ChartDomain, maxCount: number): number[] {
-  const span = domain.end - domain.start;
-  if (!(span > 0)) return [];
-
-  const firstDay = Math.ceil(domain.start / DAY_MS) * DAY_MS;
-  const lastDay = Math.floor(domain.end / DAY_MS) * DAY_MS;
-  const days = Math.max(0, Math.floor((lastDay - firstDay) / DAY_MS) + 1);
-  const candidates = Array.from({ length: days }, (_, index) => firstDay + index * DAY_MS);
-  if (candidates.length <= maxCount) return candidates;
-
-  return Array.from({ length: maxCount }, (_, index) => {
-    const candidateIndex = Math.round((index * (candidates.length - 1)) / (maxCount - 1));
-    return candidates[candidateIndex]!;
-  }).filter((tick, index, ticks) => index === 0 || tick !== ticks[index - 1]);
 }
 
 function niceCeiling(value: number): number {
@@ -1440,7 +1470,7 @@ function chartYScale(data: DashboardChartPoint[]): {
   domain: [number, number];
   ticks: number[];
 } {
-  const values = data.map((point) => point.cumulativeR);
+  const values = data.map((point) => point.value);
   const minimum = Math.min(0, ...values);
   const maximum = Math.max(0, ...values);
 
@@ -1461,30 +1491,26 @@ function chartYScale(data: DashboardChartPoint[]): {
 }
 
 function dashboardPlotPoints(data: DashboardChartPoint[]): DashboardPlotPoint[] {
-  return data.map((point) => ({ ...point, time: chartTime(point.date) }));
+  return data.map((point) => ({ ...point, time: dashboardChartTime(point.date) }));
 }
 
 function MonthlyPerformanceTabbed({
   monthChart,
-  monthKey,
   monthLabel,
   eligibility,
   tradeCount,
-  closedTradeCount,
 }: {
   monthChart: DashboardChartPoint[];
-  monthKey: string;
   monthLabel: string;
   eligibility: ReturnType<typeof dashboardChartEligibility>;
   tradeCount: number;
-  closedTradeCount: number;
 }) {
-  const domain = chartDataDomain(monthChart, monthChartBounds(monthKey));
+  const domain = dashboardChartDateDomain(monthChart) ?? { start: 0, end: 0 };
   const plotData = dashboardPlotPoints(monthChart);
-  const xTicks = chartTimeTicks(domain, 4);
+  const xTicks = dashboardChartDateTicks(monthChart, 4);
   const yScale = chartYScale(monthChart);
-  const finalR = monthChart.at(-1)?.cumulativeR ?? 0;
-  const monthTone = finalR > 0 ? "positive" : finalR < 0 ? "negative" : "neutral";
+  const monthNetR = monthChart.reduce((sum, point) => sum + point.value, 0);
+  const monthTone = monthNetR > 0 ? "positive" : monthNetR < 0 ? "negative" : "neutral";
   const monthColor =
     monthTone === "positive"
       ? "oklch(0.72 0.14 152)"
@@ -1509,15 +1535,10 @@ function MonthlyPerformanceTabbed({
 
       <div className="mt-4 h-[250px]">
         {!eligibility.eligible ? (
-          <DashboardLowDataState
-            missingTradeCount={eligibility.missingTradeCount}
-            tradeCount={tradeCount}
-            closedTradeCount={closedTradeCount}
-            chart="monthly"
-          />
+          <DashboardLowDataState tradeCount={tradeCount} chart="monthly" />
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={plotData} margin={{ top: 18, right: 24, left: 8, bottom: 14 }}>
+            <ComposedChart data={plotData} margin={DASHBOARD_CHART_MARGIN}>
               <defs>
                 <linearGradient id="dash-month-fill" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor={monthColor} stopOpacity={0.2} />
@@ -1530,6 +1551,7 @@ function MonthlyPerformanceTabbed({
                 dataKey="time"
                 scale="time"
                 domain={[domain.start, domain.end]}
+                allowDataOverflow
                 tick={{ fontSize: 10, fill: "oklch(0.55 0 0)" }}
                 axisLine={false}
                 tickLine={false}
@@ -1537,24 +1559,24 @@ function MonthlyPerformanceTabbed({
                 ticks={xTicks}
                 interval="preserveStartEnd"
                 minTickGap={28}
-                padding={{ left: 12, right: 12 }}
+                padding={DASHBOARD_CHART_X_PADDING}
                 tickFormatter={chartTimeTick}
               />
               <YAxis
                 tick={{ fontSize: 10, fill: "oklch(0.5 0 0)" }}
                 axisLine={false}
                 tickLine={false}
-                width={54}
+                width={DASHBOARD_CHART_Y_WIDTH}
                 ticks={yScale.ticks}
                 allowDecimals
                 tickFormatter={formatRAxisTick}
                 domain={yScale.domain}
               />
-              <Tooltip content={<DashboardChartTooltip label="Cum R" />} />
+              <Tooltip content={<DashboardChartTooltip valueLabel="Daily net R" />} />
               <ReferenceLine y={0} stroke="oklch(1 0 0 / 0.18)" strokeDasharray="3 3" />
               <Area
                 type="linear"
-                dataKey="cumulativeR"
+                dataKey="value"
                 stroke="transparent"
                 fill="url(#dash-month-fill)"
                 baseValue={0}
@@ -1562,7 +1584,7 @@ function MonthlyPerformanceTabbed({
               />
               <Line
                 type="linear"
-                dataKey="cumulativeR"
+                dataKey="value"
                 stroke={monthColor}
                 strokeWidth={2.25}
                 dot={plotData.length <= 8 ? { r: 2, fill: monthColor, strokeWidth: 0 } : false}
@@ -1585,20 +1607,23 @@ function MonthlyPerformanceTabbed({
 function DashboardChartTooltip({
   active,
   payload,
-  label,
+  valueLabel,
 }: {
   active?: boolean;
   payload?: Array<{ payload?: DashboardPlotPoint }>;
-  label: string;
+  valueLabel: string;
 }) {
   const point = payload?.find((entry) => entry.payload?.date)?.payload;
   if (!active || !point) return null;
   return (
     <div className="rounded-xl border border-white/[0.08] bg-[oklch(0.13_0.018_270)] px-3 py-2 text-xs shadow-[0_8px_32px_-8px_oklch(0_0_0/0.5)]">
-      <div className="text-muted-foreground">{formatTradeDateOnly(point.date || label)}</div>
+      <div className="text-muted-foreground">{formatTradeDateOnly(point.date)}</div>
+      <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/75">
+        {valueLabel}
+      </div>
       <div className="mt-1 font-semibold text-foreground">
-        {point.cumulativeR > 0 ? "+" : ""}
-        {point.cumulativeR.toFixed(2)}R
+        {point.value > 0 ? "+" : ""}
+        {point.value.toFixed(2)}R
       </div>
     </div>
   );
@@ -1608,16 +1633,14 @@ function OverallEquitySection({
   data,
   eligibility,
   tradeCount,
-  closedTradeCount,
 }: {
   data: DashboardChartPoint[];
   eligibility: ReturnType<typeof dashboardChartEligibility>;
   tradeCount: number;
-  closedTradeCount: number;
 }) {
-  const domain = chartDataDomain(data);
+  const domain = dashboardChartDateDomain(data) ?? { start: 0, end: 0 };
   const plotData = dashboardPlotPoints(data);
-  const xTicks = chartTimeTicks(domain, 5);
+  const xTicks = dashboardChartDateTicks(data, 5);
   const yScale = chartYScale(data);
 
   return (
@@ -1628,7 +1651,7 @@ function OverallEquitySection({
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="flex items-center gap-2 text-sm font-semibold">
-          <TrendingUp className="h-4 w-4 text-primary" /> Overall equity curve
+          <ChartLine className="h-4 w-4 text-primary" /> Overall equity curve
         </h3>
         <span className="rounded-md bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">
           All-time
@@ -1636,15 +1659,10 @@ function OverallEquitySection({
       </div>
       <div className={cn("mt-4", eligibility.eligible ? "h-[300px]" : "h-[176px]")}>
         {!eligibility.eligible ? (
-          <DashboardLowDataState
-            missingTradeCount={eligibility.missingTradeCount}
-            tradeCount={tradeCount}
-            closedTradeCount={closedTradeCount}
-            chart="equity"
-          />
+          <DashboardLowDataState tradeCount={tradeCount} chart="equity" />
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={plotData} margin={{ top: 18, right: 28, left: 10, bottom: 14 }}>
+            <ComposedChart data={plotData} margin={DASHBOARD_CHART_MARGIN}>
               <defs>
                 <linearGradient id="dash-equity" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="oklch(0.68 0.23 295)" stopOpacity={0.38} />
@@ -1657,31 +1675,32 @@ function OverallEquitySection({
                 dataKey="time"
                 scale="time"
                 domain={[domain.start, domain.end]}
+                allowDataOverflow
                 tick={{ fontSize: 10, fill: "oklch(0.55 0 0)" }}
                 axisLine={false}
                 tickLine={false}
-                tickMargin={10}
+                tickMargin={8}
                 ticks={xTicks}
                 interval="preserveStartEnd"
                 minTickGap={28}
-                padding={{ left: 14, right: 14 }}
+                padding={DASHBOARD_CHART_X_PADDING}
                 tickFormatter={(time) => chartTimeTickForDomain(time, domain)}
               />
               <YAxis
                 tick={{ fontSize: 10, fill: "oklch(0.5 0 0)" }}
                 axisLine={false}
                 tickLine={false}
-                width={54}
+                width={DASHBOARD_CHART_Y_WIDTH}
                 ticks={yScale.ticks}
                 allowDecimals
                 tickFormatter={formatRAxisTick}
                 domain={yScale.domain}
               />
-              <Tooltip content={<DashboardChartTooltip label="Equity" />} />
+              <Tooltip content={<DashboardChartTooltip valueLabel="Cumulative R" />} />
               <ReferenceLine y={0} stroke="oklch(1 0 0 / 0.14)" strokeDasharray="3 3" />
               <Area
                 type="linear"
-                dataKey="cumulativeR"
+                dataKey="value"
                 stroke="transparent"
                 fill="url(#dash-equity)"
                 baseValue={0}
@@ -1689,7 +1708,7 @@ function OverallEquitySection({
               />
               <Line
                 type="linear"
-                dataKey="cumulativeR"
+                dataKey="value"
                 stroke="oklch(0.78 0.19 295)"
                 strokeWidth={2.25}
                 dot={
@@ -1714,49 +1733,31 @@ function OverallEquitySection({
 }
 
 function DashboardLowDataState({
-  missingTradeCount,
   tradeCount,
-  closedTradeCount,
   chart,
 }: {
-  missingTradeCount: number;
   tradeCount: number;
-  closedTradeCount: number;
   chart: "monthly" | "equity";
 }) {
   const hasTrades = tradeCount > 0;
-  const hasClosedTrades = closedTradeCount > 0;
-  const noTradeHeadline =
-    chart === "monthly" ? "No trades logged this month" : "No trading history yet";
-  const noTradeMessage =
-    chart === "monthly"
-      ? "Log a trade to start this month's performance curve."
-      : "Log your first trade to build the equity curve.";
-  const noClosedTradeHeadline =
-    chart === "monthly" ? "No closed trades this month" : "No closed performance yet";
-  const noClosedTradeMessage =
-    chart === "monthly"
-      ? "Close a trade and record risk and P/L to start this month's curve."
-      : "Close a trade and record risk and P/L to start the equity curve.";
+  const EmptyIcon = chart === "monthly" ? CalendarDays : ChartLine;
+  const heading = hasTrades
+    ? "Add R data to continue"
+    : chart === "monthly"
+      ? "No trades this month"
+      : "No trading history yet";
+  const message = hasTrades
+    ? "Enter Risk and P/L on a closed trade."
+    : chart === "monthly"
+      ? "Log a trade to begin tracking this month."
+      : "Log your first trade to begin your curve.";
 
   return (
-    <div className="flex h-full min-h-[160px] items-center justify-center rounded-xl bg-white/[0.02] px-5 text-center ring-1 ring-white/[0.04]">
+    <div className="flex h-full min-h-[150px] items-center justify-center px-5 text-center">
       <div className="flex flex-col items-center">
-        <Activity className="mb-2 h-5 w-5 text-muted-foreground/60" aria-hidden="true" />
-        <div className="text-sm font-semibold text-foreground">
-          {!hasTrades
-            ? noTradeHeadline
-            : !hasClosedTrades
-              ? noClosedTradeHeadline
-              : missingRTradeHeadline(missingTradeCount)}
-        </div>
-        <p className="mt-1 max-w-sm text-sm leading-5 text-muted-foreground">
-          {!hasTrades
-            ? noTradeMessage
-            : !hasClosedTrades
-              ? noClosedTradeMessage
-              : "Add risk and P/L to closed trades."}
-        </p>
+        <EmptyIcon className="mb-2 h-5 w-5 text-muted-foreground/55" aria-hidden="true" />
+        <div className="text-sm font-semibold text-foreground">{heading}</div>
+        <p className="mt-1 max-w-sm text-sm leading-5 text-muted-foreground">{message}</p>
       </div>
     </div>
   );

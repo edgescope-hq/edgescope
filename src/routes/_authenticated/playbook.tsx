@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { motion, AnimatePresence } from "framer-motion";
-import { useState, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 import {
   Brain,
   BookOpen,
@@ -23,6 +23,7 @@ import {
   Trash2,
   X,
   ChevronRight,
+  ShieldCheck,
 } from "lucide-react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -34,6 +35,12 @@ import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 import { NOTE_TEMPLATES } from "@/lib/note-templates";
 import { PageHeader, PageShell, PremiumEmptyState } from "@/components/ui/premium";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import {
+  adoptPlaybookEntry,
+  listPlaybookStandards,
+  retirePlaybookStandard,
+  type PlaybookStandard,
+} from "@/lib/playbook.functions";
 
 export const Route = createFileRoute("/_authenticated/playbook")({
   head: () => ({
@@ -66,10 +73,10 @@ const TYPE_OPTIONS: { v: NoteType; l: string }[] = [
   { v: "review", l: "Review" },
 ];
 
-type Tab = "notes" | "templates";
+type Tab = "standard" | "notes" | "templates";
 
 function PlaybookPage() {
-  const [tab, setTab] = useState<Tab>("notes");
+  const [tab, setTab] = useState<Tab>("standard");
 
   return (
     <PageShell>
@@ -77,12 +84,13 @@ function PlaybookPage() {
         icon={BookOpen}
         eyebrow="Process"
         title="Playbook"
-        description="Your personal rules, notes, and templates for structured review."
+        description="Your deliberately adopted current standard, with ordinary notes and reference templates kept separate."
       />
 
       <div className="mt-6 inline-flex rounded-xl bg-white/[0.03] p-1 ring-1 ring-white/[0.06]">
         {(
           [
+            { v: "standard", l: "Current standard", icon: ShieldCheck },
             { v: "notes", l: "Notes", icon: NotebookPen },
             { v: "templates", l: "Templates", icon: FileText },
           ] as const
@@ -108,10 +116,93 @@ function PlaybookPage() {
       </div>
 
       <div className="mt-6">
+        {tab === "standard" && <CurrentStandardTab />}
         {tab === "notes" && <NotesTab />}
         {tab === "templates" && <TemplatesTab />}
       </div>
     </PageShell>
+  );
+}
+
+function CurrentStandardTab() {
+  const queryClient = useQueryClient();
+  const listStandardsFn = useServerFn(listPlaybookStandards);
+  const retireStandardFn = useServerFn(retirePlaybookStandard);
+  const { data } = useSuspenseQuery({
+    queryKey: ["playbook-standards"],
+    queryFn: () => listStandardsFn(),
+  });
+  const standards = (data ?? []) as PlaybookStandard[];
+  const current = standards.filter(
+    (standard) => standard.status === "active" && standard.current_version,
+  );
+  const retire = useMutation({
+    mutationFn: (standardId: string) => retireStandardFn({ data: { standard_id: standardId } }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["playbook-standards"] });
+      toast.success("Standard retired prospectively. Historical trade intent remains unchanged.");
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+
+  if (!current.length) {
+    return (
+      <div className="glow-card rounded-2xl p-6">
+        <div className="flex items-start gap-4">
+          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary ring-1 ring-primary/20">
+            <ShieldCheck className="h-5 w-5" />
+          </div>
+          <div>
+            <h2 className="text-base font-bold">No current adopted standard</h2>
+            <p className="mt-1.5 max-w-2xl text-sm leading-6 text-muted-foreground">
+              A Setup note is still ordinary material until you deliberately adopt it. Open Notes,
+              create or edit a Setup, save it, then choose Adopt as current standard.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-xl bg-info/[0.055] px-4 py-3 text-xs leading-5 text-muted-foreground ring-1 ring-info/15">
+        Current standards apply prospectively. Editing a source note does not rewrite the adopted
+        snapshot; adopting it again publishes a new effective version while historical trades keep
+        their original reference.
+      </div>
+      {current.map((standard) => {
+        const version = standard.current_version!;
+        return (
+          <article key={standard.id} className="glow-card rounded-2xl p-5">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full bg-success/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-success ring-1 ring-success/20">
+                    Current · v{version.version_number}
+                  </span>
+                  <span className="text-[11px] text-muted-foreground">
+                    Effective {new Date(version.effective_from).toLocaleString()}
+                  </span>
+                </div>
+                <h2 className="mt-3 text-lg font-bold">{version.title}</h2>
+                <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-foreground/82">
+                  {version.content || "No written conditions in this adopted snapshot."}
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={retire.isPending}
+                onClick={() => retire.mutate(standard.id)}
+                className="shrink-0 rounded-xl bg-white/[0.04] px-3.5 py-2.5 text-xs font-semibold text-muted-foreground ring-1 ring-white/[0.07] hover:text-foreground disabled:opacity-50"
+              >
+                Retire standard
+              </button>
+            </div>
+          </article>
+        );
+      })}
+    </div>
   );
 }
 
@@ -161,18 +252,47 @@ function NotesTab() {
   const create = useServerFn(createEntry);
   const upd = useServerFn(updateEntry);
   const del = useServerFn(deleteEntry);
+  const listStandardsFn = useServerFn(listPlaybookStandards);
+  const adoptStandardFn = useServerFn(adoptPlaybookEntry);
 
   const { data } = useSuspenseQuery({ queryKey: ["notebook"], queryFn: () => list() });
+  const { data: standardsData } = useSuspenseQuery({
+    queryKey: ["playbook-standards"],
+    queryFn: () => listStandardsFn(),
+  });
   const entries = useMemo(() => (data ?? []) as Entry[], [data]);
+  const standards = (standardsData ?? []) as PlaybookStandard[];
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditor, setShowEditor] = useState(false);
+  const [editorDirty, setEditorDirty] = useState(false);
+  const [createDirty, setCreateDirty] = useState(false);
+  const [discardSurface, setDiscardSurface] = useState<"editor" | "create" | null>(null);
   const [typeFilter, setTypeFilter] = useState<NoteType | "ALL">("ALL");
   const [searchQuery, setSearchQuery] = useState("");
 
   const selected = entries.find((e) => e.id === selectedId) ?? null;
+
+  const closeEditor = () => {
+    setShowEditor(false);
+    setSelectedId(null);
+    setEditorDirty(false);
+  };
+  const closeCreate = () => {
+    setShowCreateModal(false);
+    setCreateDirty(false);
+  };
+  const requestSurfaceClose = (surface: "editor" | "create") => {
+    const dirty = surface === "editor" ? editorDirty : createDirty;
+    if (dirty) {
+      setDiscardSurface(surface);
+      return;
+    }
+    if (surface === "editor") closeEditor();
+    else closeCreate();
+  };
 
   const filtered = useMemo(() => {
     let result = entries;
@@ -196,6 +316,8 @@ function NotesTab() {
       }),
     onSuccess: (row) => {
       invalidate();
+      closeCreate();
+      toast.success("Note created");
       if (row && "id" in row) {
         setSelectedId(row.id as string);
         setShowEditor(true);
@@ -213,6 +335,18 @@ function NotesTab() {
       invalidate();
     },
     onError: (e: Error) => toast.error(e.message),
+  });
+  const adoptM = useMutation({
+    mutationFn: (entryId: string) => adoptStandardFn({ data: { entry_id: entryId } }),
+    onSuccess: async (result) => {
+      await qc.invalidateQueries({ queryKey: ["playbook-standards"] });
+      toast.success(
+        result.changed
+          ? "Current standard adopted prospectively."
+          : "This exact standard version is already current.",
+      );
+    },
+    onError: (error: Error) => toast.error(error.message),
   });
 
   return (
@@ -338,16 +472,21 @@ function NotesTab() {
       <Dialog
         open={showEditor}
         onOpenChange={(open) => {
-          if (!open) {
-            setShowEditor(false);
-            setSelectedId(null);
-          }
+          if (!open) requestSurfaceClose("editor");
         }}
       >
         <DialogContent className="max-h-[88vh] max-w-2xl overflow-hidden rounded-2xl border-white/[0.08] bg-[oklch(0.09_0.015_270)] p-0 [&>button]:hidden">
           {selected && (
             <NoteEditor
               entry={selected}
+              currentStandard={
+                standards.find(
+                  (standard) =>
+                    standard.source_entry_id === selected.id && standard.status === "active",
+                ) ?? null
+              }
+              adopting={adoptM.isPending}
+              onAdopt={() => adoptM.mutate(selected.id)}
               isDuplicateTitle={(title) => {
                 const nextTitle = normalizeTitle(title);
                 return nextTitle
@@ -374,20 +513,23 @@ function NotesTab() {
                 toast.success("Saved");
               }}
               onDelete={() => setConfirmDelete(true)}
-              onClose={() => {
-                setShowEditor(false);
-                setSelectedId(null);
-              }}
+              onClose={() => requestSurfaceClose("editor")}
+              onDirtyChange={setEditorDirty}
             />
           )}
         </DialogContent>
       </Dialog>
 
       {/* Create Note modal */}
-      <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
+      <Dialog
+        open={showCreateModal}
+        onOpenChange={(open) => {
+          if (!open) requestSurfaceClose("create");
+        }}
+      >
         <DialogContent className="rounded-2xl border-white/[0.08] bg-[oklch(0.09_0.015_270)] max-w-md p-6 [&>button]:hidden">
           <CreateNoteModal
-            onClose={() => setShowCreateModal(false)}
+            onClose={() => requestSurfaceClose("create")}
             onCreate={(init) => {
               if (
                 entries.some((entry) => normalizeTitle(entry.title) === normalizeTitle(init.title))
@@ -404,6 +546,7 @@ function NotesTab() {
                 : false;
             }}
             loading={addM.isPending}
+            onDirtyChange={setCreateDirty}
           />
         </DialogContent>
       </Dialog>
@@ -421,18 +564,41 @@ function NotesTab() {
           if (selected) delM.mutate(selected.id);
         }}
       />
+      <ConfirmDialog
+        open={discardSurface !== null}
+        onOpenChange={(open) => {
+          if (!open) setDiscardSurface(null);
+        }}
+        title="Discard unsaved Playbook changes?"
+        description="Your note edits have not been saved."
+        confirmLabel="Discard changes"
+        destructive
+        onConfirm={() => {
+          const surface = discardSurface;
+          setDiscardSurface(null);
+          if (surface === "editor") closeEditor();
+          if (surface === "create") closeCreate();
+        }}
+      />
     </div>
   );
 }
 
 function NoteEditor({
   entry,
+  currentStandard,
+  adopting,
+  onAdopt,
   isDuplicateTitle,
   onSave,
   onDelete,
   onClose,
+  onDirtyChange,
 }: {
   entry: Entry;
+  currentStandard: PlaybookStandard | null;
+  adopting: boolean;
+  onAdopt: () => void;
   isDuplicateTitle: (title: string) => boolean;
   onSave: (p: {
     title: string | null;
@@ -442,6 +608,7 @@ function NoteEditor({
   }) => Promise<void>;
   onDelete: () => void;
   onClose: () => void;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const [title, setTitle] = useState(entry.title ?? "");
   const [content, setContent] = useState(entry.content ?? "");
@@ -457,6 +624,7 @@ function NoteEditor({
   const duplicateTitle = isDuplicateTitle(title);
 
   useUnsavedChanges(dirty);
+  useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
 
   return (
     <div className="flex max-h-[88vh] flex-col">
@@ -513,6 +681,12 @@ function NoteEditor({
               </button>
             ))}
           </div>
+          {noteType === "setup" && (
+            <p className="text-[11px] leading-5 text-muted-foreground">
+              Setup is a note type only. It becomes part of your current standard only when you
+              deliberately adopt a saved snapshot.
+            </p>
+          )}
         </div>
 
         <div className="space-y-2">
@@ -548,7 +722,23 @@ function NoteEditor({
         >
           <Trash2 className="h-3.5 w-3.5" /> Delete note
         </button>
-        <div className="flex justify-end gap-2">
+        <div className="flex flex-wrap justify-end gap-2">
+          {noteType === "setup" && (
+            <button
+              type="button"
+              onClick={onAdopt}
+              disabled={dirty || adopting || duplicateTitle}
+              title={dirty ? "Save note changes before adopting a snapshot" : undefined}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-success/10 px-4 py-2 text-xs font-semibold text-success ring-1 ring-success/20 transition hover:bg-success/15 disabled:opacity-40"
+            >
+              <ShieldCheck className="h-3.5 w-3.5" />{" "}
+              {adopting
+                ? "Adopting..."
+                : currentStandard
+                  ? "Publish updated version"
+                  : "Adopt as current standard"}
+            </button>
+          )}
           <button
             onClick={onClose}
             className="rounded-xl border border-white/[0.06] bg-white/[0.04] px-4 py-2 text-xs font-semibold text-muted-foreground transition hover:text-foreground"
@@ -588,16 +778,21 @@ function CreateNoteModal({
   onCreate,
   isDuplicateTitle,
   loading,
+  onDirtyChange,
 }: {
   onClose: () => void;
   onCreate: (init: { title: string; content: string; tags: string[]; note_type: NoteType }) => void;
   isDuplicateTitle: (title: string) => boolean;
   loading: boolean;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const [title, setTitle] = useState("");
   const [noteType, setNoteType] = useState<NoteType>("general");
   const [content, setContent] = useState("");
   const duplicateTitle = isDuplicateTitle(title);
+  const dirty = title !== "" || noteType !== "general" || content !== "";
+  useUnsavedChanges(dirty);
+  useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

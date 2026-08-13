@@ -105,30 +105,26 @@ baseline becomes the first migration in the clean replay set.
 Use a clean baseline migration set for new environments. Do not place the
 baseline next to all legacy migrations and then run the entire folder from zero.
 
-Recommended repository workflow:
+Repository workflow:
 
-1. Keep the current legacy `supabase/migrations` directory on the existing branch
-   for production/staging history.
-2. Create a dedicated baseline branch or release branch for new-environment
-   bootstrap.
-3. On that branch, archive the legacy SQL files outside the replay path, for
-   example:
+1. Preserve legacy pre-baseline SQL outside the active replay path:
 
 ```text
 supabase/migrations_legacy_pre_baseline/
 ```
 
-4. Put the baseline SQL as the first file in:
+2. Keep the reviewed baseline SQL as the first file in:
 
 ```text
 supabase/migrations/20260710000000_launch_baseline.sql
 ```
 
-5. Copy only migrations created after the baseline timestamp into
+3. Keep only migrations created after the baseline timestamp alongside it in
    `supabase/migrations`.
 
-This keeps history available for audit while preventing Supabase CLI from
-replaying the conflicting legacy files into fresh databases.
+EdgeScope now follows this layout. This keeps history available for audit while
+preventing Supabase CLI from replaying conflicting legacy files into fresh
+databases.
 
 ## Future migrations after baseline
 

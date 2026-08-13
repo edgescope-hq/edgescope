@@ -23,7 +23,7 @@ import {
   Lock,
   MoreHorizontal,
 } from "lucide-react";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link, useBlocker, useNavigate } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -104,6 +104,9 @@ import {
   type AnalyticsKpiId,
   type AnalyticsPreferences,
 } from "@/lib/analytics-sections";
+import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
+import { resetUserSessionCache } from "@/lib/session-cache-boundary";
+import { DataExportSection } from "@/components/settings/data-export";
 
 export const Route = createFileRoute("/_authenticated/settings")({
   head: () => ({
@@ -184,15 +187,9 @@ function RequirementToggle({
   required?: boolean;
 }) {
   return (
-    <div
-      className={cn(
-        "flex items-center justify-between gap-4 rounded-xl px-4 py-3",
-      )}
-    >
+    <div className={cn("flex items-center justify-between gap-4 rounded-xl px-4 py-3")}>
       <span className="min-w-0">
-        <span className="block text-sm font-medium text-foreground">
-          {label}
-        </span>
+        <span className="block text-sm font-medium text-foreground">{label}</span>
         {description ? (
           <span className="mt-0.5 block text-xs text-muted-foreground">{description}</span>
         ) : null}
@@ -210,13 +207,7 @@ function RequirementToggle({
   );
 }
 
-function LockedRequirementRow({
-  label,
-  onTrack,
-}: {
-  label: string;
-  onTrack: () => void;
-}) {
+function LockedRequirementRow({ label, onTrack }: { label: string; onTrack: () => void }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
       <span className="text-sm font-medium text-foreground">{label}</span>
@@ -315,6 +306,7 @@ function SettingsPage() {
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [signOutConfirmOpen, setSignOutConfirmOpen] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [providerLabel, setProviderLabel] = useState("Google");
   const [reviewRequirements, setReviewRequirements] = useState<ReviewRequirements>(
@@ -337,15 +329,21 @@ function SettingsPage() {
     DEFAULT_ANALYTICS_PREFERENCES.hidden,
   );
   const [analyticsRestoreOpen, setAnalyticsRestoreOpen] = useState(false);
-  const lastStoredTrackingRef = useRef<JournalTrackingConfig>(journalTrackingFromPreferences(null));
-  const lastStoredReviewRef = useRef<ReviewRequirements>(DEFAULT_REVIEW_REQUIREMENTS);
-  const lastStoredCompletenessRef = useRef<TradeCompletenessRequirements>({});
+  const trackingDraftDirtyRef = useRef(false);
+  const requirementsDraftDirtyRef = useRef(false);
   const lastStoredAnalyticsRef = useRef<AnalyticsPreferences>(DEFAULT_ANALYTICS_PREFERENCES);
+  const lastStoredProfileRef = useRef({ username: "", displayName: "" });
 
   useEffect(() => {
     if (!profile) return;
-    setUsername(profile.username ?? "");
-    setDisplayName(profile.display_name ?? "");
+    const stored = {
+      username: profile.username ?? "",
+      displayName: profile.display_name ?? "",
+    };
+    const previous = lastStoredProfileRef.current;
+    setUsername((current) => (current === previous.username ? stored.username : current));
+    setDisplayName((current) => (current === previous.displayName ? stored.displayName : current));
+    lastStoredProfileRef.current = stored;
   }, [profile]);
 
   useEffect(() => {
@@ -355,24 +353,11 @@ function SettingsPage() {
     const storedCompleteness = tradeCompletenessRequirementsFromPreferences(
       tradingPreferences?.journal_tracking,
     );
-    setReviewRequirements((current) =>
-      JSON.stringify(current) === JSON.stringify(lastStoredReviewRef.current)
-        ? storedReview
-        : current,
-    );
-    setTracking((current) =>
-      JSON.stringify(current) === JSON.stringify(lastStoredTrackingRef.current)
-        ? storedTracking
-        : current,
-    );
-    setTradeCompletenessRequirements((current) =>
-      JSON.stringify(current) === JSON.stringify(lastStoredCompletenessRef.current)
-        ? storedCompleteness
-        : current,
-    );
-    lastStoredReviewRef.current = storedReview;
-    lastStoredTrackingRef.current = storedTracking;
-    lastStoredCompletenessRef.current = storedCompleteness;
+    if (!requirementsDraftDirtyRef.current) {
+      setReviewRequirements(storedReview);
+      setTradeCompletenessRequirements(storedCompleteness);
+    }
+    if (!trackingDraftDirtyRef.current) setTracking(storedTracking);
     const storedAnalytics = analyticsPreferencesFromStored(
       tradingPreferences?.analytics_preferences,
     );
@@ -430,6 +415,23 @@ function SettingsPage() {
   const analyticsReportsDirty =
     JSON.stringify([...analyticsReportHidden].sort()) !==
     JSON.stringify([...storedAnalyticsPreferences.hidden].sort());
+  const profileDirty = Boolean(
+    profile &&
+    (username !== (profile.username ?? "") || displayName !== (profile.display_name ?? "")),
+  );
+  const settingsDirty =
+    profileDirty ||
+    trackingDirty ||
+    requirementsDirty ||
+    analyticsSummaryDirty ||
+    analyticsReportsDirty;
+  useUnsavedChanges(settingsDirty);
+  const navigationBlocker = useBlocker({
+    shouldBlockFn: () => settingsDirty,
+    disabled: !settingsDirty,
+    enableBeforeUnload: false,
+    withResolver: true,
+  });
 
   const tradeRequirementRow = (field: JournalTrackingField) => {
     const meta = JOURNAL_FIELD_META[field];
@@ -439,6 +441,7 @@ function SettingsPage() {
         label={meta.label}
         checked={tradeCompletenessRequirements[field] === true}
         onChange={(checked) => {
+          requirementsDraftDirtyRef.current = true;
           setReviewSaveState("idle");
           setTradeCompletenessRequirements((current) => ({
             ...current,
@@ -467,7 +470,20 @@ function SettingsPage() {
         data: { username: username.trim(), display_name: displayName.trim() || null },
       }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["profile"] });
+      const savedUsername = username.trim();
+      const savedDisplayName = displayName.trim();
+      setUsername(savedUsername);
+      setDisplayName(savedDisplayName);
+      qc.setQueryData(["profile"], (current: typeof profile) =>
+        current
+          ? {
+              ...current,
+              username: savedUsername,
+              display_name: savedDisplayName || null,
+              profile_completed: true,
+            }
+          : current,
+      );
       toast.success("Profile saved");
     },
     onError: (e: Error) => toast.error(e.message),
@@ -503,6 +519,7 @@ function SettingsPage() {
       });
     },
     onSuccess: (row) => {
+      requirementsDraftDirtyRef.current = false;
       qc.setQueryData(["trading-preferences"], row);
       setReviewSaveState("saved");
       toast.success("Review requirements saved");
@@ -532,6 +549,7 @@ function SettingsPage() {
       });
     },
     onSuccess: (row) => {
+      trackingDraftDirtyRef.current = false;
       qc.setQueryData(["trading-preferences"], row);
       setTrackingSaveState("saved");
       toast.success("Journal tracking saved");
@@ -571,6 +589,8 @@ function SettingsPage() {
         },
       }),
     onSuccess: (row) => {
+      trackingDraftDirtyRef.current = false;
+      requirementsDraftDirtyRef.current = false;
       qc.setQueryData(["trading-preferences"], row);
       setTracking({ ...DEFAULT_JOURNAL_TRACKING });
       setTradeCompletenessRequirements({});
@@ -616,6 +636,7 @@ function SettingsPage() {
       toast.error(issues[0].message);
       return;
     }
+    trackingDraftDirtyRef.current = true;
     setTrackingSaveState("idle");
     setTracking(next);
   };
@@ -638,7 +659,7 @@ function SettingsPage() {
       qc.invalidateQueries({ queryKey: ["profile"] });
       setDeleteOpen(false);
       toast.success(
-        `Your EdgeScope account deletion request is pending review for ${formatDate(result.deletion_scheduled_for)}. You can cancel this before then.`,
+        `Your EdgeScope account is scheduled for permanent deletion on ${formatDate(result.deletion_scheduled_for)}. You can cancel before processing begins.`,
       );
     },
     onError: (e: Error) => toast.error(e.message),
@@ -662,6 +683,13 @@ function SettingsPage() {
     } catch {
       /* ignore */
     }
+  };
+
+  const performSignOut = async () => {
+    setSignOutConfirmOpen(false);
+    await resetUserSessionCache(qc);
+    await supabase.auth.signOut();
+    navigate({ to: "/auth", replace: true, ignoreBlocker: true });
   };
 
   const initial = (displayName || username || "?").charAt(0).toUpperCase();
@@ -983,7 +1011,7 @@ function SettingsPage() {
                         [
                           ["screenshot", "screenshots", "Trade screenshot"],
                           ["reasoning", "reasoning", "Trade reasoning"],
-                          ["category", "category", "Category / setup"],
+                          ["category", "category", "Category"],
                           ["grade", "grade", "Trade grade"],
                         ] as const
                       ).map(([requirement, field, label]) =>
@@ -993,6 +1021,7 @@ function SettingsPage() {
                             label={label}
                             checked={reviewRequirements[requirement]}
                             onChange={(checked) => {
+                              requirementsDraftDirtyRef.current = true;
                               setReviewSaveState("idle");
                               setReviewRequirements((current) => ({
                                 ...current,
@@ -1018,6 +1047,7 @@ function SettingsPage() {
                             label={meta.label}
                             checked={reviewRequirements[field as keyof ReviewRequirements]}
                             onChange={(checked) => {
+                              requirementsDraftDirtyRef.current = true;
                               setReviewSaveState("idle");
                               setReviewRequirements((current) => ({
                                 ...current,
@@ -1158,10 +1188,7 @@ function SettingsPage() {
                           : tracking.r_performance !== "hidden";
                       const selected = analyticsSummaryCards.includes(id);
                       return (
-                        <div
-                          key={id}
-                          className="flex items-center justify-between gap-3 px-3 py-3"
-                        >
+                        <div key={id} className="flex items-center justify-between gap-3 px-3 py-3">
                           <div className="flex min-w-0 items-center gap-3">
                             <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/[0.08] text-primary ring-1 ring-primary/12">
                               <Icon className="size-3.5" aria-hidden="true" />
@@ -1235,10 +1262,7 @@ function SettingsPage() {
                                 : section.trackingField;
                             const visible = !analyticsReportHidden.includes(section.id);
                             return (
-                              <div
-                                key={section.id}
-                                className="flex items-center gap-3 px-3 py-2.5"
-                              >
+                              <div key={section.id} className="flex items-center gap-3 px-3 py-2.5">
                                 <div
                                   className="min-w-0 flex-1"
                                   title={
@@ -1356,18 +1380,16 @@ function SettingsPage() {
                   </div>
                   <button
                     type="button"
-                    onClick={async () => {
-                      await qc.cancelQueries();
-                      qc.clear();
-                      await supabase.auth.signOut();
-                      navigate({ to: "/auth", replace: true });
-                    }}
+                    onClick={() =>
+                      settingsDirty ? setSignOutConfirmOpen(true) : void performSignOut()
+                    }
                     className="inline-flex items-center gap-1.5 rounded-lg bg-destructive/[0.045] px-3.5 py-2 text-xs font-semibold text-destructive/78 ring-1 ring-destructive/[0.08] transition hover:bg-destructive/[0.07] hover:text-destructive/85"
                   >
                     <LogOut className="h-3.5 w-3.5" /> Sign out
                   </button>
                 </div>
               </div>
+              <DataExportSection />
               <div className="rounded-2xl bg-destructive/[0.01] p-5 ring-1 ring-destructive/[0.06]">
                 <div className="flex flex-wrap items-center justify-between gap-5">
                   <div>
@@ -1376,8 +1398,8 @@ function SettingsPage() {
                     </div>
                     <div className="mt-1 text-xs leading-5 text-muted-foreground">
                       {deletionScheduledFor
-                        ? `Account deletion request pending review for ${formatDate(deletionScheduledFor)}. You can cancel before that date.`
-                        : "Request deletion of your profile, login, trades, reviews, screenshots, playbook notes, and private review content."}
+                        ? `Permanent account deletion is scheduled for ${formatDate(deletionScheduledFor)}. You can cancel before processing begins.`
+                        : "Schedule permanent deletion of your login, profile, trades, reviews, screenshots, Playbook, and private improvement data after a 15-day grace period."}
                     </div>
                   </div>
                   {deletionScheduledFor ? (
@@ -1460,9 +1482,9 @@ function SettingsPage() {
               <div>
                 <h2 className="text-lg font-bold">Request EdgeScope account deletion?</h2>
                 <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                  This marks your EdgeScope account for deletion review after 15 days unless you
-                  cancel. Permanent deletion is completed manually by the EdgeScope team until
-                  automated account purging is available.
+                  This schedules permanent deletion after a 15-day grace period unless you cancel.
+                  After the grace period, EdgeScope removes your authentication account, private
+                  core records, and stored screenshots.
                 </p>
               </div>
             </div>
@@ -1497,6 +1519,28 @@ function SettingsPage() {
           </motion.div>
         </motion.div>
       )}
+      <ConfirmDialog
+        open={navigationBlocker.status === "blocked"}
+        onOpenChange={(open) => {
+          if (!open && navigationBlocker.status === "blocked") navigationBlocker.reset();
+        }}
+        title="Leave Settings without saving?"
+        description="Your unsaved profile or preference changes will be discarded."
+        confirmLabel="Leave without saving"
+        destructive
+        onConfirm={() => {
+          if (navigationBlocker.status === "blocked") navigationBlocker.proceed();
+        }}
+      />
+      <ConfirmDialog
+        open={signOutConfirmOpen}
+        onOpenChange={setSignOutConfirmOpen}
+        title="Sign out with unsaved settings?"
+        description="Signing out will discard your unsaved profile or preference changes."
+        confirmLabel="Discard and sign out"
+        destructive
+        onConfirm={() => void performSignOut()}
+      />
       <ConfirmDialog
         open={restoreDefaultsOpen}
         onOpenChange={setRestoreDefaultsOpen}

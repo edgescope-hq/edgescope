@@ -8,7 +8,7 @@ import {
   weekdayStats,
   type TradeRow,
 } from "./analytics.ts";
-import { isResultComplete, realizedR } from "./trade-mappers.ts";
+import { isResultComplete, realizedR, tradeDollarPnl } from "./trade-mappers.ts";
 
 function trade(result: string | null) {
   return { result };
@@ -74,6 +74,23 @@ describe("realised-R eligibility", () => {
   it("normalises result sign and derives R from the eligible pair", () => {
     assert.equal(realizedR({ result: "win", risk_amount: 100, pnl_amount: -250 }), 2.5);
     assert.equal(realizedR({ result: "loss", risk_amount: 100, pnl_amount: 250 }), -2.5);
+  });
+
+  it("falls back to finite recorded legacy R without using planned R:R", () => {
+    const legacy = { result: "win", achieved_rr: 1.75, planned_rr: 5 };
+    const plannedOnly = { result: "win", planned_rr: 5 };
+    assert.equal(realizedR(legacy), 1.75);
+    assert.equal(realizedR(plannedOnly), null);
+  });
+
+  it("keeps result-inconsistent legacy R out of evidence without deleting the record", () => {
+    assert.equal(realizedR({ result: "loss", achieved_rr: 1.25 }), null);
+    assert.equal(realizedR({ result: "breakeven", achieved_rr: -0.5 }), null);
+  });
+
+  it("uses the same signed evidence when converting a legacy R record to account P/L", () => {
+    assert.equal(tradeDollarPnl({ result: "loss", achieved_rr: -1.5, risk_amount: 100 }), -150);
+    assert.equal(tradeDollarPnl({ result: "win", achieved_rr: 2, risk_amount: 75 }), 150);
   });
 });
 

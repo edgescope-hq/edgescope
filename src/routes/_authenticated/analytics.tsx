@@ -55,16 +55,14 @@ import { cn } from "@/lib/utils";
 import { SearchInput } from "@/components/ui/search-input";
 import { sessionLabel, SESSIONS, KILLZONES, killzoneLabel } from "@/lib/trade-constants";
 import {
-  isPaperTrade,
   isResultComplete,
   localDateKey,
-  recordedR,
   realizedR,
-  rrNum,
   streaks,
   toAnalytics,
   type DbTrade,
 } from "@/lib/trade-mappers";
+import { journalTradesForEvidenceView } from "@/lib/evidence-population";
 import {
   categoryStats,
   equityCurve,
@@ -437,9 +435,7 @@ function buildReport(trades: DbTrade[], scope: ReportScope): Report {
     killzone: trades.filter((t) => typeof t.in_killzone === "boolean").length,
   };
 
-  const rrs = resultCompleteAna
-    .map((t) => recordedR(t.achieved_rr))
-    .filter((n): n is number => n !== null);
+  const rrs = resultCompleteAna.map((t) => realizedR(t)).filter((n): n is number => n !== null);
   const totalR = rrs.reduce((a, b) => a + b, 0);
   const avgRR = rrs.length ? totalR / rrs.length : null;
 
@@ -473,7 +469,7 @@ function buildReport(trades: DbTrade[], scope: ReportScope): Report {
     const s = sStats.find((x) => x.key === o.key);
     const subset = ana.filter((t) => t.session === o.key);
     const rrList = subset
-      .map((t) => recordedR(t.achieved_rr))
+      .map((t) => realizedR(t))
       .filter((value): value is number => value !== null);
     const netR = rrList.reduce((sum, value) => sum + value, 0);
     return {
@@ -503,7 +499,7 @@ function buildReport(trades: DbTrade[], scope: ReportScope): Report {
   const killzones = KILLZONES.map((o) => {
     const s = kzStats.find((x) => x.key === o.v);
     const subset = ana.filter((t) => t.killzone === o.v);
-    const rCount = subset.filter((t) => recordedR(t.achieved_rr) !== null).length;
+    const rCount = subset.filter((t) => realizedR(t) !== null).length;
     return {
       name: o.l,
       wins: s?.wins ?? 0,
@@ -524,15 +520,15 @@ function buildReport(trades: DbTrade[], scope: ReportScope): Report {
   const categories: CategoryRow[] = cStats.map((s) => {
     const subset = ana.filter((t) => (t.categories ?? []).includes(s.key));
     const rList = subset
-      .map((t) => recordedR(t.achieved_rr))
+      .map((t) => realizedR(t))
       .filter((value): value is number => value !== null);
     const wList = subset
       .filter((t) => t.result === "win")
-      .map((t) => recordedR(t.achieved_rr))
+      .map((t) => realizedR(t))
       .filter((value): value is number => value !== null);
     const lList = subset
       .filter((t) => t.result === "loss")
-      .map((t) => recordedR(t.achieved_rr))
+      .map((t) => realizedR(t))
       .filter((value): value is number => value !== null);
     const net = rList.reduce((a, b) => a + b, 0);
     return {
@@ -562,7 +558,7 @@ function buildReport(trades: DbTrade[], scope: ReportScope): Report {
   const gradeOrder = ["A+", "A", "B+", "B", "C", "D"];
   const grades = gradeOrder.map((g) => {
     const sub = ana.filter((t) => t.grade === g);
-    const r = sub.map((t) => recordedR(t.achieved_rr)).filter((n): n is number => n !== null);
+    const r = sub.map((t) => realizedR(t)).filter((n): n is number => n !== null);
     return {
       name: g,
       count: sub.length,
@@ -1191,8 +1187,8 @@ function LegacyReportView({
             body: "Tracks trades that still need detailed review.",
           },
           {
-            title: "Execution gap",
-            body: "Compares planned R with achieved R.",
+            title: "Planned/outcome difference",
+            body: "Pairs planned target R with realized R; it does not measure execution adherence.",
           },
           {
             title: "Repeated costly mistake",
@@ -1208,10 +1204,10 @@ function LegacyReportView({
                 : `${reviewGap} trade${reviewGap === 1 ? "" : "s"} still need detailed review.`,
           },
           {
-            title: "Execution gap",
+            title: "Planned/outcome difference",
             body:
               executionGap == null
-                ? "Add planned R to more trades to compare intent vs result."
+                ? "Add planned R to more trades to compare target context with realized result."
                 : executionGap < 0
                   ? `Achieved R is ${Math.abs(executionGap).toFixed(2)}R below planned R on average.`
                   : executionGap > 0
@@ -1228,7 +1224,7 @@ function LegacyReportView({
   ).filter((item) => {
     if (item.title === "Review gap") return true;
     if (!rPerformanceEnabled) return false;
-    if (item.title === "Execution gap") return tracking.planned_rr !== "hidden";
+    if (item.title === "Planned/outcome difference") return tracking.planned_rr !== "hidden";
     if (item.title === "Repeated costly mistake") return tracking.mistakes !== "hidden";
     return true;
   });
@@ -1265,7 +1261,7 @@ function LegacyReportView({
                   <Tags className="h-5 w-5 text-primary" /> Category performance breakdown
                 </h2>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Full breakdown of your setup performance. Logged setups and categories.
+                  Descriptive outcomes by your observational trade categories.
                 </p>
               </div>
               <SampleStatus count={r.coverage.categories} />
@@ -3706,7 +3702,7 @@ function AnalyticsReportExperience({
               <ReportSectionHeader
                 id="planned_vs_achieved"
                 title="Planned vs Achieved R"
-                description="Average planned risk-reward compared with the recorded result."
+                description="Average planned target R compared with realized R. This is context, not proof of adherence."
                 meta={`${r.plannedVsAchieved.sampleSize} paired ${
                   r.plannedVsAchieved.sampleSize === 1 ? "trade" : "trades"
                 }`}
@@ -5755,28 +5751,27 @@ function AnalyticsPage() {
     onSuccess: (row) => queryClient.setQueryData(["trading-preferences"], row),
   });
   const trades = useMemo(() => (data ?? []) as DbTrade[], [data]);
-  const realTrades = useMemo(() => trades.filter((trade) => !isPaperTrade(trade)), [trades]);
 
   const accountsFn = useServerFn(listTradingAccounts);
-  const { data: accounts } = useQuery({
+  const { data: accounts = [] } = useSuspenseQuery({
     queryKey: ["trading-accounts"],
     queryFn: () => accountsFn(),
   });
   const { activeAccountId: selectedAccountId, setActiveAccountId: setSelectedAccountId } =
     useActiveAccount();
 
-  const filteredTrades = useMemo(() => {
-    if (selectedAccountId === "ALL") return realTrades;
-    return realTrades.filter((t) => t.account_id === selectedAccountId);
-  }, [realTrades, selectedAccountId]);
+  const filteredTrades = useMemo(
+    () => journalTradesForEvidenceView(trades, accounts, selectedAccountId),
+    [accounts, selectedAccountId, trades],
+  );
 
   const oldestTradeDate = useMemo(() => {
-    if (realTrades.length === 0) return null;
-    return realTrades.reduce((oldest, t) => {
+    if (filteredTrades.length === 0) return null;
+    return filteredTrades.reduce((oldest, t) => {
       if (!t.trade_date) return oldest;
       return t.trade_date < oldest ? t.trade_date : oldest;
-    }, realTrades[0].trade_date || localDateKey());
-  }, [realTrades]);
+    }, filteredTrades[0].trade_date || localDateKey());
+  }, [filteredTrades]);
 
   const weekKeys = useMemo(() => {
     return generateWeekKeysInRange(oldestTradeDate);
@@ -6022,9 +6017,10 @@ function AnalyticsPage() {
           </div>
 
           <AccountFilterSelect
-            accounts={(accounts ?? []).filter((account) => account.status !== "archived")}
+            accounts={accounts}
             value={selectedAccountId}
             onValueChange={setSelectedAccountId}
+            allLabel="Live evidence"
           />
         </div>
       </div>

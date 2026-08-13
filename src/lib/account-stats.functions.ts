@@ -2,7 +2,7 @@ import { safeError } from "@/lib/server-errors";
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { recordedR, tradeDollarPnl } from "@/lib/trade-mappers";
+import { realizedR, tradeDollarPnl } from "@/lib/trade-mappers";
 
 export type AccountStats = {
   starting_balance: number;
@@ -32,7 +32,7 @@ export const getAccountStats = createServerFn({ method: "GET" })
     const { data: rows, error } = await context.supabase
       .from("trades")
       .select(
-        "achieved_rr, risk_percentage, account_size, result, trade_date, is_paper, reward_amount, pnl_amount",
+        "achieved_rr, risk_amount, risk_percentage, account_size, result, status, trade_date, is_paper, reward_amount, pnl_amount",
       )
       .eq("user_id", context.userId)
       .eq("account_id", data.account_id);
@@ -68,10 +68,7 @@ export const getAccountStats = createServerFn({ method: "GET" })
       if (dd > maxDrawdown) maxDrawdown = dd;
 
       if (t.trade_date) dayCounter.add(t.trade_date);
-      const r =
-        t.result === "win" || t.result === "loss" || t.result === "breakeven"
-          ? recordedR(t.achieved_rr)
-          : null;
+      const r = realizedR(t);
       if (r != null) {
         rSum += r;
         rCount += 1;

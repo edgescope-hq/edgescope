@@ -17,7 +17,13 @@ import {
 } from "@/lib/trades.functions";
 import { supabase } from "@/integrations/supabase/client";
 import { validateScreenshotFile } from "@/lib/file-validation";
-import { localDateKey, localTimeKey, type DbTrade } from "@/lib/trade-mappers";
+import {
+  localDateKey,
+  localTimeKey,
+  primaryTradeCategory,
+  tradeDollarPnl,
+  type DbTrade,
+} from "@/lib/trade-mappers";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 import { listTradingAccounts, createTradingAccount } from "@/lib/trading-accounts.functions";
 import { parsePlannedRR } from "@/lib/planned-rr";
@@ -49,6 +55,12 @@ import { ScreenshotSlot } from "@/components/trades/screenshot-slot";
 import { SessionSelect } from "@/components/trades/session-select";
 import { CreatableCombobox, DarkSelect, TagInput } from "@/components/trades/trade-field-controls";
 import { ClearTextButton } from "@/components/ui/search-input";
+import { resolveQuickCaptureAccountId } from "@/lib/trade-account-target";
+import {
+  listPlaybookStandards,
+  type PlaybookStandard,
+  type PlaybookStandardVersion,
+} from "@/lib/playbook.functions";
 
 const DEFAULT_MISTAKE_TAGS = [
   "FOMO",
@@ -143,12 +155,14 @@ export function TradeFormModal({
   onClose,
   onSaved,
   editing,
+  initialAccountId,
 }: {
   taxonomy?: Taxonomy;
   nextNum: number;
   onClose: () => void;
   onSaved: (savedId?: string) => void;
   editing?: DbTrade;
+  initialAccountId?: string;
 }) {
   const qc = useQueryClient();
   const create = useServerFn(createTrade);
@@ -178,7 +192,10 @@ export function TradeFormModal({
   const instrumentWrapperRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const handleClickOutside = (event: globalThis.MouseEvent | globalThis.TouchEvent) => {
-      if (instrumentWrapperRef.current && !instrumentWrapperRef.current.contains(event.target as Node)) {
+      if (
+        instrumentWrapperRef.current &&
+        !instrumentWrapperRef.current.contains(event.target as Node)
+      ) {
         setInstrumentOpen(false);
       }
     };
@@ -214,7 +231,10 @@ export function TradeFormModal({
   const [entryTimeframe, setEntryTimeframe] = useState(editing?.entry_timeframe ?? "");
   const [newsInvolvement, setNewsInvolvement] = useState(editing?.news_involvement ?? "");
   const [customTags, setCustomTags] = useState<string[]>(editing?.custom_tags ?? []);
-  const [category, setCategory] = useState((editing?.categories ?? [])[0] ?? "");
+  const [category, setCategory] = useState(editing ? (primaryTradeCategory(editing) ?? "") : "");
+  const [setupIntentVersionId, setSetupIntentVersionId] = useState(
+    editing?.setup_intent_version_id ?? "",
+  );
   const [reasoning, setReasoning] = useState(editing?.reasoning ?? "");
   const [grade, setGrade] = useState(editing?.grade ?? "");
   const [inKillzone, setInKillzone] = useState<boolean | null>(editing?.in_killzone ?? null);
@@ -238,7 +258,14 @@ export function TradeFormModal({
 
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
+  const [guardrailConfirmOpen, setGuardrailConfirmOpen] = useState(false);
+  const [persistedTradeId, setPersistedTradeId] = useState<string | null>(editing?.id ?? null);
+  const [pendingAncillarySummary, setPendingAncillarySummary] = useState<string | null>(null);
   const [attemptedSubmit, setAttemptedSubmit] = useState(false);
+  const [selectedTradeAccountId, setSelectedTradeAccountId] = useState(
+    editing?.account_id ?? initialAccountId ?? "",
+  );
   useUnsavedChanges(dirty);
   const markDirty = () => {
     if (!dirty) setDirty(true);
@@ -267,6 +294,7 @@ export function TradeFormModal({
   const createAccountFn = useServerFn(createTradingAccount);
   const createCategoryFn = useServerFn(createTradeCategory);
   const listCategoriesFn = useServerFn(listTradeCategories);
+  const listStandardsFn = useServerFn(listPlaybookStandards);
   const listGroupsFn = useServerFn(listMyGroups);
   const getSharesFn = useServerFn(getTradeShares);
   const shareTradeFn = useServerFn(shareTradeToGroups);
@@ -276,6 +304,10 @@ export function TradeFormModal({
   const { data: categoryRows = [] } = useQuery({
     queryKey: ["trade-categories"],
     queryFn: () => listCategoriesFn(),
+  });
+  const { data: playbookStandards = [] } = useQuery({
+    queryKey: ["playbook-standards"],
+    queryFn: () => listStandardsFn(),
   });
   const { data: myGroups = [] } = useQuery({
     queryKey: ["my-groups"],
@@ -287,9 +319,9 @@ export function TradeFormModal({
     enabled: Boolean(editing?.id),
   });
   const { data: editingTradeData } = useQuery({
-    queryKey: ["trade", editing?.id],
-    queryFn: () => getTradeFn({ data: { id: editing!.id } }),
-    enabled: Boolean(editing?.id),
+    queryKey: ["trade", editing?.id ?? persistedTradeId],
+    queryFn: () => getTradeFn({ data: { id: (editing?.id ?? persistedTradeId)! } }),
+    enabled: Boolean(editing?.id ?? persistedTradeId),
   });
   const existingScreenshots = useMemo(
     () =>
@@ -374,24 +406,30 @@ export function TradeFormModal({
   const plannedRRNum = plannedVal.parsedValue ?? NaN;
 
   const errors: string[] = [];
-  const canSubmit = !saving && sym.trim().length > 0 && side !== null && res !== null && (!editing || dirty);
+  const canSubmit =
+    !saving && sym.trim().length > 0 && side !== null && res !== null && (!editing || dirty);
 
   const handleClose = useCallback(
     (_initiator?: HTMLElement | null) => {
+      if (dirty) {
+        setDiscardConfirmOpen(true);
+        return;
+      }
       onClose();
     },
-    [onClose],
+    [dirty, onClose],
   );
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
+      if (event.key !== "Escape" || previewScreenshot || guardrailConfirmOpen || discardConfirmOpen)
+        return;
       event.preventDefault();
       handleClose(document.activeElement as HTMLElement | null);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [handleClose]);
+  }, [discardConfirmOpen, guardrailConfirmOpen, handleClose, previewScreenshot]);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -479,11 +517,15 @@ export function TradeFormModal({
         in_killzone: appearsInPlacement(tracking, "killzone", "quick_capture")
           ? inKillzone
           : (editing?.in_killzone ?? null),
-        categories: appearsInPlacement(tracking, "category", "quick_capture")
-          ? category.trim()
-            ? [category.trim()]
-            : []
-          : (editing?.categories ?? []),
+        primary_category: appearsInPlacement(tracking, "category", "quick_capture")
+          ? category.trim() || null
+          : (editing?.primary_category ?? null),
+        // Preserve every legacy category string. New trades also keep the
+        // primary value in the old array for backwards portability.
+        categories: editing ? (editing.categories ?? []) : category.trim() ? [category.trim()] : [],
+        ...(setupIntentVersionId !== (editing?.setup_intent_version_id ?? "")
+          ? { setup_intent_version_id: setupIntentVersionId || null }
+          : {}),
         subcategories: editing?.subcategories ?? [],
         mistake_tags: appearsInPlacement(tracking, "mistakes", "quick_capture")
           ? mistakeTags
@@ -515,15 +557,23 @@ export function TradeFormModal({
         await createCategoryFn({ data: category.trim() });
       }
 
-      const trade = editing
-        ? await update({ data: { id: editing.id, patch: payload } })
-        : await create({ data: payload });
+      const existingTradeId = editing?.id ?? persistedTradeId;
+      const trade = existingTradeId
+        ? await update({ data: { id: existingTradeId, patch: payload } })
+        : await create({
+            data: {
+              ...payload,
+              account_id: selectedTradeAccountId || initialAccountId,
+            },
+          });
       const tradeId = (trade as { id?: string }).id;
       const screenshotEntries = Object.entries(quickScreenshotFiles) as [
         ScreenshotTimeframe,
         File,
       ][];
       let screenshotError: string | null = null;
+      const completedScreenshotRemovals: string[] = [];
+      const completedScreenshotTimeframes: ScreenshotTimeframe[] = [];
       if (tradeId && (screenshotEntries.length || removedScreenshotIds.length)) {
         try {
           const {
@@ -532,6 +582,7 @@ export function TradeFormModal({
           if (!user) throw new Error("Not signed in");
           for (const screenshotId of new Set(removedScreenshotIds)) {
             await deleteScreenshotFn({ data: { id: screenshotId } });
+            completedScreenshotRemovals.push(screenshotId);
           }
           for (const [timeframe, file] of screenshotEntries) {
             const fileError = validateScreenshotFile(file);
@@ -566,6 +617,7 @@ export function TradeFormModal({
                   },
                 });
               }
+              completedScreenshotTimeframes.push(timeframe);
             } catch (error) {
               await supabase.storage.from("trade-screenshots").remove([storagePath]);
               throw error;
@@ -576,20 +628,22 @@ export function TradeFormModal({
         }
       }
       let shareError: string | null = null;
-      if (
-        tradeId &&
-        appearsInPlacement(tracking, "community", "quick_capture") &&
-        sharedGroupIds.length > 0
-      ) {
+      if (tradeId && appearsInPlacement(tracking, "community", "quick_capture")) {
         try {
           await shareTradeFn({
             data: { tradeId, groupIds: sharedGroupIds, includeReasoning: true },
           });
         } catch (error) {
-          shareError = error instanceof Error ? error.message : "Community sharing failed";
+          shareError = error instanceof Error ? error.message : "Network sharing failed";
         }
       }
-      return { trade, screenshotError, shareError };
+      return {
+        trade,
+        screenshotError,
+        shareError,
+        completedScreenshotRemovals,
+        completedScreenshotTimeframes,
+      };
     },
     onSuccess: (result) => {
       const savedId = (result.trade as { id?: string } | null | undefined)?.id;
@@ -598,25 +652,45 @@ export function TradeFormModal({
       qc.invalidateQueries({ queryKey: ["trading-accounts"] });
       qc.invalidateQueries({ queryKey: ["shared-trades-count"] });
       if (savedId) qc.invalidateQueries({ queryKey: ["trade-shares", savedId] });
-      if (editing?.id) qc.invalidateQueries({ queryKey: ["trade", editing.id] });
+      if (savedId) qc.invalidateQueries({ queryKey: ["trade", savedId] });
+      if (savedId) setPersistedTradeId(savedId);
+      if (result.completedScreenshotRemovals.length) {
+        setRemovedScreenshotIds((current) =>
+          current.filter((id) => !result.completedScreenshotRemovals.includes(id)),
+        );
+      }
+      if (result.completedScreenshotTimeframes.length) {
+        setQuickScreenshotFiles((current) => {
+          const next = { ...current };
+          result.completedScreenshotTimeframes.forEach((timeframe) => delete next[timeframe]);
+          return next;
+        });
+      }
       setDirty(false);
       if (result.screenshotError) {
-        toast.error(`Trade saved. Screenshots were not uploaded: ${result.screenshotError}`);
+        toast.error(
+          `Trade saved, but some screenshot work failed: ${result.screenshotError} The remaining items are available to retry.`,
+        );
       }
       if (result.shareError) {
-        toast.error(`Trade saved privately. Sharing failed: ${result.shareError}`);
+        toast.error(
+          `Trade saved privately, but Network sharing failed: ${result.shareError} Your group selections remain available to retry.`,
+        );
       }
-      if (editing) {
-        if (result.shareError) {
-          setDirty(true);
-          return;
-        }
-        toast.success("Trade updated");
-        onSaved();
-        onClose();
+      if (result.screenshotError || result.shareError) {
+        setPendingAncillarySummary(
+          [
+            result.screenshotError ? "screenshot work" : null,
+            result.shareError ? "Network sharing" : null,
+          ]
+            .filter(Boolean)
+            .join(" and "),
+        );
+        setDirty(true);
         return;
       }
-      if (!result.shareError) toast.success("Trade logged successfully.");
+      setPendingAncillarySummary(null);
+      toast.success(editing ? "Trade updated" : "Trade logged successfully.");
       onSaved(savedId);
       onClose();
     },
@@ -634,14 +708,27 @@ export function TradeFormModal({
     queryKey: ["trading-accounts"],
     queryFn: () => listAccountsFn(),
   });
-  const activeAccount = accountList.find((a) => a.is_active) ?? null;
+  useEffect(() => {
+    if (editing) return;
+    setSelectedTradeAccountId(
+      (current) =>
+        resolveQuickCaptureAccountId(accountList, current || initialAccountId) ?? current,
+    );
+  }, [accountList, editing, initialAccountId]);
+  const availableAccounts = accountList.filter((account) => account.status !== "archived");
+  const targetAccount =
+    (editing
+      ? accountList.find((account) => account.id === editing.account_id)
+      : availableAccounts.find((account) => account.id === selectedTradeAccountId)) ??
+    availableAccounts.find((account) => account.is_active) ??
+    null;
   const { data: guardrails = null } = useQuery({
-    queryKey: ["guardrails", activeAccount?.id],
+    queryKey: ["guardrails", targetAccount?.id],
     queryFn: () =>
-      activeAccount
-        ? getGuardrailsFn({ data: { account_id: activeAccount.id } })
+      targetAccount
+        ? getGuardrailsFn({ data: { account_id: targetAccount.id } })
         : Promise.resolve(null),
-    enabled: !!activeAccount?.id,
+    enabled: !!targetAccount?.id,
   });
   const { data: tradesForGuardrails = [] } = useQuery({
     queryKey: ["trades"],
@@ -690,6 +777,31 @@ export function TradeFormModal({
         ),
     [categoryRows],
   );
+  const setupIntentOptions = useMemo(() => {
+    const standards = playbookStandards as PlaybookStandard[];
+    const options: { version: PlaybookStandardVersion; label: string }[] = standards
+      .filter((standard) => standard.status === "active" && standard.current_version)
+      .map((standard) => ({
+        version: standard.current_version!,
+        label: `${standard.title} · current v${standard.current_version!.version_number}`,
+      }));
+    if (
+      setupIntentVersionId &&
+      !options.some((option) => option.version.id === setupIntentVersionId)
+    ) {
+      for (const standard of standards) {
+        const historical = standard.versions.find((version) => version.id === setupIntentVersionId);
+        if (historical) {
+          options.push({
+            version: historical,
+            label: `${historical.title} · historical v${historical.version_number}`,
+          });
+          break;
+        }
+      }
+    }
+    return options;
+  }, [playbookStandards, setupIntentVersionId]);
   const entryModelSuggestions = useMemo(
     () => [
       ...new Set(
@@ -725,18 +837,18 @@ export function TradeFormModal({
       ].slice(0, 8) as string[],
     [tradesForGuardrails],
   );
-  const maxRiskPct = activeAccount?.max_risk_per_trade_pct ?? null;
-  const dailyLossPct = activeAccount?.daily_loss_limit_pct ?? null;
-  const startBal = activeAccount?.starting_balance ?? null;
+  const maxRiskPct = targetAccount?.max_risk_per_trade_pct ?? null;
+  const dailyLossPct = targetAccount?.daily_loss_limit_pct ?? null;
+  const startBal = targetAccount?.starting_balance ?? null;
   const riskPctAttempted =
     Number.isFinite(riskNum) && startBal && startBal > 0 ? (riskNum / startBal) * 100 : null;
   const exceedsMaxRisk =
     maxRiskPct != null && riskPctAttempted != null && riskPctAttempted > maxRiskPct;
-  const maxTradesPerDay = prefsData?.max_trades_per_day ?? null;
+  const maxTradesPerDay = targetAccount?.max_trades_per_day ?? null;
   const todayKey = localDateKey();
   const todayTradeCount = tradesForGuardrails.filter((t) => {
     if (t.is_paper) return false;
-    if (activeAccount && t.account_id !== activeAccount.id) return false;
+    if (targetAccount && t.account_id !== targetAccount.id) return false;
     if (t.id === editing?.id) return false;
     if (t.trade_date !== todayKey) return false;
     return true;
@@ -745,22 +857,14 @@ export function TradeFormModal({
     maxTradesPerDay != null && !editing && todayTradeCount >= maxTradesPerDay;
   const todaysAccountNet = tradesForGuardrails.reduce((sum, t) => {
     if (
-      !activeAccount ||
-      t.account_id !== activeAccount.id ||
+      !targetAccount ||
+      t.account_id !== targetAccount.id ||
       t.trade_date !== todayKey ||
       t.id === editing?.id ||
       t.is_paper
     )
       return sum;
-    const moneyTrade = t as DbTrade & {
-      reward_amount?: number | string | null;
-      risk_amount?: number | string | null;
-    };
-    const reward = moneyTrade.reward_amount == null ? NaN : Number(moneyTrade.reward_amount);
-    if (Number.isFinite(reward)) return sum + reward;
-    const risk = moneyTrade.risk_amount == null ? NaN : Number(moneyTrade.risk_amount);
-    const rr = t.achieved_rr == null ? NaN : Number(t.achieved_rr);
-    return Number.isFinite(risk) && Number.isFinite(rr) ? sum + risk * rr : sum;
+    return sum + (tradeDollarPnl(t) ?? 0);
   }, 0);
   const attemptedReward = Number.isFinite(signedReward) ? signedReward : 0;
   const dailyLossAmount =
@@ -792,8 +896,6 @@ export function TradeFormModal({
       : []),
   ];
   const shouldShowGuardrailReminder = guardrailMessages.length > 0;
-  const [guardrailConfirmOpen, setGuardrailConfirmOpen] = useState(false);
-
   const onSubmit = () => {
     const cleanedPlanned = plannedRR.trim().replace(/\.$/, "");
     if (cleanedPlanned !== plannedRR) {
@@ -854,6 +956,25 @@ export function TradeFormModal({
         </div>
 
         <div className="mt-5 space-y-4">
+          {!editing && availableAccounts.length > 0 && (
+            <label className="block">
+              <span className={labelClass}>TRADING ACCOUNT</span>
+              <select
+                value={selectedTradeAccountId}
+                onChange={(event) => {
+                  markDirty();
+                  setSelectedTradeAccountId(event.target.value);
+                }}
+                className={inputClass}
+              >
+                {availableAccounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <div className="relative" ref={instrumentWrapperRef}>
             <label className={labelClass}>INSTRUMENT</label>
             <input
@@ -1015,17 +1136,14 @@ export function TradeFormModal({
                   markDirty();
                   setSession(value);
                 }}
-                triggerClassName={cn(
-                  inputClass,
-                  "h-auto justify-between border-0 shadow-none",
-                )}
+                triggerClassName={cn(inputClass, "h-auto justify-between border-0 shadow-none")}
               />
             </div>
           )}
 
           {appearsInPlacement(tracking, "category", "quick_capture") && (
             <label>
-              <span className={labelClass}>CATEGORY / SETUP</span>
+              <span className={labelClass}>CATEGORY</span>
               <CreatableCombobox
                 value={category}
                 suggestions={categorySuggestions}
@@ -1035,6 +1153,31 @@ export function TradeFormModal({
                   setCategory(value);
                 }}
               />
+            </label>
+          )}
+
+          {setupIntentOptions.length > 0 && (
+            <label>
+              <span className={labelClass}>INTENDED PLAYBOOK SETUP (OPTIONAL)</span>
+              <select
+                value={setupIntentVersionId}
+                onChange={(event) => {
+                  markDirty();
+                  setSetupIntentVersionId(event.target.value);
+                }}
+                className={cn(inputClass, "mt-1.5 h-10")}
+              >
+                <option value="">Unknown / not recorded</option>
+                {setupIntentOptions.map((option) => (
+                  <option key={option.version.id} value={option.version.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <span className="mt-1.5 block text-[11px] leading-5 text-muted-foreground">
+                Select only when this was genuinely the intended setup. Category is separate, and
+                leaving this blank keeps intent unknown.
+              </span>
             </label>
           )}
 
@@ -1195,7 +1338,16 @@ export function TradeFormModal({
                     )}
                   >
                     {Number.isFinite(achievedR) ? (
-                      <span className={cn("font-semibold", achievedR > 0 ? "text-success" : achievedR < 0 ? "text-destructive" : "text-foreground")}>
+                      <span
+                        className={cn(
+                          "font-semibold",
+                          achievedR > 0
+                            ? "text-success"
+                            : achievedR < 0
+                              ? "text-destructive"
+                              : "text-foreground",
+                        )}
+                      >
                         {achievedR > 0 ? "+" : ""}
                         {achievedR.toFixed(2)}R
                       </span>
@@ -1490,7 +1642,7 @@ export function TradeFormModal({
 
           {appearsInPlacement(tracking, "community", "quick_capture") && (
             <div>
-              <span className={labelClass}>COMMUNITY SHARING</span>
+              <span className={labelClass}>NETWORK SHARING</span>
               {myGroups.length > 0 ? (
                 <div className="mt-1.5 space-y-2">
                   {sharedTradesCount < 3 && (
@@ -1571,7 +1723,13 @@ export function TradeFormModal({
             onClick={onSubmit}
             className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] transition-all duration-200 hover:brightness-110 disabled:opacity-40"
           >
-            {saving ? "Saving..." : editing ? "Save changes" : "Log trade"}
+            {saving
+              ? "Saving..."
+              : pendingAncillarySummary
+                ? "Retry remaining save"
+                : editing
+                  ? "Save changes"
+                  : "Log trade"}
           </button>
         </div>
       </motion.div>
@@ -1604,6 +1762,23 @@ export function TradeFormModal({
           setGuardrailConfirmOpen(false);
           setSaving(true);
           saveM.mutate();
+        }}
+      />
+      <ConfirmDialog
+        open={discardConfirmOpen}
+        onOpenChange={setDiscardConfirmOpen}
+        title="Discard unsaved trade work?"
+        description={
+          pendingAncillarySummary
+            ? `The trade itself is already saved. Pending ${pendingAncillarySummary} and any other unsaved edits will be discarded.`
+            : "Your Quick Capture changes have not been saved."
+        }
+        confirmLabel="Discard changes"
+        destructive
+        onConfirm={() => {
+          setDiscardConfirmOpen(false);
+          setDirty(false);
+          onClose();
         }}
       />
     </motion.div>

@@ -39,7 +39,7 @@ const primaryNav: NavItem[] = [
 ];
 
 const secondaryBaseNav: NavItem[] = [
-  { to: "/community", label: "Community", icon: Users },
+  { to: "/community", label: "Network", icon: Users },
   { to: "/recentre", label: "Recentre", icon: RotateCcw },
   { to: "/accounts", label: "Accounts", icon: Wallet },
 ];
@@ -98,7 +98,8 @@ export function AppSidebar() {
     return (
       <Link
         key={item.to}
-        to={item.to} hash=""
+        to={item.to}
+        hash=""
         className={cn(
           "group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-all duration-200",
           active
@@ -180,4 +181,3 @@ export function AppSidebar() {
     </>
   );
 }
-

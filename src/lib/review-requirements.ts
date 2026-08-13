@@ -45,7 +45,7 @@ export type ReviewRequirementKey = keyof ReviewRequirements;
 export const REVIEW_REQUIREMENT_LABEL: Record<ReviewRequirementKey, string> = {
   screenshot: "Screenshot",
   reasoning: "Trade reasoning",
-  category: "Category / setup",
+  category: "Category",
   grade: "Trade grade",
   entry_model: "Entry model",
   market_condition: "Market condition",
